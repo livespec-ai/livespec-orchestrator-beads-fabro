@@ -315,6 +315,7 @@ fail-closed-when-unobservable behavior 5v9 built stays the live path.
 import argparse
 from collections.abc import Callable
 
+import livespec_orchestrator_beads_fabro.commands._dispatcher_cancel_for_restart as _restart
 from livespec_orchestrator_beads_fabro.commands._acp_hold_clear import (
     run_clear_acp_availability_hold_command,
 )
@@ -456,6 +457,8 @@ from livespec_orchestrator_beads_fabro.commands._plan_record_cli import (
     run_post_plan_record_cli,
 )
 
+run_cancel_for_restart_command = _restart.run_cancel_for_restart_command
+
 # Keep pre-existing dispatcher mini-hub attributes available without changing __all__.
 _COMPATIBILITY_REEXPORTS: tuple[object, ...] = (
     admit_and_select,
@@ -513,6 +516,7 @@ __all__: list[str] = [
 
 _SUBCOMMAND_HANDLERS: dict[str, Callable[..., int]] = {
     "claude-cred-status": run_claude_cred_status,
+    "cancel-for-restart": lambda *, args: run_cancel_for_restart_command(args=args),  # type: ignore
     "classify-tier": run_classify_tier_command,
     "clear-acp-availability-hold": run_clear_acp_availability_hold_command,
     "clear-provider-exhaustion": run_clear_provider_exhaustion_command,
@@ -540,10 +544,8 @@ _SUBCOMMAND_HANDLERS: dict[str, Callable[..., int]] = {
 
 
 def main(*, argv: list[str] | None = None) -> int:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-    handler = _SUBCOMMAND_HANDLERS.get(args.subcommand, run_loop_command)
-    return handler(args=args)
+    args = _build_parser().parse_args(argv)
+    return _SUBCOMMAND_HANDLERS.get(args.subcommand, run_loop_command)(args=args)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -569,6 +571,7 @@ def _build_parser() -> argparse.ArgumentParser:
     add_file_canary_arguments(parser=subparsers.add_parser("file-canary"))
     add_factory_inspect_arguments(parser=subparsers.add_parser("inspect"))
     add_host_only_subcommand(subparsers=subparsers, handlers=_SUBCOMMAND_HANDLERS)
+    _restart.add_cancel_for_restart_arguments(parser=subparsers.add_parser("cancel-for-restart"))
     add_probe_arguments(parser=subparsers.add_parser("probe"))
     add_dispatch_arguments(parser=subparsers.add_parser("dispatch"))
     add_resume_arguments(parser=subparsers.add_parser("resume"))
