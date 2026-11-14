@@ -18,15 +18,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
 
+from livespec_orchestrator_beads_fabro.commands import _drive_impl_scope as scope
 from livespec_orchestrator_beads_fabro.commands._dispatcher_invoker import (
     FALLBACK_SOURCE,
     INVOKER_FLAG,
     InvokerIdentity,
+    default_invoker_identity,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_journal_file import JournalFile
 from livespec_orchestrator_beads_fabro.commands._dispatcher_merge_wait_handoff import (
     HANDED_OFF_STATUS,
 )
-from livespec_orchestrator_beads_fabro.effects import JsonParseFailure, parse_json
+from livespec_orchestrator_beads_fabro.commands._dispatcher_run_reconcile_hook import (
+    dispatch_journal_path,
+)
+from livespec_orchestrator_beads_fabro.effects import JsonParseFailure, attempt, parse_json
 
 __all__: list[str] = [
     "CommandRun",
@@ -71,7 +77,32 @@ def run_impl_dispatch(  # noqa: PLR0913 — kw-only transport; `workflow_name` i
         workflow_name=workflow_name,
         identity=identity,
     )
-    result = resolved_runner(argv=argv, cwd=repo)
+    plan = scope.scope_plan(host=scope.default_scope_host())
+    unit: str | None = None
+    detail: str | None = None
+    launch = scope.LAUNCH_UNSCOPED
+    result: CommandRun | None = None
+    if plan is not None:
+        unit = scope.scope_unit_name(work_item_ref=work_item_ref)
+        scoped = resolved_runner(argv=scope.scoped_argv(plan=plan, unit=unit, argv=argv), cwd=repo)
+        detail = scope.scope_launch_failure(
+            unit=unit, returncode=scoped.returncode, stderr=scoped.stderr
+        )
+        if detail is None:
+            launch = scope.LAUNCH_SCOPED
+            result = scoped
+        else:
+            unit = None
+    if result is None:
+        result = resolved_runner(argv=argv, cwd=repo)
+    _record_launch(
+        repo=repo,
+        identity=identity,
+        work_item_ref=work_item_ref,
+        launch=launch,
+        scope_unit=unit,
+        detail=detail,
+    )
     parsed = _parse_json_object_or_array(text=result.stdout)
     status = _dispatch_status(returncode=result.returncode, parsed=parsed)
     goal_template_refusal = _goal_template_refusal(parsed=parsed)
@@ -80,6 +111,8 @@ def run_impl_dispatch(  # noqa: PLR0913 — kw-only transport; `workflow_name` i
         "kind": "impl",
         "work_item_ref": work_item_ref,
         "status": status,
+        "launch": launch,
+        **({} if unit is None else {"scope_unit": unit}),
         "dispatcher": {
             "argv": list(argv),
             "exit_code": result.returncode,
@@ -93,6 +126,26 @@ def run_impl_dispatch(  # noqa: PLR0913 — kw-only transport; `workflow_name` i
         ),
         "goal_template_refusal": goal_template_refusal,
     }
+
+
+def _record_launch(
+    *,
+    repo: Path,
+    identity: InvokerIdentity | None,
+    work_item_ref: str,
+    launch: str,
+    scope_unit: str | None,
+    detail: str | None,
+) -> None:
+    """Append the launch's journal record; a journal fault never fails the dispatch."""
+    journal = JournalFile(
+        path=dispatch_journal_path(repo=repo),
+        identity=default_invoker_identity() if identity is None else identity,
+    )
+    record = scope.launch_record(
+        work_item_id=work_item_ref, launch=launch, scope_unit=scope_unit, detail=detail
+    )
+    _ = attempt(action=lambda: journal.append(record=record), exceptions=(OSError,))
 
 
 def build_dispatcher_argv(
