@@ -2,7 +2,7 @@
 
 The hook forces every cached openai-codex `lib/codex.mjs` sandbox chokepoint to
 `danger-full-access` and emits a loud stderr WARNING when the chokepoint has
-drifted upstream (the canary — see `plan/codex-yolo-sandbox/`).
+drifted upstream (the canary — see `plan/archive/codex-yolo-sandbox/`).
 
 `.claude-plugin/hooks/` is not an importable package, so the module is loaded by file
 location — the same idiom `test_fleet_pat_dispatch_surface_helpers.py` uses.
