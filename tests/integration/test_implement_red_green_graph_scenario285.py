@@ -65,7 +65,9 @@ def test_scenario285_routes_each_implement_commit_through_red_and_green_command_
     assert ("test_wrong_reset", "red_admission", None) in edges
     assert ("commit_green", "green_admission", "outcome=failed") in edges
     assert ("commit_green", "implementation_diff", None) in edges
-    assert graph.nodes["commit_red"]["script"] == "bash dev-tooling/commit-red.sh"
+    assert graph.nodes["commit_red"]["script"] == (
+        'bash "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-red.sh"'
+    )
     assert graph.nodes["commit_green"]["script"] == "bash dev-tooling/commit-green.sh"
     assert "commit-runner.py" not in graph.nodes["red"].get("prompt", "")
     assert "commit-runner.py" not in graph.nodes["green"].get("prompt", "")
