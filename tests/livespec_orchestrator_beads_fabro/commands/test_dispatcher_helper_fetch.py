@@ -26,7 +26,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_plugins impo
 )
 
 _SOURCE = HelperSource(
-    repository="https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git",
+    repository="https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git",
     commit="37e012335ed23ecba9bbcbb829e0fc90f2fdaf3b",
 )
 _MAX_SCRIPT_CHARS = 2000

@@ -207,7 +207,7 @@ def _expected_by_prompt(*, fixtures: dict[str, FixturedSkill]) -> dict[str, tupl
 def _config() -> HarnessConfig:
     return HarnessConfig(
         impl_plugin_id="livespec-orchestrator-beads-fabro",
-        marketplace="thewoolleyman/livespec-orchestrator-beads-fabro",
+        marketplace="livespec-ai/livespec-orchestrator-beads-fabro",
         enabled_plugins=(
             "livespec@livespec",
             "livespec-orchestrator-beads-fabro@livespec-orchestrator-beads-fabro",

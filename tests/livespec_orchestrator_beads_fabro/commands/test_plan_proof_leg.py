@@ -67,7 +67,7 @@ _HOST = "The released build runs in a real operator session."
 _HUMAN = "The maintainer agrees the console reads well."
 _TAG = "v0.167.0"
 _TAGS = frozenset({_TAG, "v0.166.0"})
-_REPOSITORY = "thewoolleyman/livespec"
+_REPOSITORY = "livespec-ai/livespec"
 
 _ASSERTIONS = (
     DefinitionOfDoneAssertion(text=_HOST, proof_mode=PROOF_MODE_HOST_CAPTURED),

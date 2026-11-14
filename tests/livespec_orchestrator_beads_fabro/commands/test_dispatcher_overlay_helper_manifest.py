@@ -35,7 +35,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_publication_metadata
 from tests.prepare_step_support import readable
 
 _COMMITTED = '[workflow]\ngraph = "workflow.fabro"\n[run.environment]\nid = "sandbox"\n'
-_REPOSITORY = "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git"
+_REPOSITORY = "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git"
 _COMMIT = "0123456789abcdef0123456789abcdef01234567"
 _MANIFEST_ENV = "LIVESPEC_DISPATCH_HELPER_MANIFEST"
 # Opaque non-secret placeholders: the overlay renders whatever it is handed.

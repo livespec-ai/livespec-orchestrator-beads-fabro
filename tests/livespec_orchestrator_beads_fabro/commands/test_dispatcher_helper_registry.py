@@ -40,7 +40,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_wip_capture import (
     wip_capture_program_source,
 )
 
-_REPOSITORY = "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git"
+_REPOSITORY = "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git"
 _COMMIT = "37e012335ed23ecba9bbcbb829e0fc90f2fdaf3b"
 _SCRIPTS = Path(__file__).resolve().parents[3] / ".claude-plugin" / "scripts"
 

@@ -448,7 +448,7 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "contracts.md",
     "test": "TODO",
-    "reason": "Ratified at the approval-model restoration (design record: repo thewoolleyman/livespec, plan/archive/work-item-state-machine, decisions 26/32): plain-English semantics for the seven lifecycle states, the approve-is-pending-approval-to-ready transition rule, the maintainer's verbatim rationale, and the intent-preservation clauses. Definitional semantics + process clauses; the transition behaviors are exercised via Scenarios 8/10/23/31/33's bindings, and the post-ratification rework slice binds the re-targeted behaviors when its tests land.",
+    "reason": "Ratified at the approval-model restoration (design record: repo livespec-ai/livespec, plan/archive/work-item-state-machine, decisions 26/32): plain-English semantics for the seven lifecycle states, the approve-is-pending-approval-to-ready transition rule, the maintainer's verbatim rationale, and the intent-preservation clauses. Definitional semantics + process clauses; the transition behaviors are exercised via Scenarios 8/10/23/31/33's bindings, and the post-ratification rework slice binds the re-targeted behaviors when its tests land.",
     "work_item": "bd-ib-heat"
   },
   {

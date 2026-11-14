@@ -84,14 +84,14 @@ def test_a_bare_first_word_names_a_repository_of_the_governed_owner() -> None:
 
 def test_an_owner_and_repository_first_word_names_both_parts() -> None:
     named = release_repository_in(
-        body=_body(installed_build="thewoolleyman/livespec-dev-tooling v1.95.12")
+        body=_body(installed_build="livespec-ai/livespec-dev-tooling v1.95.12")
     )
 
-    assert named == ExplicitRepository(owner="thewoolleyman", repository="livespec-dev-tooling")
+    assert named == ExplicitRepository(owner="livespec-ai", repository="livespec-dev-tooling")
     assert isinstance(named, ExplicitRepository)
     # The rendered name is what every forge read and every refusal cites, so it
     # is the parse's own output rather than something each caller re-joins.
-    assert named.name == "thewoolleyman/livespec-dev-tooling"
+    assert named.name == "livespec-ai/livespec-dev-tooling"
 
 
 @pytest.mark.parametrize(

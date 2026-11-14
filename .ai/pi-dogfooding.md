@@ -19,13 +19,13 @@ Install the three pi git packages in the governed project: livespec CORE, the
 
 ```bash
 # livespec CORE (spec-side prose + wrappers):
-pi install git:github.com/thewoolleyman/livespec@release -l --approve
+pi install git:github.com/livespec-ai/livespec@release -l --approve
 
 # The pi Driver (supplies the spec-side livespec-* pi skill surface):
-pi install git:github.com/thewoolleyman/livespec-driver-pi@release -l --approve
+pi install git:github.com/livespec-ai/livespec-driver-pi@release -l --approve
 
 # This repo's orchestrator package (ships its OWN pi skill bindings):
-pi install git:github.com/thewoolleyman/livespec-orchestrator-beads-fabro@release -l --approve
+pi install git:github.com/livespec-ai/livespec-orchestrator-beads-fabro@release -l --approve
 ```
 
 pi has a flat skill namespace: it cannot express the Claude/Codex

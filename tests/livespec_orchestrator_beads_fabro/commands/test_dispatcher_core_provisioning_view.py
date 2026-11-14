@@ -107,7 +107,7 @@ def test_absent_core_repo_resolves_to_the_fleet_livespec_core_repository() -> No
     """`core_repo` is OPTIONAL: an absent key completely answers "use the fleet core"."""
     module = _module()
     fleet = module.FLEET_JANITOR_CORE_REPO_URL
-    assert fleet == "https://github.com/thewoolleyman/livespec.git"
+    assert fleet == "https://github.com/livespec-ai/livespec.git"
     declared = module.resolve_janitor_core_provisioning(
         config_text=_config(compat='{ "pinned": "v1" }')
     )

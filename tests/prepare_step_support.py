@@ -170,7 +170,7 @@ def plugins_helper(*, path: str) -> Helper:
     return helper
 
 
-_FETCH_REPOSITORY = "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git"
+_FETCH_REPOSITORY = "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git"
 _FETCH_COMMIT = "0123456789abcdef0123456789abcdef01234567"
 
 

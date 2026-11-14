@@ -55,7 +55,7 @@ _MODULE_NAME = "livespec_sandbox_path_policy_under_test"
 
 _SANDBOX_ROOT = "/workspace"
 _LINK = "/workspace/livespec-orchestrator-beads-fabro"
-_CLONE = "/repos/thewoolleyman/livespec-orchestrator-beads-fabro"
+_CLONE = "/repos/livespec-ai/livespec-orchestrator-beads-fabro"
 # What the guard reads off the sandbox root: every immediate child mapped to
 # what it really is. Only the one entry that resolves to the clone is the
 # working-directory link; the Dispatcher-materialized siblings are not.
@@ -483,7 +483,7 @@ def test_a_move_into_a_destination_that_is_already_a_directory_is_not_refused() 
     )
 
 
-@pytest.mark.parametrize(("written", "directory"), [(".", _CLONE), ("..", "/repos/thewoolleyman")])
+@pytest.mark.parametrize(("written", "directory"), [(".", _CLONE), ("..", "/repos/livespec-ai")])
 def test_a_move_into_the_working_directory_or_its_parent_is_not_refused(
     written: str, directory: str
 ) -> None:

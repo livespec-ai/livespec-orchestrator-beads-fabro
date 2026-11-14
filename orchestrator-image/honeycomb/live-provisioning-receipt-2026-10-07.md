@@ -146,7 +146,7 @@ The dispatcher journal associates this item with dispatch
 `b9e1b5a76c384339b0f65fb77ac1ee72` and HP run
 `01M4CBAD9QMGTJGX807QMVDTDM` on
 `https://hp-xubuntu.perch-rudd.ts.net:32276`. The real run succeeded;
-[PR #2652](https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/pull/2652)
+[PR #2652](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/pull/2652)
 merged as `f95ad6fd45e6058ad521eabfd8e6b6c7043bf9fe`.
 The detached dispatcher gate `20261007T233025Z-3357009` completed with exit
 zero at `2026-10-08T01:24:22Z`. Its collector/exporter started on released

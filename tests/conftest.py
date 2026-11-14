@@ -406,7 +406,7 @@ def _hermetic_helper_build_identity_and_reach(
     from livespec_orchestrator_beads_fabro.commands import _dispatcher_helper_build as build
 
     source = build.HelperSource(
-        repository="https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git",
+        repository="https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git",
         commit=HERMETIC_HELPER_BUILD_COMMIT,
     )
 

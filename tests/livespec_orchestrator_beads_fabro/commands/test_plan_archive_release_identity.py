@@ -82,8 +82,8 @@ _ARCHIVING_SESSION_ENV = {"CLAUDE_CODE_SESSION_ID": "archiving-session"}
 # so a reviewer distinct from the archiver is expressed as a distinct session.
 _REVIEWING_SESSION_ENV = {"CLAUDE_CODE_SESSION_ID": "reviewing-session"}
 
-_GOVERNED = "thewoolleyman/livespec"
-_SIBLING = "thewoolleyman/livespec-dev-tooling"
+_GOVERNED = "livespec-ai/livespec"
+_SIBLING = "livespec-ai/livespec-dev-tooling"
 # The live case this rule exists for: the livespec plan k3s-on-gmktec-for-vps-usage
 # shipped as livespec-dev-tooling releases, and the governed repository carries
 # neither tag.

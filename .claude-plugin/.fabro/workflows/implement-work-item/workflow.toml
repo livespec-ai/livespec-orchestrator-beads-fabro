@@ -377,7 +377,7 @@ provider = "docker"
 # manager, uv, recipe runner, hook manager — plus node/ACP adapter + gh;
 # Dockerfile in livespec-dev-tooling). Published
 # by dev-tooling PR #111 (2026-06-12) to
-# ghcr.io/thewoolleyman/livespec-fabro-sandbox. Since the layered-image
+# ghcr.io/livespec-ai/livespec-fabro-sandbox. Since the layered-image
 # split this consumer pulls the `python-agent` layer (base tools + uv +
 # CPython, plus the agent payload: bubblewrap and both ACP adapters; no
 # Rust). Tag format:
@@ -415,7 +415,7 @@ provider = "docker"
 # only `provider = "docker"` + `[image] docker = "..."` — never an
 # `[env]` table (the Dispatcher's per-dispatch overlay owns that block;
 # TOML forbids duplicate table declarations).
-docker = "ghcr.io/thewoolleyman/livespec-fabro-sandbox:python-agent-v1.208.0"
+docker = "ghcr.io/livespec-ai/livespec-fabro-sandbox:python-agent-v1.208.0"
 
 [environments.livespec-ci.resources]
 cpu = 4

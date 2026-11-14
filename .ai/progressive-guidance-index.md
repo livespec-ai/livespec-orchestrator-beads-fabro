@@ -111,7 +111,7 @@ references passes with its guidance orphaned.
   Claude's `SendMessage`, never `herdr agent prompt` into another session's
   pane (maintainer ruling 2026-10-14).
 - Read the fleet's distributed SendMessage protocol,
-  https://github.com/thewoolleyman/livespec-dev-tooling/blob/master/%2Eai/distributed-sendmessage-protocol.md,
+  https://github.com/livespec-ai/livespec-dev-tooling/blob/master/%2Eai/distributed-sendmessage-protocol.md,
   BEFORE messaging, asking, directing or answering another agent session on any
   host, and before running `herdr pane send-text`, `herdr pane run`,
   `herdr agent prompt` or `tmux send-keys` against a pane you did not create.

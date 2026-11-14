@@ -5,7 +5,7 @@
 # SPECIFICATION, just real enough for the UNMODIFIED production
 # implement-work-item Fabro workflow's prepare -> implement -> janitor -> PR
 # steps to all succeed. Versions match the family sandbox image
-# (ghcr.io/thewoolleyman/livespec-fabro-sandbox) so `mise install` is a no-op
+# (ghcr.io/livespec-ai/livespec-fabro-sandbox) so `mise install` is a no-op
 # in-sandbox.
 [tools]
 uv       = "0.9.26"

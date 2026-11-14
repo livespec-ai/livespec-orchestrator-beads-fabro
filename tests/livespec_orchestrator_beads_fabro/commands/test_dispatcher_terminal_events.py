@@ -112,7 +112,7 @@ def terminal_outcome(*, tmp_path: Path, runner: EventRunner) -> DispatchOutcome:
         janitor=None,
         janitor_checkout=tmp_path / ".janitor",
         janitor_core_checkout=tmp_path / ".janitor" / ".livespec-core",
-        janitor_core_repo_url="https://github.com/thewoolleyman/livespec.git",
+        janitor_core_repo_url="https://github.com/livespec-ai/livespec.git",
         janitor_core_ref="master",
         review_fix_visit_cap=3,
         merge_on_review_cap_outcome="succeeded",

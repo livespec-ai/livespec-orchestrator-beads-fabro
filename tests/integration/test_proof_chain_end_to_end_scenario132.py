@@ -226,7 +226,7 @@ _SIGNIFICANT_TERM = re.compile(r"[a-z0-9_]{4,}")
 _STEP_BOUND = 192
 
 _PULL_REQUEST_NUMBER = 2538
-_PULL_REQUEST_URL = "https://example.test/thewoolleyman/livespec-orchestrator-beads-fabro/pull/"
+_PULL_REQUEST_URL = "https://example.test/livespec-ai/livespec-orchestrator-beads-fabro/pull/"
 _FIRST_COMMENT_ID = 5940546142
 # The real merge sha of the pull request the committed record payload came from.
 _MERGE_SHA = "77067d88"

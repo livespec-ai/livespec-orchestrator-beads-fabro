@@ -1148,7 +1148,7 @@ def _janitor_results(*, fail_at: int | None = None) -> list[CommandResult]:
         _ok("master\nfeat/x\n"),
         _ok(remote),
         _ok(worktrees),
-        _ok("thewoolleyman/livespec-orchestrator-beads-fabro\n"),
+        _ok("livespec-ai/livespec-orchestrator-beads-fabro\n"),
         _ok("feat/x\nmaster\n"),
     ]
     if fail_at is not None:
@@ -1213,7 +1213,9 @@ def test_janitor_checks_flag_stale_branches_prs_and_worktrees(tmp_path: Path) ->
         ("no-stale-worktree", "/repo/worktrees/merged", "warn"),
     ]
     assert "git branch -d feat/x" in findings[0].message
-    delete_action = "gh api -X DELETE repos/thewoolleyman/livespec-orchestrator-beads-fabro/git/refs/heads/feat/x"
+    delete_action = (
+        "gh api -X DELETE repos/livespec-ai/livespec-orchestrator-beads-fabro/git/refs/heads/feat/x"
+    )
     assert delete_action in findings[1].message
     assert "git worktree remove /repo/worktrees/gone" in findings[2].message
 
@@ -1676,7 +1678,7 @@ def test_argv_builders_encode_family_discipline(tmp_path: Path) -> None:
         "1",
         "--branch",
         "master",
-        "https://github.com/thewoolleyman/livespec.git",
+        "https://github.com/livespec-ai/livespec.git",
         str(tmp_path / "janitor-co-livespec-core"),
     ]
 
@@ -6191,7 +6193,7 @@ def test_fetch_fleet_manifest_text_shells_gh_api_raw(
     argv, _cwd = fake.calls[0]
     assert argv[:2] == ["gh", "api"]
     assert "Accept: application/vnd.github.raw" in argv
-    assert argv[-1] == "repos/thewoolleyman/livespec/contents/.livespec-fleet-manifest.jsonc"
+    assert argv[-1] == "repos/livespec-ai/livespec/contents/.livespec-fleet-manifest.jsonc"
 
 
 def test_fetch_fleet_manifest_text_returns_none_on_failure(
@@ -7306,11 +7308,11 @@ def test_ready_items_resolves_configured_sibling_terminal_states(
         {{
           "cross_repo_targets": {{
             "livespec-orchestrator-beads-fabro": {{
-              "github_url": "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro",
+              "github_url": "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro",
               "local_clone": "{beads_fabro}"
             }},
             "livespec-overseer": {{
-              "github_url": "https://github.com/thewoolleyman/livespec-overseer",
+              "github_url": "https://github.com/livespec-ai/livespec-overseer",
               "local_clone": "{overseer}"
             }}
           }}

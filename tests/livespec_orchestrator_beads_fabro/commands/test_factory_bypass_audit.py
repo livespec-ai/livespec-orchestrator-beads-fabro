@@ -198,7 +198,7 @@ def test_factory_override_pr_is_a_recorded_exception_not_a_bypass() -> None:
 
 def test_resolve_product_policy_derives_from_the_audited_repo() -> None:
     policy = resolve_product_policy(
-        repo="thewoolleyman/livespec-dev-tooling",
+        repo="livespec-ai/livespec-dev-tooling",
         seam=_seam(prs_stdout="[]", pyproject=_DEV_TOOLING_PYPROJECT),
     )
     assert policy.origin == "declared"
@@ -327,7 +327,7 @@ def test_main_repo_selects_the_layout_the_classifier_derives(
 ) -> None:
     """`--repo` drives BOTH gh reads, so another repo's product code is visible."""
     code = main(
-        argv=["--json", "--repo", "thewoolleyman/livespec-dev-tooling"],
+        argv=["--json", "--repo", "livespec-ai/livespec-dev-tooling"],
         seam=_seam(
             prs_stdout=_stdout_one_bypass(path=_DEV_TOOLING_PRODUCT),
             pyproject=_DEV_TOOLING_PYPROJECT,

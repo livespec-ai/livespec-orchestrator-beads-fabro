@@ -69,15 +69,15 @@ enabled = true
 
 [marketplaces.livespec]
 source_type = "git"
-source = "https://github.com/thewoolleyman/livespec.git"
+source = "https://github.com/livespec-ai/livespec.git"
 
 [marketplaces.livespec-driver-codex]
 source_type = "git"
-source = "https://github.com/thewoolleyman/livespec-driver-codex.git"
+source = "https://github.com/livespec-ai/livespec-driver-codex.git"
 
 [marketplaces.livespec-orchestrator-beads-fabro]
 source_type = "git"
-source = "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git"
+source = "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git"
 """
 
 

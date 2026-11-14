@@ -110,13 +110,13 @@ def test_fetch_merged_prs_default_window_requests_commits() -> None:
 def test_fetch_merged_prs_repo_and_since() -> None:
     recorder: list[list[str]] = []
     _ = fetch_merged_prs(
-        repo="thewoolleyman/livespec-dev-tooling",
+        repo="livespec-ai/livespec-dev-tooling",
         limit=25,
         merged_since="2026-06-15",
         seam=_seam(stdout="[]", recorder=recorder),
     )
     args = recorder[0]
-    assert args[args.index("--repo") + 1] == "thewoolleyman/livespec-dev-tooling"
+    assert args[args.index("--repo") + 1] == "livespec-ai/livespec-dev-tooling"
     assert args[args.index("--search") + 1] == "merged:>=2026-06-15"
     assert args[args.index("--limit") + 1] == "25"
 
@@ -129,13 +129,13 @@ def test_fetch_merged_prs_repo_and_since() -> None:
 def test_fetch_repo_pyproject_targets_the_selected_repository() -> None:
     recorder: list[list[str]] = []
     text = fetch_repo_pyproject(
-        repo="thewoolleyman/livespec-dev-tooling",
+        repo="livespec-ai/livespec-dev-tooling",
         seam=_seam(stdout="[tool.livespec_dev_tooling]\n", recorder=recorder),
     )
     assert text == "[tool.livespec_dev_tooling]\n"
     assert recorder[0] == [
         "api",
-        "repos/thewoolleyman/livespec-dev-tooling/contents/pyproject.toml",
+        "repos/livespec-ai/livespec-dev-tooling/contents/pyproject.toml",
         "-H",
         "Accept: application/vnd.github.raw",
     ]

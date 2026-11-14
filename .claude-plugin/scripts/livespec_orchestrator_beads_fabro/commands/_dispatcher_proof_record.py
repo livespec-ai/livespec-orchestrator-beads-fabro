@@ -62,7 +62,7 @@ nested heading detaches the verdict from the section stating the assertion and t
 reader answers `None` for an assertion the record states was reproduced — the same
 loss the fence repair fixed, arriving through prose instead of through code.
 Measured on released 0.170.0 against the published body of
-`thewoolleyman/livespec-overseer` PR #2341 comment 5976999030, a correctly
+`livespec-ai/livespec-overseer` PR #2341 comment 5976999030, a correctly
 attributed and correctly published verified record: `reproduced` returned `None`
 for its first assertion, and returned `True` once the nested heading marker was
 removed from the body and nothing else changed.

@@ -56,7 +56,7 @@ from tests.conftest import HERMETIC_HELPER_BUILD_COMMIT
 
 # The identity the suite-wide hermetic fixture answers for the installed build.
 _HERMETIC_SOURCE = HelperSource(
-    repository="https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git",
+    repository="https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git",
     commit=HERMETIC_HELPER_BUILD_COMMIT,
 )
 _Value = TypeVar("_Value")
@@ -762,13 +762,13 @@ _WORKFLOW_WITH_IMAGE = (
     'provider = "docker"\n'
     "\n"
     "[environments.livespec-ci.image]\n"
-    'docker = "ghcr.io/thewoolleyman/livespec-fabro-sandbox:python-agent-v1.0.0"\n'
+    'docker = "ghcr.io/livespec-ai/livespec-fabro-sandbox:python-agent-v1.0.0"\n'
     "\n"
     "[[run.prepare.steps]]\n"
     'script = "just bootstrap"\n'
 )
 
-_IMAGE_OVERRIDE = "ghcr.io/thewoolleyman/livespec-fabro-sandbox:python-rust-agent-v9.9.9"
+_IMAGE_OVERRIDE = "ghcr.io/livespec-ai/livespec-fabro-sandbox:python-rust-agent-v9.9.9"
 
 
 def _configured_image(*, image: str) -> SandboxImageSource:
@@ -915,7 +915,7 @@ def test_resolve_fabro_sandbox_image_uses_dispatcher_config_key(
 ) -> None:
     """With no env override, `dispatcher.fabro_sandbox_image` is used."""
     monkeypatch.delenv("LIVESPEC_FABRO_SANDBOX_IMAGE", raising=False)
-    configured = "ghcr.io/thewoolleyman/livespec-fabro-sandbox:python-rust-agent-v9.9.9"
+    configured = "ghcr.io/livespec-ai/livespec-fabro-sandbox:python-rust-agent-v9.9.9"
     _write_config(
         cwd=tmp_path,
         body=json.dumps(
@@ -934,8 +934,8 @@ def test_env_fabro_sandbox_image_beats_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A non-empty `LIVESPEC_FABRO_SANDBOX_IMAGE` wins over the config key."""
-    configured = "ghcr.io/thewoolleyman/livespec-fabro-sandbox:python-agent-v1.0.0"
-    env_value = "ghcr.io/thewoolleyman/livespec-fabro-sandbox:python-rust-agent-v9.9.9"
+    configured = "ghcr.io/livespec-ai/livespec-fabro-sandbox:python-agent-v1.0.0"
+    env_value = "ghcr.io/livespec-ai/livespec-fabro-sandbox:python-rust-agent-v9.9.9"
     monkeypatch.setenv("LIVESPEC_FABRO_SANDBOX_IMAGE", env_value)
     _write_config(
         cwd=tmp_path,

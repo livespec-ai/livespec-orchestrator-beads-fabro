@@ -7,7 +7,7 @@ import textwrap
 
 _MARKETPLACE = "livespec-driver-claude"
 _PLUGIN = "livespec"
-_REPOSITORY = "https://github.com/thewoolleyman/livespec-driver-claude.git"
+_REPOSITORY = "https://github.com/livespec-ai/livespec-driver-claude.git"
 
 __all__: list[str] = ["claude_materialize_script"]
 
@@ -64,7 +64,7 @@ def claude_materialize_script() -> str:
             marketplaces["livespec-driver-claude"] = {
                 "source": {
                     "source": "github",
-                    "repo": "thewoolleyman/livespec-driver-claude",
+                    "repo": "livespec-ai/livespec-driver-claude",
                     "ref": revision,
                 },
                 "installLocation": str(marketplace),

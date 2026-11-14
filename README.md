@@ -3,7 +3,7 @@
 Built with [livespec](https://livespec-ai.org/)
 
 The **beads/Dolt-backed implementation plugin** for
-[livespec](https://github.com/thewoolleyman/livespec), and the livespec
+[livespec](https://github.com/livespec-ai/livespec), and the livespec
 family's current work-items backend. It is one realization of the
 abstract implementation-plugin contract each orchestrator plugin
 concretizes, per `SPECIFICATION/contracts.md` §"The skill surface"
@@ -30,11 +30,11 @@ This is a Claude Code plugin distributed via a marketplace. It composes
 with livespec core and the Claude Code Driver, so install all three:
 
 ```
-/plugin marketplace add thewoolleyman/livespec
+/plugin marketplace add livespec-ai/livespec
 /plugin install livespec@livespec
-/plugin marketplace add thewoolleyman/livespec-driver-claude
+/plugin marketplace add livespec-ai/livespec-driver-claude
 /plugin install livespec@livespec-driver-claude
-/plugin marketplace add thewoolleyman/livespec-orchestrator-beads-fabro
+/plugin marketplace add livespec-ai/livespec-orchestrator-beads-fabro
 /plugin install livespec-orchestrator-beads-fabro@livespec-orchestrator-beads-fabro
 ```
 
@@ -56,9 +56,9 @@ This repository also ships a pi package for
 pi Driver, so install all three git packages in the governed project:
 
 ```bash
-pi install git:github.com/thewoolleyman/livespec@release -l --approve
-pi install git:github.com/thewoolleyman/livespec-driver-pi@release -l --approve
-pi install git:github.com/thewoolleyman/livespec-orchestrator-beads-fabro@release -l --approve
+pi install git:github.com/livespec-ai/livespec@release -l --approve
+pi install git:github.com/livespec-ai/livespec-driver-pi@release -l --approve
+pi install git:github.com/livespec-ai/livespec-orchestrator-beads-fabro@release -l --approve
 ```
 
 The pi package is declared by this repo's `package.json` and exposes the
@@ -213,7 +213,7 @@ The livespec family dogfoods its own telemetry. CI runs, Red→Green commit-gate
 
 ## More
 
-- See [livespec](https://github.com/thewoolleyman/livespec) for the core
+- See [livespec](https://github.com/livespec-ai/livespec) for the core
   contract, prose, and templates this plugin realizes.
 - See this repo's own `SPECIFICATION/contracts.md` §"The skill
   surface" for the concrete skill inventory realized on the beads
