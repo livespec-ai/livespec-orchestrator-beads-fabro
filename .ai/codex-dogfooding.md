@@ -79,7 +79,7 @@ hardcodes a restrictive sandbox on every plugin-launched thread (`read-only` /
 `workspace-write`, both network-OFF), which silently cripples Codex reviews — an
 adversarial review that cannot run `pytest`/`gh` passes code it never executed.
 Upstream ships no toggle and has merged no fix (prior-art survey:
-`plan/codex-yolo-sandbox/research.md`), so this repo self-carries a one-line
+`plan/archive/codex-yolo-sandbox/research.md`), so this repo self-carries a one-line
 chokepoint rewrite in the plugin cache — `buildThreadParams` / `buildResumeParams`
 in `lib/codex.mjs` resolve to `danger-full-access` — re-applied every session by
 the distributed orchestrator plugin hook in `.claude-plugin/hooks/hooks.json`
@@ -89,4 +89,4 @@ To DOWNGRADE a single run, set `CODEX_COMPANION_SANDBOX` (e.g. `read-only` or
 chokepoint honors. `~/.codex/config.toml` also carries
 `sandbox_mode = "danger-full-access"` to cover the raw `codex exec` path.
 Rationale, end-to-end proof, and the deferred fork / host-wide options are in
-`plan/codex-yolo-sandbox/handoff.md`.
+`plan/archive/codex-yolo-sandbox/handoff.md`.
