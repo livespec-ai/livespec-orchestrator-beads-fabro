@@ -100,8 +100,8 @@ def repo(tmp_path: Path) -> Path:
 
 def _commit_product(*, repo: Path, message: str) -> None:
     """Land the product path at HEAD under a commit carrying `message`."""
-    _write(repo=repo, relative=_PRODUCT_PATH, body="VALUE = 1\n")
-    _write(repo=repo, relative=_OTHER_PRODUCT_PATH, body="OTHER = 1\n")
+    _write(repo=repo, relative=_PRODUCT_PATH, body=f"VALUE = {message!r}\n")
+    _write(repo=repo, relative=_OTHER_PRODUCT_PATH, body=f"OTHER = {message!r}\n")
     _git(repo=repo, arguments=["add", "-A"])
     _git(repo=repo, arguments=["commit", "--quiet", "-m", message])
 
