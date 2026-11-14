@@ -270,7 +270,7 @@ def test_engine_checkpoints_classify_the_nearest_authored_commit(
     assert "closed-head" in str(closed["reason"])
 
     _commit_product(repo=repo, message="chore: no trailers here")
-    _commit_checkpoint(repo=repo, node="review_fix")
+    _commit_checkpoint(repo=repo, node="review_fix_complete")
     trailer_free = _drive(
         guard=guard,
         payload=_structured(tool="Write", path=_PRODUCT_PATH),
