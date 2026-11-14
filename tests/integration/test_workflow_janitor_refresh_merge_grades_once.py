@@ -17,6 +17,10 @@ import subprocess
 from pathlib import Path
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dot_graph import parse_dot_graph
+from livespec_orchestrator_beads_fabro.commands._dispatcher_implement_auxiliary_programs import (
+    GREEN_SCOPE_PROGRAM_FILENAME,
+    green_token_scope_program_source,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = (
@@ -27,7 +31,6 @@ _WORKFLOW = (
     / "implement-work-item"
     / "workflow.fabro"
 )
-_SCOPE_ADAPTER = _REPO_ROOT / "dev-tooling" / "green-token-scope.sh"
 _DEFAULT_BRANCH = "master"
 _PUBLISH_BRANCH = "feat/bd-ib-yqjaut"
 _STATE_DIRECTORY = ".git/livespec-publication"
@@ -75,12 +78,7 @@ def _world(*, root: Path) -> Path:
     _ = _git("init", "--initial-branch=master", cwd=seed)
     _ = _git("config", "user.name", "Test", cwd=seed)
     _ = _git("config", "user.email", "test@example.invalid", cwd=seed)
-    _ = _commit(
-        cwd=seed,
-        path="dev-tooling/green-token-scope.sh",
-        text=_SCOPE_ADAPTER.read_text(encoding="utf-8"),
-        subject="chore: seed the scope adapter",
-    )
+    _ = _commit(cwd=seed, path="seed.txt", text="seed\n", subject="chore: seed repository")
     _ = _git("remote", "add", "origin", str(origin), cwd=seed)
     _ = _git("push", "-u", "origin", _DEFAULT_BRANCH, cwd=seed)
 
@@ -126,6 +124,9 @@ def _plugins(*, root: Path) -> Path:
     gate = plugins / "livespec-run-plugin-gate.py"
     _ = gate.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
     _ = gate.chmod(gate.stat().st_mode | stat.S_IXUSR)
+    scope = plugins / GREEN_SCOPE_PROGRAM_FILENAME
+    _ = scope.write_text(green_token_scope_program_source(), encoding="utf-8")
+    _ = scope.chmod(scope.stat().st_mode | stat.S_IXUSR)
     return plugins
 
 
@@ -187,7 +188,7 @@ def test_a_refresh_merge_whose_hook_passed_the_aggregate_is_graded_once(*, tmp_p
     assert recorded["tree_hash"] == _git("rev-parse", "HEAD^{tree}", cwd=run).stdout.strip()
     assert recorded["skipped_targets"] == [_PICKER]
     honoured = subprocess.run(
-        ["bash", "dev-tooling/green-token-scope.sh", "check", _PICKER],
+        ["bash", str(plugins / GREEN_SCOPE_PROGRAM_FILENAME), "check", _PICKER],
         check=False,
         cwd=run,
     )

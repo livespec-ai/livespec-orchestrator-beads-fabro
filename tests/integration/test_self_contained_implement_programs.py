@@ -22,3 +22,19 @@ def test_commit_red_uses_the_program_materialized_in_the_plugin_root() -> None:
     assert _graph().nodes["commit_red"]["script"] == (
         f'bash "{_PLUGINS_ROOT}/livespec-commit-red.sh"'
     )
+
+
+def test_remaining_implement_commands_use_programs_materialized_in_the_plugin_root() -> None:
+    """Green, reset, and janitor must not depend on target-repository tooling."""
+    graph = _graph()
+
+    assert graph.nodes["commit_green"]["script"] == (
+        f'bash "{_PLUGINS_ROOT}/livespec-commit-green.sh"'
+    )
+    assert (
+        f'bash "{_PLUGINS_ROOT}/livespec-reset-test-wrong-to-dispatch-base.sh"'
+        in graph.nodes["test_wrong_reset"]["script"]
+    )
+    assert (
+        f'bash "{_PLUGINS_ROOT}/livespec-green-token-scope.sh"' in graph.nodes["janitor"]["script"]
+    )

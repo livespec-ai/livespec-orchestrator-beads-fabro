@@ -70,6 +70,12 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_hook_limit_program i
     HOOK_LIMIT_PROGRAM_FILENAME,
     hook_limit_program_source,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_implement_auxiliary_programs import (
+    GREEN_SCOPE_PROGRAM_FILENAME,
+    RESET_TEST_WRONG_PROGRAM_FILENAME,
+    green_token_scope_program_source,
+    reset_test_wrong_program_source,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_implement_commit_programs import (
     COMMIT_GREEN_PROGRAM_FILENAME,
     COMMIT_RED_PROGRAM_FILENAME,
@@ -172,6 +178,8 @@ def _plugin_root_programs() -> tuple[Helper, ...]:
         ("implement-gate-preview", GATE_PREVIEW_PROGRAM_FILENAME, gate_preview_program_source),
         ("commit-red", COMMIT_RED_PROGRAM_FILENAME, commit_red_program_source),
         ("commit-green", COMMIT_GREEN_PROGRAM_FILENAME, commit_green_program_source),
+        ("reset-test-wrong", RESET_TEST_WRONG_PROGRAM_FILENAME, reset_test_wrong_program_source),
+        ("green-token-scope", GREEN_SCOPE_PROGRAM_FILENAME, green_token_scope_program_source),
         ("review-guard", REVIEW_GUARD_PROGRAM_FILENAME, review_guard_program_source),
         ("harness-settings-merge", _MERGE_FILENAME, harness_settings_merge_program),
         ("run-from-clones", RUN_FROM_PROGRAM_FILENAME, run_from_program_source),
