@@ -530,20 +530,17 @@ def test_a_checkpoint_without_a_readable_parent_fails_closed(
 ) -> None:
     """A checkpoint walk without its authored commit cannot admit a product write."""
     guard = _load_guard()
+    responses = {
+        ("log", "-1", "--format=%B", "HEAD"): (0, "fabro(run): review_fix (succeeded)\n"),
+        ("rev-list", "--parents", "-n", "1", "HEAD"): (0, "checkpoint-sha"),
+        ("status", "--porcelain", "--", "tests"): (0, ""),
+        ("rev-parse", "--absolute-git-dir"): (1, ""),
+        ("cat-file", "-e", f"HEAD:{_PRODUCT_PATH}"): (0, ""),
+    }
 
     def _checkpoint_root(*, repo_root: Path, arguments: list[str]) -> tuple[int, str]:
         assert repo_root == repo
-        if arguments == ["log", "-1", "--format=%B", "HEAD"]:
-            return 0, "fabro(run): review_fix (succeeded)\n"
-        if arguments == ["rev-list", "--parents", "-n", "1", "HEAD"]:
-            return 0, "checkpoint-sha"
-        if arguments[:2] == ["status", "--porcelain"]:
-            return 0, ""
-        if arguments == ["rev-parse", "--absolute-git-dir"]:
-            return 1, ""
-        if arguments[:2] == ["cat-file", "-e"]:
-            return 0, ""
-        raise AssertionError(arguments)
+        return responses[tuple(arguments)]
 
     monkeypatch.setattr(guard, "_git", _checkpoint_root)
     denial = _drive(
