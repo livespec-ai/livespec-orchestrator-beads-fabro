@@ -50,7 +50,7 @@ def published_head_relation(
         publishing_run = next((run for head, run in publications if head == published_head), None)
         if publishing_run is None:
             return None
-        if publishing_run == preserved_run_id:
+        if preserved_run_id in _run_identifiers(run_id=publishing_run):
             return False
         published_position = _run_position(records=records, run_id=publishing_run)
     preserved_position = _run_position(records=records, run_id=preserved_run_id)
@@ -74,10 +74,22 @@ def _run_position(
     *, records: tuple[dict[str, object], ...], run_id: str, fallback: int | None = None
 ) -> int | None:
     """The latest record that names a run, preserving journal dispatch order."""
+    identifiers = _run_identifiers(run_id=run_id)
     for position, record in reversed(tuple(enumerate(records))):
-        if record.get(_RUN_ID_KEY) == run_id:
+        if record.get(_RUN_ID_KEY) in identifiers:
             return position
     return fallback
+
+
+def _run_identifiers(*, run_id: str) -> frozenset[str]:
+    """Every run identifier a publication binding carries.
+
+    A sandbox can name a run by its dispatch correlation identifier and its
+    Fabro run identifier.  A preservation ref and a dispatch-journal row each
+    carry only one of those identifiers, so comparison must recognise either
+    rather than treating the binding as an opaque, third identifier.
+    """
+    return frozenset(identifier for identifier in run_id.split() if identifier)
 
 
 def foreign_run_ids(
