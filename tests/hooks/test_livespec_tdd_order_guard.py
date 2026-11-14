@@ -106,6 +106,13 @@ def _commit_product(*, repo: Path, message: str) -> None:
     _git(repo=repo, arguments=["commit", "--quiet", "-m", message])
 
 
+def _commit_checkpoint(*, repo: Path, node: str) -> None:
+    """Add one engine checkpoint in the same subject form Fabro emits."""
+    _write(repo=repo, relative=".engine-checkpoint", body=f"{node}\n")
+    _git(repo=repo, arguments=["add", ".engine-checkpoint"])
+    _git(repo=repo, arguments=["commit", "--quiet", "-m", f"fabro(run): {node} (succeeded)"])
+
+
 def _drive(
     *,
     guard: ModuleType,
@@ -228,6 +235,51 @@ def test_several_product_targets_are_all_allowed_while_head_is_an_open_red(
         )
         is None
     )
+
+
+def test_engine_checkpoints_classify_the_nearest_authored_commit(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Checkpoint commits do not replace the authored commit's TDD state."""
+    guard = _load_guard()
+
+    _commit_product(repo=repo, message=f"feat: thing\n\n{_RED_TRAILER}\n")
+    _commit_checkpoint(repo=repo, node="review_fix")
+    _commit_checkpoint(repo=repo, node="review_fix_settle")
+    assert (
+        _drive(
+            guard=guard,
+            payload=_structured(tool="Edit", path=_PRODUCT_PATH),
+            repo=repo,
+            monkeypatch=monkeypatch,
+            capsys=capsys,
+        )
+        is None
+    )
+
+    _commit_product(repo=repo, message=f"fix: close red\n\n{_RED_TRAILER}\n{_GREEN_TRAILER}\n")
+    _commit_checkpoint(repo=repo, node="review_fix")
+    closed = _drive(
+        guard=guard,
+        payload=_structured(tool="Write", path=_PRODUCT_PATH),
+        repo=repo,
+        monkeypatch=monkeypatch,
+        capsys=capsys,
+    )
+    assert closed is not None
+    assert "closed-head" in str(closed["reason"])
+
+    _commit_product(repo=repo, message="chore: no trailers here")
+    _commit_checkpoint(repo=repo, node="review_fix")
+    trailer_free = _drive(
+        guard=guard,
+        payload=_structured(tool="Write", path=_PRODUCT_PATH),
+        repo=repo,
+        monkeypatch=monkeypatch,
+        capsys=capsys,
+    )
+    assert trailer_free is not None
+    assert "trailer-free-head" in str(trailer_free["reason"])
 
 
 # --- the Bash leg decides identically -------------------------------------
@@ -451,8 +503,9 @@ def test_a_blank_project_dir_is_treated_as_unset(
     assert capsys.readouterr().out.strip()
 
 
+@pytest.mark.parametrize("tool", ["Edit", "Write"])
 def test_an_unreadable_git_refuses_rather_than_admitting_the_write(
-    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tool: str, repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     guard = _load_guard()
     _commit_product(repo=repo, message=f"feat: thing\n\n{_RED_TRAILER}\n")
@@ -463,7 +516,7 @@ def test_an_unreadable_git_refuses_rather_than_admitting_the_write(
     monkeypatch.setattr(guard.subprocess, "run", _unavailable)
     denial = _drive(
         guard=guard,
-        payload=_structured(tool="Write", path=_PRODUCT_PATH),
+        payload=_structured(tool=tool, path=_PRODUCT_PATH),
         repo=repo,
         monkeypatch=monkeypatch,
         capsys=capsys,
