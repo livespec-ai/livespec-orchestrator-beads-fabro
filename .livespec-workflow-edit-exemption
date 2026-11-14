@@ -1,4 +1,2 @@
-work_item=bd-ib-jpqhog
-change=additive
-ci_runtime=no-significant-increase
-reason=incident-ci prints ONLY the enablement reading the released plan recorded (one json.dumps of the plan's enablement field, then one echo), right after the step reads the plan's mode; five added lines, no existing workflow line deleted or modified, no job, trigger, permission, runner, concurrency group or required check changes, one in-process JSON read so CI runtime does not change; mirror of livespec-dev-tooling-3z6fyq (fleet follow-up to livespec-dev-tooling-ahl6vz), maintainer approval of the additive one-field echo 2026-11-13 and coordinator authorization under coordinator-duties section 12 on 2026-11-14
+work_item=bd-ib-qokmf7
+reason=carve incident-ci and acceptance runs-on onto CI_INCIDENT_RUNNER_LABELS so expedited PRs reach the tailnet-only observer (coordinator ruling option B; logically additive routing change, maintainer 2026-11-03)
