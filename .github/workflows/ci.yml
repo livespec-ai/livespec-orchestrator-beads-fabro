@@ -1284,7 +1284,7 @@ jobs:
 
   acceptance:
     name: acceptance
-    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(vars.CI_INCIDENT_RUNNER_LABELS || vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     container:
       image: ghcr.io/thewoolleyman/livespec-fabro-sandbox:python-v1.208.0
     env:
@@ -1346,7 +1346,7 @@ jobs:
   incident-ci:
     timeout-minutes: 90
     name: incident-ci
-    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(vars.CI_INCIDENT_RUNNER_LABELS || vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     container:
       image: ghcr.io/thewoolleyman/livespec-fabro-sandbox:python-v1.208.0
     permissions:
