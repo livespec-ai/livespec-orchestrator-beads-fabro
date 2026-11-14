@@ -399,6 +399,23 @@ the inverse recovery is still owed, or `collecting-failures` once the resolution
 carries a revert receipt. An exact retry of either recovers the recorded
 transition.
 
+The Dispatcher's admission records both phases as it goes (bd-ib-wz6bsa).
+`admit_claimed_item` wraps the claim of a `ready` item. Before the claim it
+records `repayment-ready` for an incident whose chain still names
+`repayment-admission`, since ordinary admission (the `approve` valve or an
+automatic approval) has already approved it. Once the item rests `active`
+under the claim, it records `repayment-active`. A phase the chain cannot record
+refuses that dispatch by name, as `incident-repayment-phase-unrecorded`, so no
+repayment runs that the chain could never bind. An admission with no
+repayment in play builds no ledger client and reads no comments: a repository
+whose committed `dispatcher.claim_tokens` is not true cannot hold an incident
+chain (genesis refuses without claim tokens), and elsewhere one record read
+finds no `incident_authority_head` hint, which every incident transition
+writes. An item carrying the hint, or whose record cannot be read, takes the
+full sync.
+`recover-repayment-phases` remains the repair for an item that moved past those
+states before this admission write existed.
+
 `recover-repayment-phases` records the `repayment-ready` and `repayment-active`
 generations a dispatch skipped (bd-ib-wz6bsa). An item can travel `ready`,
 `active` and `acceptance` through ordinary admission while its chain still names

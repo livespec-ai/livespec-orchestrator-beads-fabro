@@ -55,7 +55,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_admission_slots impo
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_admission_writes import (
     admission_held_outcome,
-    admit_item,
+    admit_claimed_item,
     approve_ready_items,
     withheld_outcomes,
 )
@@ -274,8 +274,9 @@ def admit_and_select(  # noqa: PLR0913 — kw-only; `explicit_factory` is the on
         # which the factory now reports absent and a reconciler would release.
         # `_dispatcher_claim_stamp` carries the full reasoning; the two store
         # writers are handed over so `_dispatcher_admission_writes` calls them
-        # exactly as this valve did.
-        refusal = admit_item(
+        # exactly as this valve did. An incident repayment's chain also records
+        # the phase each side of the claim pairs with (bd-ib-wz6bsa).
+        refusal = admit_claimed_item(
             repo=repo,
             config=config,
             journal=journal,

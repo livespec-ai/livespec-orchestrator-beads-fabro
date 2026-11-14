@@ -39,6 +39,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from livespec_orchestrator_beads_fabro._store_dispatch_claim import ClaimRow
 from livespec_orchestrator_beads_fabro.commands._dispatcher_admission_slots import (
@@ -56,12 +57,16 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_claim_stamp import (
 from livespec_orchestrator_beads_fabro.commands._dispatcher_claim_writes import (
     WRITER_ADMISSION,
     claim_status_write,
+    claim_tokens_setting,
     settle_claim_write,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_decision_journal import (
     auto_disposition_journal_record,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import DispatchOutcome
+from livespec_orchestrator_beads_fabro.commands._dispatcher_incident_repayment_admit import (
+    admit_with_repayment_phase,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import JournalFile
 from livespec_orchestrator_beads_fabro.commands._dispatcher_valves import (
     AdmissionPlan,
@@ -73,6 +78,7 @@ from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 __all__: list[str] = [
     "ADMISSION_CLAIM_REFUSED_STAGE",
     "admission_held_outcome",
+    "admit_claimed_item",
     "admit_item",
     "approve_ready_items",
     "withheld_outcomes",
@@ -180,6 +186,28 @@ def admit_item(  # noqa: PLR0913 — kw-only; one admission's facts plus the val
             explicit_factory=explicit_factory,
             planned=planned,
         ),
+    )
+
+
+def admit_claimed_item(
+    *, repo: Path, config: StoreConfig, item_id: str, **claim: Any
+) -> str | None:
+    """`admit_item`, with an incident repayment's chain kept in step with the claim.
+
+    `_dispatcher_incident_repayment_admit` records `repayment-ready` before the
+    claim and `repayment-active` after it, and refuses by name when it cannot
+    (bd-ib-wz6bsa); every other item is claimed exactly as `admit_item` claims it.
+
+    A repository whose committed `dispatcher.claim_tokens` is not true cannot
+    hold an incident chain at all, because genesis refuses without claim tokens
+    (`_incident_genesis_writer`), so its admissions build no ledger client and
+    take no phase read: they go straight to `admit_item`, which settles the
+    unguarded or unreadable setting exactly as before.
+    """
+    if claim_tokens_setting(repo=repo) is not True:
+        return admit_item(repo=repo, config=config, item_id=item_id, **claim)
+    return admit_with_repayment_phase(
+        config=config, item_id=item_id, admit=admit_item, claim={"repo": repo, **claim}
     )
 
 

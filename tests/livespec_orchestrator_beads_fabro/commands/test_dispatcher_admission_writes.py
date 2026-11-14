@@ -34,11 +34,15 @@ from livespec_orchestrator_beads_fabro._store_dispatch_claim import (
     CLAIM_TOKEN_METADATA_KEY,
     create_claim_token,
 )
-from livespec_orchestrator_beads_fabro.commands import _dispatcher_claim_stamp
+from livespec_orchestrator_beads_fabro.commands import (
+    _dispatcher_admission_writes,
+    _dispatcher_claim_stamp,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_admission import admit_and_select
 from livespec_orchestrator_beads_fabro.commands._dispatcher_admission_writes import (
     ADMISSION_CLAIM_REFUSED_STAGE,
     admission_held_outcome,
+    admit_claimed_item,
     admit_item,
     approve_ready_items,
     withheld_outcomes,
@@ -495,3 +499,46 @@ def test_an_enabled_approval_of_an_item_that_left_pending_approval_is_refused_un
     assert (approved_ids, refused) == (set(), [(item, "claim-changed")])
     assert _snapshot(client=client) == before
     assert client.show_issue(issue_id=token)["status"] != "closed"
+
+
+def test_a_repository_without_claim_tokens_admits_with_no_repayment_phase_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Genesis refuses without claim tokens, so no incident chain can need the sync."""
+    repo = _repo(tmp_path=tmp_path, claim_tokens=False)
+    calls: list[dict[str, object]] = []
+
+    def _admit_item(**kwargs: object) -> str | None:
+        calls.append(kwargs)
+        return None
+
+    wrapped: list[dict[str, object]] = []
+    monkeypatch.setattr(_dispatcher_admission_writes, "admit_item", _admit_item)
+    monkeypatch.setattr(
+        _dispatcher_admission_writes, "admit_with_repayment_phase", lambda **kw: wrapped.append(kw)
+    )
+    assert admit_claimed_item(repo=repo, config=_config(), item_id=_ITEM_ID, resume=False) is None
+    assert calls == [{"repo": repo, "config": _config(), "item_id": _ITEM_ID, "resume": False}]
+    assert wrapped == []
+
+
+def test_a_claim_token_repository_hands_the_claim_to_the_repayment_phase_wrapper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path=tmp_path, claim_tokens=True)
+    seen: dict[str, object] = {}
+
+    def _wrapper(**kwargs: object) -> str | None:
+        seen.update(kwargs)
+        return "wrapped"
+
+    monkeypatch.setattr(_dispatcher_admission_writes, "admit_with_repayment_phase", _wrapper)
+    assert admit_claimed_item(repo=repo, config=_config(), item_id=_ITEM_ID, resume=True) == (
+        "wrapped"
+    )
+    assert seen == {
+        "config": _config(),
+        "item_id": _ITEM_ID,
+        "admit": admit_item,
+        "claim": {"repo": repo, "resume": True},
+    }
