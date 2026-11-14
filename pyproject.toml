@@ -557,6 +557,7 @@ destructive_cli_allowlist = [
     "dev-tooling/reset-test-wrong-to-dispatch-base.sh",
     "dev-tooling/commit-red.sh",
     ".claude-plugin/scripts/livespec_orchestrator_beads_fabro/commands/_dispatcher_commit_red_program.sh",
+    ".claude-plugin/scripts/livespec_orchestrator_beads_fabro/commands/_dispatcher_reset_test_wrong_program.sh",
     ".claude-plugin/.fabro/workflows/implement-work-item/prompts/",
     ".claude-plugin/scripts/livespec_orchestrator_beads_fabro/commands/_dispatcher_publication_push.py",
     "orchestrator-image/acceptance-live-golden-master.sh",

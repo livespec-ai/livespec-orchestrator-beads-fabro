@@ -41,7 +41,9 @@ def test_implement_commits_are_owned_by_command_nodes() -> None:
     assert graph.nodes["commit_red"]["script"] == (
         'bash "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-red.sh"'
     )
-    assert graph.nodes["commit_green"]["script"] == "bash dev-tooling/commit-green.sh"
+    assert graph.nodes["commit_green"]["script"] == (
+        'bash "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-green.sh"'
+    )
 
 
 def test_fix_and_review_fix_keep_their_commit_runner_settle_nodes() -> None:
