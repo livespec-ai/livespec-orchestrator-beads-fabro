@@ -25,7 +25,7 @@ __all__: list[str] = [
 # sibling projection (the non-fleet adopter path); a present-but-malformed
 # manifest fails the dispatch fast rather than falling back to a stale
 # hardcoded set.
-_FLEET_MANIFEST_API_PATH = "repos/thewoolleyman/livespec/contents/.livespec-fleet-manifest.jsonc"
+_FLEET_MANIFEST_API_PATH = "repos/livespec-ai/livespec/contents/.livespec-fleet-manifest.jsonc"
 _FLEET_MANIFEST_FETCH_TIMEOUT_SECONDS = 60.0
 
 # In-sandbox directory the sibling clones land under; projected into

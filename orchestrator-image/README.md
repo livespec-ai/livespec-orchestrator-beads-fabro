@@ -1564,7 +1564,7 @@ fresh and points the Dispatcher at the clones:
   livespec-orchestrator:dev \
   sleep infinity
 # then, INSIDE the container (the helper does this for you):
-#   git clone https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git /workspace/livespec-orchestrator-beads-fabro
+#   git clone https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git /workspace/livespec-orchestrator-beads-fabro
 #   (cd /workspace/livespec-orchestrator-beads-fabro && uv sync --all-groups)
 #   git clone https://github.com/<org>/<target>.git /workspace/dispatch-target
 #   regenerate /workspace/dispatch-target/.beads/metadata.json  (bd init --server --external)

@@ -10,7 +10,7 @@ THERE, as an item parked on NEEDS_ATTENTION while a correctly attributed verifie
 record sat on its pull request.
 
 THE DEFECT, AS MEASURED. Measured on released 0.170.0 against the published body
-of `thewoolleyman/livespec-overseer` PR #2341 comment 5976999030, whose `##
+of `livespec-ai/livespec-overseer` PR #2341 comment 5976999030, whose `##
 Assertion 1` section states the assertion, introduces its replay under a nested
 `### Replay proof` heading, and closes with `Reproduced: yes` at the end of that
 same subtree: `ProofRecord.reproduced` returned `None`, and returned `True` once
@@ -71,7 +71,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_record import 
 _RUN_ID = "01M467EWE4PS0EQH6SKZWXNA7F"
 _PR_NUMBER = 2599
 _RECORD_URL = (
-    "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/pull/2599"
+    "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/pull/2599"
     "#issuecomment-5977000000"
 )
 _REPRODUCED_ASSERTION = (

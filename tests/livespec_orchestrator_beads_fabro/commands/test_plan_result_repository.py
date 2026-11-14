@@ -236,7 +236,7 @@ def test_legacy_self_repository_identities_resolve_to_the_invoking_checkout(
             str(checkout),
             "config",
             "remote.origin.url",
-            "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git",
+            "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git",
         ],
         check=True,
     )
@@ -244,7 +244,7 @@ def test_legacy_self_repository_identities_resolve_to_the_invoking_checkout(
     for name in (
         str(checkout),
         str(primary),
-        "thewoolleyman/livespec-orchestrator-beads-fabro",
+        "livespec-ai/livespec-orchestrator-beads-fabro",
     ):
         assert resolve_result_repository(project_root=checkout, name=name) == ResultRepository(
             name=name,
@@ -266,12 +266,12 @@ def test_a_name_matching_neither_the_checkout_nor_the_primary_path_does_not_reso
 @pytest.mark.parametrize(
     ("origin", "resolves"),
     [
-        ("https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro", True),
-        ("https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git", True),
-        ("git@github.com:thewoolleyman/livespec-orchestrator-beads-fabro.git", True),
-        ("ssh://git@host/thewoolleyman/livespec-orchestrator-beads-fabro.git/", True),
+        ("https://github.com/livespec-ai/livespec-orchestrator-beads-fabro", True),
+        ("https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git", True),
+        ("git@github.com:livespec-ai/livespec-orchestrator-beads-fabro.git", True),
+        ("ssh://git@host/livespec-ai/livespec-orchestrator-beads-fabro.git/", True),
         ("/clones/livespec-orchestrator-beads-fabro", True),
-        ("https://github.com/thewoolleyman/livespec-overseer.git", False),
+        ("https://github.com/livespec-ai/livespec-overseer.git", False),
         ("", False),
         (None, False),
     ],
@@ -344,7 +344,7 @@ def test_the_identity_this_project_writes_is_its_origin_remotes_repository_name(
             str(checkout),
             "config",
             "remote.origin.url",
-            "git@github.com:thewoolleyman/livespec-orchestrator-beads-fabro.git",
+            "git@github.com:livespec-ai/livespec-orchestrator-beads-fabro.git",
         ],
         check=True,
     )

@@ -233,7 +233,7 @@ def main(
                 repository=_REPO_ROOT,
                 name=_own_name(),
                 siblings=_SELF_SCOPE_SIBLINGS,
-                owner="thewoolleyman",
+                owner="livespec-ai",
             )
             measurements, findings = own, []
     for m in measurements:

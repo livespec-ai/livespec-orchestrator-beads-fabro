@@ -272,7 +272,7 @@ Plugins, sessions and hosts:
 - You are about to message, ask, direct or answer another agent session on any
   host, or run `herdr pane send-text`, `herdr pane run`, `herdr agent prompt` or
   `tmux send-keys` against a pane you did not create → the fleet's distributed
-  SendMessage protocol, https://github.com/thewoolleyman/livespec-dev-tooling/blob/master/%2Eai/distributed-sendmessage-protocol.md.
+  SendMessage protocol, https://github.com/livespec-ai/livespec-dev-tooling/blob/master/%2Eai/distributed-sendmessage-protocol.md.
   Prefer `SendMessage` (across machines via Remote Control) to message another
   Claude session, because text typed into its pane can interrupt the
   maintainer (maintainer ruling 2026-11-14). Typing into a pane is still

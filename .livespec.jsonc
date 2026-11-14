@@ -409,7 +409,7 @@
       // lower or delete is not a floor. Raise it by hand, through a committed
       // change, when a release fixes something a dispatch must not run without.
       "minimum_release": "0.161.0",
-      "fabro_sandbox_image": "ghcr.io/thewoolleyman/livespec-fabro-sandbox:python-agent-v1.92.0",
+      "fabro_sandbox_image": "ghcr.io/livespec-ai/livespec-fabro-sandbox:python-agent-v1.92.0",
       // THE COMMITTED MIRROR of the capability set the sandbox image above
       // publishes at /etc/livespec/sandbox-capabilities — one lowercase
       // snake_case name per entry. A *sandbox capability* is a named surface

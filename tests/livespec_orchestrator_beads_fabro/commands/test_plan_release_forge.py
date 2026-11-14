@@ -41,7 +41,7 @@ from livespec_orchestrator_beads_fabro.commands._plan_release_repository import 
 )
 
 _ROOT = Path("/governed")
-_REPOSITORY = "thewoolleyman/livespec-dev-tooling"
+_REPOSITORY = "livespec-ai/livespec-dev-tooling"
 
 
 @dataclass(kw_only=True)
@@ -204,11 +204,11 @@ def test_a_probe_answered_with_any_other_status_is_a_failure_naming_that_status(
 
 
 def test_the_governed_identity_is_the_owner_and_repository_the_forge_names() -> None:
-    runner = _runner(stdout="thewoolleyman/livespec\n")
+    runner = _runner(stdout="livespec-ai/livespec\n")
 
     identity = governed_repository_identity(project_root=_ROOT, runner=runner)
 
-    assert identity == ExplicitRepository(owner="thewoolleyman", repository="livespec")
+    assert identity == ExplicitRepository(owner="livespec-ai", repository="livespec")
     assert runner.calls == [(tuple(governed_repository_argv()), _ROOT)]
 
 

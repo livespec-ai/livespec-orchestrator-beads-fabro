@@ -261,7 +261,7 @@ class _UnreleasedForge:
     ) -> CommandResult:
         del cwd, timeout_seconds, env, stdin
         if argv == governed_repository_argv():
-            return CommandResult(exit_code=0, stdout="thewoolleyman/livespec", stderr="")
+            return CommandResult(exit_code=0, stdout="livespec-ai/livespec", stderr="")
         return CommandResult(exit_code=0, stdout="", stderr="")
 
 

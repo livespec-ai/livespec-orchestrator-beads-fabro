@@ -240,7 +240,7 @@ JANITOR_BOOTSTRAP_RECIPE_DEFAULT: tuple[str, ...] = (
 # There is deliberately NO companion default for `compat.pinned`: the only
 # substitutable ref would be the moving branch tip its own clause forbids, so
 # that field is REQUIRED and an absent declaration resolves to `Defective`.
-FLEET_CORE_REPO_URL = "https://github.com/thewoolleyman/livespec.git"
+FLEET_CORE_REPO_URL = "https://github.com/livespec-ai/livespec.git"
 
 # THIS PLUGIN'S OWN release repository and the two refs the currency gate probes
 # on it. Not an integration point at all: a governed repository cannot declare
@@ -250,7 +250,7 @@ FLEET_CORE_REPO_URL = "https://github.com/thewoolleyman/livespec.git"
 # ban admits in exactly one module -- and because splitting the URL from its refs
 # would leave the plugin's own identity spelled in two places, which is the
 # drift the defaults module exists to stop.
-RELEASE_REPOSITORY_URL = "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git"
+RELEASE_REPOSITORY_URL = "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git"
 RELEASE_REPOSITORY_RELEASE_REF = "refs/heads/release"
 RELEASE_REPOSITORY_MASTER_REF = "refs/heads/master"
 

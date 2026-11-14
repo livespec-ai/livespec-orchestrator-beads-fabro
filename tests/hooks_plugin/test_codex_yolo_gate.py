@@ -146,7 +146,7 @@ def test_read_marker_fails_open_for_bad_config_shapes(tmp_path: Path) -> None:
 def test_repo_name_from_remote_url_accepts_canonical_github_forms() -> None:
     assert (
         hook.repo_name_from_remote_url(
-            remote_url="https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git"
+            remote_url="https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git"
         )
         == "livespec-orchestrator-beads-fabro"
     )
@@ -354,7 +354,7 @@ def test_main_refresh_writes_manifest_derived_marker(
 
     def fake_remote_url_for_repo(*, repo: Path) -> str:
         assert repo == tmp_path
-        return "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git"
+        return "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git"
 
     monkeypatch.setattr(hook, "resolve_owner", fake_resolve_owner)
     monkeypatch.setattr(hook, "remote_url_for_repo", fake_remote_url_for_repo)
@@ -376,9 +376,7 @@ def _refresh_with_owner(*, owner: object, tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(
         hook,
         "remote_url_for_repo",
-        lambda **_kwargs: (
-            "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git"
-        ),
+        lambda **_kwargs: ("https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git"),
     )
 
     assert hook.main(argv=["refresh", str(manifest)]) == 0
@@ -466,7 +464,7 @@ def test_main_refresh_derives_off_without_owner_resolver(
 
     def fake_remote_url_for_repo(*, repo: Path) -> str:
         assert repo == tmp_path
-        return "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git"
+        return "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git"
 
     monkeypatch.setattr(hook, "resolve_owner", None)
     monkeypatch.setattr(hook, "remote_url_for_repo", fake_remote_url_for_repo)

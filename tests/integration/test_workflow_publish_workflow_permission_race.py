@@ -255,7 +255,7 @@ def _plan(*, repo: Path) -> DispatchPlan:
         janitor=("just", "check"),
         janitor_checkout=repo / ".janitor",
         janitor_core_checkout=repo / ".janitor" / ".livespec-core",
-        janitor_core_repo_url="https://github.com/thewoolleyman/livespec.git",
+        janitor_core_repo_url="https://github.com/livespec-ai/livespec.git",
         janitor_core_ref="master",
         review_fix_visit_cap=3,
         merge_on_review_cap_outcome="succeeded",

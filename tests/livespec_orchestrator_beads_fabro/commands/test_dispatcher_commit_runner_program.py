@@ -141,7 +141,7 @@ def test_the_source_and_fetch_step_carry_no_template_opener_and_no_privileged_wr
     source = commit_runner_program_source()
     block = helper_fetch_prepare_steps_block(
         source=HelperSource(
-            repository="https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git",
+            repository="https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git",
             commit="0123456789abcdef0123456789abcdef01234567",
         )
     )

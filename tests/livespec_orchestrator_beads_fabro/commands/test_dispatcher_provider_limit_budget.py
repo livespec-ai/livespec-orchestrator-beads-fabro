@@ -426,7 +426,7 @@ def test_a_candidate_scoped_model_unsupported_release_sets_no_usage_limit_flag(
             janitor=("just", "check"),
             janitor_checkout=repo / ".janitor",
             janitor_core_checkout=repo / ".janitor" / ".livespec-core",
-            janitor_core_repo_url="https://github.com/thewoolleyman/livespec.git",
+            janitor_core_repo_url="https://github.com/livespec-ai/livespec.git",
             janitor_core_ref="master",
             review_fix_visit_cap=3,
             merge_on_review_cap_outcome="succeeded",

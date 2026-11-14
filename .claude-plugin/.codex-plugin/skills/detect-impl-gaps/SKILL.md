@@ -101,7 +101,7 @@ if [ -z "$PLUGIN_ROOT" ] || [ ! -d "$PLUGIN_ROOT/scripts/bin" ]; then
     printf "%b\n" "$PLUGIN_ROOT_DIAGNOSTICS" >&2
   fi
   echo "Install it first:" >&2
-  echo "  codex plugin marketplace add thewoolleyman/livespec-orchestrator-beads-fabro" >&2
+  echo "  codex plugin marketplace add livespec-ai/livespec-orchestrator-beads-fabro" >&2
   echo "  codex plugin add livespec-orchestrator-beads-fabro@livespec-orchestrator-beads-fabro" >&2
   exit 1
 fi

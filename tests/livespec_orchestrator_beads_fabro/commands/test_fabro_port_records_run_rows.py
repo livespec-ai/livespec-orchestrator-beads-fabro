@@ -29,7 +29,7 @@ from livespec_orchestrator_beads_fabro.commands._fabro_port_records import (
 # attribute error in the middle of a case.
 _EXPOSED_FIELDS = frozenset({"labels", "repo_origin_url"})
 
-_ORIGIN = "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro"
+_ORIGIN = "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro"
 _LABELS: dict[str, Any] = {
     "work.item.id": "bd-ib-vlctc3",
     "livespec.dispatch.id": "01M4N4V6SEEKVVP88ST0CASGCP",

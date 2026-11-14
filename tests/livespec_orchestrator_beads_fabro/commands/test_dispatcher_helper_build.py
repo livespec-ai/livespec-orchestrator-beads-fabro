@@ -26,7 +26,7 @@ from livespec_orchestrator_beads_fabro.types import WorkItem
 _PLUGIN_KEY = "livespec-orchestrator-beads-fabro@livespec-orchestrator-beads-fabro"
 _COMMIT = "37e012335ed23ecba9bbcbb829e0fc90f2fdaf3b"
 _OTHER_COMMIT = "5be0e21eac36fde34b20225146d2fa53f4fcfb4b"
-_REPOSITORY = "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git"
+_REPOSITORY = "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git"
 _EXIT_PRECONDITION_ERROR = 3
 
 

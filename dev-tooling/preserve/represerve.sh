@@ -2,7 +2,7 @@
 # usage: represerve.sh <UTC HH:MM> <FULL_RUN_ID> <alias-ref>   (alias e.g. bd-ib-<item>-<RUN12>; HH:MM in the past = now)
 # Runs preserve_runs.sh at the given time, then mirrors its SHA to the alias ref under the same rule:
 # never move an alias ref to a tip that does not contain its old value (write a SHA-suffixed sibling).
-S=$(dirname "$0"); R=https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro
+S=$(dirname "$0"); R=https://github.com/livespec-ai/livespec-orchestrator-beads-fabro
 t=$(date -u -d "$(date -u +%F)T$1:00Z" +%s); now=$(date +%s); [ $t -gt $now ] && sleep $((t-now))
 # PRESERVE_KEEP_COPY=1: preserve_runs.sh leaves the verified copy in place, because the alias push below reads it.
 # The row is this run's own: retry rows for other kept copies print first and are not ours.

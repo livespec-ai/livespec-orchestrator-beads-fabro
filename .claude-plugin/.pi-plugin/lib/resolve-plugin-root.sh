@@ -17,9 +17,9 @@
 #   2. <project-root>/.claude-plugin when that checkout IS this plugin
 #      (dogfooding) — identity confirmed from its plugin manifest name, never
 #      from the path alone.
-#   3. <project-root>/.pi/git/github.com/thewoolleyman/livespec-orchestrator-beads-fabro/.claude-plugin
+#   3. <project-root>/.pi/git/github.com/livespec-ai/livespec-orchestrator-beads-fabro/.claude-plugin
 #      — the PROJECT-scope pi package clone (`pi install ... -l`).
-#   4. ~/.pi/agent/git/github.com/thewoolleyman/livespec-orchestrator-beads-fabro/.claude-plugin — the
+#   4. ~/.pi/agent/git/github.com/livespec-ai/livespec-orchestrator-beads-fabro/.claude-plugin — the
 #      USER-scope pi package clone.
 #
 # Steps 3 and 4 are pi's own documented git-package clone locations. A candidate

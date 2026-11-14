@@ -7,7 +7,7 @@ import textwrap
 
 _MARKETPLACE = "livespec-driver-codex"
 _PLUGIN = "livespec"
-_REPOSITORY = "https://github.com/thewoolleyman/livespec-driver-codex.git"
+_REPOSITORY = "https://github.com/livespec-ai/livespec-driver-codex.git"
 
 __all__: list[str] = ["codex_materialize_script"]
 

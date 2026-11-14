@@ -27,7 +27,7 @@
 
 [Unit]
 Description=livespec work-supply timer for tenant %i
-Documentation=https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro
+Documentation=https://github.com/livespec-ai/livespec-orchestrator-beads-fabro
 
 [Timer]
 AccuracySec=1min

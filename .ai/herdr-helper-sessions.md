@@ -68,7 +68,7 @@ picker, a session `SendMessage` cannot reach, or a Codex or pi pane. When you ty
 `herdr pane send-text <pane> "<text>"` and then `herdr pane send-keys <pane> Enter` (or the
 tmux equivalent), after the idle check above. The full protocol is the fleet's distributed
 SendMessage protocol,
-https://github.com/thewoolleyman/livespec-dev-tooling/blob/master/%2Eai/distributed-sendmessage-protocol.md.
+https://github.com/livespec-ai/livespec-dev-tooling/blob/master/%2Eai/distributed-sendmessage-protocol.md.
 
 A Codex TUI pane is a sharper case of the busy-pane rule above:
 `herdr pane send-text <pane> "..."` followed by `herdr pane send-keys <pane>

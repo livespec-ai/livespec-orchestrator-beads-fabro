@@ -22,7 +22,7 @@ from livespec_orchestrator_beads_fabro.commands import _dispatcher_helper_regist
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
 from livespec_orchestrator_beads_fabro.commands._dispatcher_shell_runner import ShellCommandRunner
 
-_REPOSITORY = "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git"
+_REPOSITORY = "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git"
 _COMMIT = "37e012335ed23ecba9bbcbb829e0fc90f2fdaf3b"
 _CAUSE = "LIVESPEC_PREPARE_PAYLOAD_DIGEST_MISMATCH"
 

@@ -62,8 +62,8 @@ from livespec_orchestrator_beads_fabro.commands._plan_release_repository import 
 )
 
 _ROOT = Path("/governed/livespec")
-_GOVERNED = "thewoolleyman/livespec"
-_SIBLING = "thewoolleyman/livespec-dev-tooling"
+_GOVERNED = "livespec-ai/livespec"
+_SIBLING = "livespec-ai/livespec-dev-tooling"
 _GOVERNED_TAGS = frozenset({"v0.1.0"})
 _SIBLING_TAGS = frozenset({"v1.95.12", "v1.96.1"})
 _ASSERTION = "The released build runs in a real operator session."
@@ -184,7 +184,7 @@ def test_a_bare_name_the_forge_reports_is_no_repository_falls_back_to_the_govern
     assert reading == ReleaseTags(repository=_GOVERNED, tags=_GOVERNED_TAGS)
     # The probe DID run and answered 404: that answer is what elected the
     # governed repository, rather than the word's shape.
-    assert tuple(repository_probe_argv(repository="thewoolleyman/v1.96.1")) in forge.calls
+    assert tuple(repository_probe_argv(repository="livespec-ai/v1.96.1")) in forge.calls
 
 
 def test_a_record_naming_no_installed_build_identifier_is_judged_against_the_governed_one() -> None:
@@ -204,7 +204,7 @@ def test_a_record_naming_no_installed_build_identifier_is_judged_against_the_gov
 def test_an_explicit_repository_the_forge_denies_is_rejected_and_never_falls_back() -> None:
     forge = _forge(existing=frozenset({_GOVERNED}))
 
-    reading = _reading(forge=forge, installed_build="thewoolleyman/livespec-dev-tooling v1.96.1")
+    reading = _reading(forge=forge, installed_build="livespec-ai/livespec-dev-tooling v1.96.1")
 
     assert isinstance(reading, UnreadableRelease)
     assert reading.repository == _SIBLING
@@ -217,7 +217,7 @@ def test_an_explicit_repository_the_forge_denies_is_rejected_and_never_falls_bac
 def test_an_explicit_repository_the_forge_reports_is_judged_against_its_own_tags() -> None:
     # The control for the case above: a ladder that rejected every explicit name
     # would satisfy it on its own.
-    reading = _reading(forge=_forge(), installed_build="thewoolleyman/livespec-dev-tooling v1.96.1")
+    reading = _reading(forge=_forge(), installed_build="livespec-ai/livespec-dev-tooling v1.96.1")
 
     assert reading == ReleaseTags(repository=_SIBLING, tags=_SIBLING_TAGS)
 
@@ -332,7 +332,7 @@ def test_component_tree_difference_reports_the_first_changed_or_one_sided_path(
     reader = ForgeReleaseReader(
         project_root=_ROOT,
         runner=runner,
-        governed=ExplicitRepository(owner="thewoolleyman", repository="livespec"),
+        governed=ExplicitRepository(owner="livespec-ai", repository="livespec"),
         components=None,
     )
 

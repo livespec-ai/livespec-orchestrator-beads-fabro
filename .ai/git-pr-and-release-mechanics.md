@@ -117,7 +117,7 @@ label. Discovered 2026-09-30 (`bd-ib-74sqh7` holds that instance's wiring).
 "Pin the plugin in all fleet repos" needs no committed change in those repos.
 Measured 2026-08-27 across all 12 consumers, and re-checked here on
 2026-10-18: each `.claude/settings.json` pins
-`{"source":"github","repo":"thewoolleyman/livespec-orchestrator-beads-fabro","ref":"release"}`,
+`{"source":"github","repo":"livespec-ai/livespec-orchestrator-beads-fabro","ref":"release"}`,
 a moving branch rather than a tag or SHA. This host's single
 `~/.claude/plugins/known_marketplaces.json` entry reads `ref: release` too, so a
 clone that commits a tag ref resolves `release` here all the same.

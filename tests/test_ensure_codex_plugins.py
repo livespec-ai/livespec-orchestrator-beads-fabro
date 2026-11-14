@@ -10,9 +10,9 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _SCRIPT = _REPO_ROOT / "dev-tooling" / "just-ensure-codex-plugins.sh"
 _REGISTRATIONS = (
-    "thewoolleyman/livespec --ref release",
-    "thewoolleyman/livespec-driver-codex --ref release",
-    "thewoolleyman/livespec-orchestrator-beads-fabro --ref release",
+    "livespec-ai/livespec --ref release",
+    "livespec-ai/livespec-driver-codex --ref release",
+    "livespec-ai/livespec-orchestrator-beads-fabro --ref release",
 )
 
 
