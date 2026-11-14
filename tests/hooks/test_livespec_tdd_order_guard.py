@@ -525,6 +525,38 @@ def test_an_unreadable_git_refuses_rather_than_admitting_the_write(
     assert "no-trailers" in str(denial["reason"])
 
 
+def test_a_checkpoint_without_a_readable_parent_fails_closed(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A checkpoint walk without its authored commit cannot admit a product write."""
+    guard = _load_guard()
+
+    def _checkpoint_root(*, repo_root: Path, arguments: list[str]) -> tuple[int, str]:
+        assert repo_root == repo
+        if arguments == ["log", "-1", "--format=%B", "HEAD"]:
+            return 0, "fabro(run): review_fix (succeeded)\n"
+        if arguments == ["rev-list", "--parents", "-n", "1", "HEAD"]:
+            return 0, "checkpoint-sha"
+        if arguments[:2] == ["status", "--porcelain"]:
+            return 0, ""
+        if arguments == ["rev-parse", "--absolute-git-dir"]:
+            return 1, ""
+        if arguments[:2] == ["cat-file", "-e"]:
+            return 0, ""
+        raise AssertionError(arguments)
+
+    monkeypatch.setattr(guard, "_git", _checkpoint_root)
+    denial = _drive(
+        guard=guard,
+        payload=_structured(tool="Edit", path=_PRODUCT_PATH),
+        repo=repo,
+        monkeypatch=monkeypatch,
+        capsys=capsys,
+    )
+    assert denial is not None
+    assert "no-trailers" in str(denial["reason"])
+
+
 def test_a_project_dir_that_is_not_a_repository_refuses_rather_than_admitting(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
