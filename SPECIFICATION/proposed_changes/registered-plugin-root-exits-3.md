@@ -41,4 +41,4 @@ In `scenarios.md`, under `## Scenario 271 — A session finds its project's regi
     Then it exits non-zero naming the missing install
 ```
 
-The two existing scenarios in that feature MUST remain unchanged.
+The four existing scenarios in that feature MUST remain unchanged.
