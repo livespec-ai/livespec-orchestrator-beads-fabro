@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -58,6 +59,11 @@ _TESTS_TREE = "tests"
 _PYTHON_SUFFIX = ".py"
 _GIT_TIMEOUT_SECONDS = 15.0
 _PORCELAIN_STATUS_WIDTH = 3
+_SINGLE_PARENT_COMMIT_FIELD_COUNT = 2
+# An engine checkpoint's subject, `fabro(<run-id>): <node> (<status>)`.
+# Keep this form aligned with Scenario 368's commit runner, which folds these
+# checkpoints back onto an open Red before it performs the Green amend.
+_ENGINE_CHECKPOINT_SUBJECT = re.compile(r"^fabro\([^)]*\): ")
 _OPERATION_MARKERS = (
     "MERGE_HEAD",
     "REBASE_HEAD",
@@ -164,13 +170,31 @@ def _repo_root(*, environ: dict[str, str]) -> Path:
 
 
 def _head_message(*, repo_root: Path) -> str:
-    """Return HEAD's full commit message, or empty when it cannot be read.
+    """Return the authored message below HEAD's engine checkpoints.
 
-    Empty is the FAIL-CLOSED value: `policy.head_state` classifies it as
-    trailer-free, which refuses a product write.
+    Fabro records an engine checkpoint after a stage, including a re-entered
+    `review_fix` turn. Those commits carry no TDD trailers, so classify the
+    nearest authored commit below a single-parent checkpoint run instead of
+    treating the checkpoint as the work's TDD state. Empty is the FAIL-CLOSED
+    value whenever either Git read cannot establish that authored commit:
+    `policy.head_state` classifies it as trailer-free and refuses the write.
     """
-    returncode, stdout = _git(repo_root=repo_root, arguments=["log", "-1", "--format=%B"])
-    return stdout if returncode == 0 else ""
+    commit = "HEAD"
+    while True:
+        returncode, message = _git(
+            repo_root=repo_root, arguments=["log", "-1", "--format=%B", commit]
+        )
+        if returncode != 0:
+            return ""
+        if not _ENGINE_CHECKPOINT_SUBJECT.match(message):
+            return message
+        returncode, parents = _git(
+            repo_root=repo_root, arguments=["rev-list", "--parents", "-n", "1", commit]
+        )
+        parent_fields = parents.split()
+        if returncode != 0 or len(parent_fields) != _SINGLE_PARENT_COMMIT_FIELD_COUNT:
+            return ""
+        commit = parent_fields[1]
 
 
 def _exists_at_head(*, repo_root: Path, path: str) -> bool:
