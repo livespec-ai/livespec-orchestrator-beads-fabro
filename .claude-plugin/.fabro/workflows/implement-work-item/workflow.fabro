@@ -484,7 +484,7 @@ chmod 755 \"$runner\""
         label="Commit Red test through repository hooks"
         shape=parallelogram
         timeout="7200s"
-        script="bash dev-tooling/commit-red.sh"
+        script="bash \"${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-red.sh\""
     ]
 
     red_admission [

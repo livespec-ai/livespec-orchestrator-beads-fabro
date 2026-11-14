@@ -38,7 +38,9 @@ def test_implement_commits_are_owned_by_command_nodes() -> None:
     assert not isinstance(graph, str), graph
 
     assert "implement" not in graph.nodes
-    assert graph.nodes["commit_red"]["script"] == "bash dev-tooling/commit-red.sh"
+    assert graph.nodes["commit_red"]["script"] == (
+        'bash "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-red.sh"'
+    )
     assert graph.nodes["commit_green"]["script"] == "bash dev-tooling/commit-green.sh"
 
 
