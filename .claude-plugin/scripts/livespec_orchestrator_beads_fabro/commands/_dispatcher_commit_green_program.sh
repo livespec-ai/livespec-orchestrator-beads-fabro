@@ -45,6 +45,20 @@ red_commit_for_current_run() {
         && grep -qxF "Factory-Run-Id: $run_id" <<<"$message"
 }
 
+open_seed_red() {
+    local ref="$1"
+    local message=""
+    message="$(git log -1 --format=%B "$ref" 2>/dev/null)" || return 1
+    grep -q '^TDD-Red-Test-File-Checksum: ' <<<"$message" \
+        && ! grep -q '^TDD-Green-Verified-At: ' <<<"$message"
+}
+
+seeded_open_red_declared() {
+    local handoff=""
+    handoff="$(git rev-parse --git-path "$HANDOFF_NAME")"
+    grep -q '^##[[:space:]]\+seeded-open-red\([[:space:]]\|$\)' "$handoff"
+}
+
 current_engine_run_id() {
     local branch=""
     if [[ -n "${FABRO_RUN_ID:-}" ]]; then
@@ -70,7 +84,17 @@ fold_checkpoints() {
         ((depth += 1))
         ref="HEAD~${depth}"
     done
-    if ! red_commit_for_current_run "$ref"; then
+    if red_commit_for_current_run "$ref"; then
+        if (( depth > 0 )); then
+            git reset --soft "$ref"
+        fi
+        return
+    fi
+    while (( depth < CHECKPOINT_LIMIT )) && checkpoint_commit "$ref"; do
+        ((depth += 1))
+        ref="HEAD~${depth}"
+    done
+    if ! seeded_open_red_declared || ! open_seed_red "$ref"; then
         printf '%s\n' "current run's own Red commit was not found beneath checkpoint commits"
         return 2
     fi

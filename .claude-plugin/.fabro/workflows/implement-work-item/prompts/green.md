@@ -25,7 +25,7 @@ A change to a stage prompt file or `_dispatcher_overlay.py` must update the test
 Read the handoff file in full, including the Red section and any declared
 already-satisfied outcome.
 
-1. Make the Red test pass by changing implementation files only. Never change the Red test file.
+1. Make the Red test pass by changing implementation files only. Never change the Red test file. When the handoff declares `seeded-open-red`, preserve the seed's changes and take that route through this Green turn even when no new Red test was written: `commit_green` folds the seed checkpoints into the existing replay-evidenced commit.
 2. Run only the tests your change touches. Do not make a commit.
 3. Before ending, run
 
