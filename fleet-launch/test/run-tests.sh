@@ -3552,13 +3552,27 @@ fi
 new_case tenant-wrapper-family
 open_boards
 unset WRAPPER
-printf '{"credential_wrapper": ["/elsewhere/%s", "--"]}\n' "$(basename "$STUB/wrapper")" > "$TENANT/.livespec.jsonc"
+# Route C's shape (#5361): the family wrapper, then a /bin/sh hop that maps the org App pair onto
+# GITHUB_APP_ID / GITHUB_PRIVATE_KEY. The whole argv must reach every launch-time command.
+printf '{"credential_wrapper": ["%s", "--", "/bin/sh", "-c", "GITHUB_APP_ID=\\"$GITHUB_APP_ID_ORG\\" GITHUB_PRIVATE_KEY=\\"$GITHUB_PRIVATE_KEY_ORG\\" exec \\"$@\\"", "sh"]}\n' "$STUB/wrapper" > "$TENANT/.livespec.jsonc"
 run_launcher bd-ib-family
 rm -f "$TENANT/.livespec.jsonc"
-if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-family ] && log_has "$CASE_LOG" "wrapper: default wrapper"; then
-    pass "a target whose credential_wrapper is the family wrapper runs under the default wrapper as is"
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-family ] && log_has "$CASE_LOG" "wrapper: committed wrapper argv, 6 words, run as written"; then
+    pass "a target whose credential_wrapper starts with the family wrapper runs its whole six-word argv as written: the /bin/sh org-App hop is kept"
 else
-    fail "a family-wrapper target did not run under the default wrapper (rc=$RC)"
+    fail "a family-wrapper argv was not run as written (rc=$RC)"
+    tail -4 "$CASE_LOG" >&2
+fi
+new_case tenant-wrapper-family-bare
+open_boards
+unset WRAPPER
+printf '{"credential_wrapper": ["%s", "--"]}\n' "$STUB/wrapper" > "$TENANT/.livespec.jsonc"
+run_launcher bd-ib-family-bare
+rm -f "$TENANT/.livespec.jsonc"
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-family-bare ] && log_has "$CASE_LOG" "wrapper: committed wrapper argv, 2 words, run as written"; then
+    pass "control: the bare family argv is run as written too, so the one rule covers both shapes"
+else
+    fail "the bare family argv was not run as written (rc=$RC)"
     tail -4 "$CASE_LOG" >&2
 fi
 new_case tenant-wrapper-absent
@@ -3797,6 +3811,42 @@ if [ "$(sed -n 1p "$LAUNCH_DIR/wrappers/homelab-wrapper.argv")" = "/home/ubuntu/
     pass "homelab-wrapper.argv is the homelab repository's committed credential wrapper followed by --"
 else
     fail "homelab-wrapper.argv does not carry the homelab credential wrapper route"
+fi
+
+echo "--- 48. a committed family-wrapper argv reaches the command intact: the child holds the org App pair"
+# Value-free: the stub family wrapper projects a personal App id and an org pair, exactly as the
+# host wrapper does, and the probe prints only WHICH pair the child holds, never a value. The
+# 2026-11-15 defect printed personal-app here, because the argv was dropped on argv[0]'s basename.
+new_case committed-argv-intact
+cat > "$CASE_DIR/family-wrapper" <<'FAMILY_STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = -- ] && shift
+GITHUB_APP_ID=personal-stub GITHUB_PRIVATE_KEY=personal-key-stub GITHUB_APP_ID_ORG=org-stub GITHUB_PRIVATE_KEY_ORG=org-key-stub exec "$@"
+FAMILY_STUB
+chmod +x "$CASE_DIR/family-wrapper"
+mkdir -p "$CASE_DIR/route-c-tenant" "$CASE_DIR/bare-tenant"
+printf '{"credential_wrapper": ["%s", "--", "/bin/sh", "-c", "GITHUB_APP_ID=\\"$GITHUB_APP_ID_ORG\\" GITHUB_PRIVATE_KEY=\\"$GITHUB_PRIVATE_KEY_ORG\\" exec \\"$@\\"", "sh"]}\n' "$CASE_DIR/family-wrapper" > "$CASE_DIR/route-c-tenant/.livespec.jsonc"
+which_app='if [ "$GITHUB_APP_ID" = "$GITHUB_APP_ID_ORG" ] && [ "$GITHUB_PRIVATE_KEY" = "$GITHUB_PRIVATE_KEY_ORG" ]; then echo org-app; else echo personal-app; fi'
+resolve_and_probe() {
+    REPO="$1" FLEET_LAUNCH_DEFAULT_WRAPPER="$CASE_DIR/family-wrapper" WRAPPER='' bash -c '
+        set -u
+        . "$1/config.sh"
+        . "$1/launch-lib.sh"
+        resolve_tenant_wrapper || { echo "mode=$TENANT_WRAPPER_MODE"; exit 1; }
+        printf "mode=%s words=%s " "$TENANT_WRAPPER_MODE" "${#TENANT_WRAPPER[@]}"
+        wrap -- sh -c "$2"' probe "$LAUNCH_DIR" "$which_app"
+}
+routed=$(resolve_and_probe "$CASE_DIR/route-c-tenant")
+if [ "$routed" = "mode=committed words=6 org-app" ]; then
+    pass "under route C's committed argv the launch-time command holds the org App pair: the argv was honoured whole"
+else
+    fail "the committed family-wrapper argv did not reach the command intact: $routed"
+fi
+bare=$(resolve_and_probe "$CASE_DIR/bare-tenant")
+if [ "$bare" = "mode=default words=0 personal-app" ]; then
+    pass "control: a target declaring no credential_wrapper runs under the bare family wrapper and holds the personal App pair"
+else
+    fail "control: the undeclared case did not run under the bare family wrapper: $bare"
 fi
 
 fi
