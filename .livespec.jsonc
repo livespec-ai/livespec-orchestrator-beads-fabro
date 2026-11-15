@@ -307,6 +307,25 @@
       // API cannot set it. A tenant that runs with it false again needs that migration
       // pass re-run, with writers stopped, before it returns to true.
       "claim_tokens": true,
+      // The Claude credential policy (orchestrator #5346 R02/R10, R01 code,
+      // bd-ib-tvcbmc, plan epic overseer-iyfjbo DoD 6). The factory pool is ONLY
+      // these declared numbered slots that the credential wrapper injects
+      // non-empty. Undeclared slots and the unnumbered CLAUDE_CODE_OAUTH_TOKEN are
+      // never assessed or projected. The allow-list is the coordinator's
+      // 2026-11-15 ruling: anthropic-2, -4, -5 and -6, EXCLUDING anthropic-0
+      // (protected) and anthropic-1 and -3 (the interactive pool). Admission still
+      // skips any declared slot that is exhausted or below the headroom floor.
+      // Committed-only and variable names only. Revisit -3 only on
+      // token-spend-analysis' numbers.
+      "claude_credential_policy": {
+        "mode": "numbered-slots",
+        "slots": [
+          "CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_2",
+          "CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_4",
+          "CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_5",
+          "CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_6"
+        ]
+      },
       "auto_approve_ready": true,
       // wip_cap: 16 matches the factory's 16-run cap (coordinator R99:
       // max_concurrent_runs 16, quota 64/32). Raised from 10 to 12 on
