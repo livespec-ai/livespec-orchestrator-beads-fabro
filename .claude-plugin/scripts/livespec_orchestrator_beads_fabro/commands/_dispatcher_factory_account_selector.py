@@ -43,8 +43,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, cast
 
+from returns.unsafe import unsafe_perform_io
+
 from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential import (
     CLAUDE_OAUTH_TOKEN_ENV,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential_policy import (
+    NUMBERED_SLOTS,
+    ClaudeCredentialPolicy,
+    resolve_claude_credential_policy,
 )
 
 __all__: list[str] = [
@@ -52,9 +59,11 @@ __all__: list[str] = [
     "FactoryCredentialChoice",
     "factory_credential_env_name",
     "injected_credential_slots",
+    "install_claude_credential_policy",
     "parse_selected_profile",
     "read_selected_profile",
     "register_admission_slot_chooser",
+    "register_claude_credential_policy",
     "resolve_factory_credential_env_name",
     "select_factory_credential",
     "selected_account_record_path",
@@ -66,11 +75,21 @@ __all__: list[str] = [
 SELECTED_ACCOUNT_RECORD_REL: Final = Path(".local/state/caam-usage-rotate/selected-account.json")
 _PROFILE_KEY: Final = "profile"
 _SLOT_PREFIX: Final = "CLAUDE_CODE_OAUTH_TOKEN__"
+# Named when a written-but-unreadable policy left no declared slot at all: a name
+# no wrapper injects, so the consumer reads an absent credential and fails closed.
+_UNREADABLE_POLICY_SLOT: Final = f"{_SLOT_PREFIX}UNDECLARED"
+_UNREADABLE_POLICY: Final = ClaudeCredentialPolicy(mode=NUMBERED_SLOTS, slots=())
 
 # The admission pass's chooser: a callable returning the env-var NAME of the slot
 # it chose, or None. Held at module scope because admission and every credential
 # consumer run in ONE dispatcher process and the consumers take no policy argument.
 _ADMISSION_CHOOSER: dict[str, Callable[[], str | None]] = {}
+
+# The dispatcher's declared Claude credential policy (orchestrator PR #5346, R01),
+# registered by the admission pass for the same reason as the chooser: every
+# consumer runs in the one dispatcher process and takes no policy argument. Absent
+# means the legacy pool rule.
+_CREDENTIAL_POLICY: dict[str, ClaudeCredentialPolicy] = {}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -92,7 +111,14 @@ def injected_credential_slots(*, environ: Mapping[str, str]) -> tuple[str, ...]:
     A slot is injected when its variable is present and non-empty. The unnumbered
     `CLAUDE_CODE_OAUTH_TOKEN` is the pool's sole slot only when no numbered slot is
     injected, so a host keying its pool by profile never assesses the legacy token.
+
+    Under a registered `numbered-slots` policy the pool is only the DECLARED slots
+    that are injected, in declaration order: an undeclared numbered slot and the
+    unnumbered token are never pool slots, so the pool may be empty.
     """
+    declared = _numbered_slot_policy()
+    if declared is not None:
+        return tuple(name for name in declared if environ.get(name))
     numbered = tuple(
         sorted(name for name, value in environ.items() if name.startswith(_SLOT_PREFIX) and value)
     )
@@ -107,6 +133,35 @@ def register_admission_slot_chooser(*, chooser: Callable[[], str | None] | None)
         _ADMISSION_CHOOSER.clear()
     else:
         _ADMISSION_CHOOSER["chooser"] = chooser
+
+
+def register_claude_credential_policy(*, policy: ClaudeCredentialPolicy | None) -> None:
+    """Install (or, with `None`, clear) the dispatcher's declared credential policy."""
+    if policy is None:
+        _CREDENTIAL_POLICY.clear()
+    else:
+        _CREDENTIAL_POLICY["policy"] = policy
+
+
+def install_claude_credential_policy(*, repo: Path) -> None:
+    """Resolve this repository's committed policy and register it for the pass.
+
+    A policy that is written but unreadable fails CLOSED to an empty declared
+    pool, never open to whatever the credential wrapper happens to inject.
+    """
+    register_claude_credential_policy(
+        policy=unsafe_perform_io(
+            resolve_claude_credential_policy(cwd=repo).value_or(_UNREADABLE_POLICY)
+        )
+    )
+
+
+def _numbered_slot_policy() -> tuple[str, ...] | None:
+    """The declared slot names under a `numbered-slots` policy, else `None`."""
+    policy = _CREDENTIAL_POLICY.get("policy")
+    if policy is None or policy.mode != NUMBERED_SLOTS:
+        return None
+    return policy.slots
 
 
 def selected_account_record_path(*, home: Path) -> Path:
@@ -204,11 +259,44 @@ def select_factory_credential(
     """
     chooser = _ADMISSION_CHOOSER.get("chooser")
     admitted = None if chooser is None else chooser()
-    if admitted is not None and admitted in injected_credential_slots(environ=environ):
+    pool = injected_credential_slots(environ=environ)
+    if admitted is not None and admitted in pool:
         return FactoryCredentialChoice(env_name=admitted, fallback_reason=None)
-    choice = factory_credential_env_name(home=home, available_env_names=frozenset(environ))
+    declared = _numbered_slot_policy()
+    choice = (
+        factory_credential_env_name(home=home, available_env_names=frozenset(environ))
+        if declared is None
+        else _declared_slot_choice(declared=declared, pool=pool, home=home)
+    )
     if choice.fallback_reason is not None:
         _ = warn(
             f"factory credential slot fallback — using {choice.env_name}: {choice.fallback_reason}"
         )
     return choice
+
+
+def _declared_slot_choice(
+    *, declared: tuple[str, ...], pool: tuple[str, ...], home: Path
+) -> FactoryCredentialChoice:
+    """Under `numbered-slots`: a declared, injected slot, never the unnumbered token.
+
+    The caam-published profile still steers the choice when its slot is declared
+    and injected. Otherwise the first declared injected slot is named, with the
+    reason. When NO declared slot is injected, the first declared name is returned
+    even though it is absent, so every consumer reads an absent credential and
+    fails closed instead of reaching for a credential nobody declared.
+    """
+    profile = read_selected_profile(home=home)
+    if profile is not None and _slot_env_name(profile=profile) in pool:
+        return FactoryCredentialChoice(
+            env_name=_slot_env_name(profile=profile), fallback_reason=None
+        )
+    if pool:
+        return FactoryCredentialChoice(
+            env_name=pool[0],
+            fallback_reason=f"no declared slot for published profile {profile!r}; using {pool[0]}",
+        )
+    return FactoryCredentialChoice(
+        env_name=declared[0] if declared else _UNREADABLE_POLICY_SLOT,
+        fallback_reason="no declared numbered slot is injected; refusing the unnumbered credential",
+    )

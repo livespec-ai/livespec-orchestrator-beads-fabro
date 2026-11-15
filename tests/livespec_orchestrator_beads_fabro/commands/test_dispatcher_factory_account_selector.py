@@ -131,3 +131,22 @@ def test_select_warns_only_on_fallback(tmp_path: Path) -> None:
     )
     assert chosen.env_name == _SLOT
     assert picked == []
+
+
+def test_an_unreadable_policy_names_an_undeclared_absent_slot(tmp_path: Path) -> None:
+    """A written-but-unreadable policy leaves no declared slot, and still never the legacy token."""
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential_policy import (
+        NUMBERED_SLOTS,
+        ClaudeCredentialPolicy,
+    )
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_selector import (
+        register_claude_credential_policy,
+    )
+
+    register_claude_credential_policy(policy=ClaudeCredentialPolicy(mode=NUMBERED_SLOTS, slots=()))
+    environ = {"CLAUDE_CODE_OAUTH_TOKEN": "t", "CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_4": "x"}
+
+    choice = select_factory_credential(environ=environ, home=tmp_path, warn=print)
+
+    assert choice.env_name == "CLAUDE_CODE_OAUTH_TOKEN__UNDECLARED"
+    assert choice.env_name not in environ
