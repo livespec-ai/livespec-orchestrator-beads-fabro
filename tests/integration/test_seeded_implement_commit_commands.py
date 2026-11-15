@@ -166,6 +166,65 @@ def test_seeded_open_red_reaches_green_without_a_second_red_commit(
     assert "TDD-Green-Verified-At: green" in message
 
 
+def test_seeded_implementation_reaches_green_through_a_dispatch_base_red(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A seed that already holds the implementation publishes through Red then Green."""
+    monkeypatch.setenv("FABRO_RUN_ID", "current-run")
+    repo = _repository(tmp_path=tmp_path)
+    base = _git(repo=repo, argv=["rev-parse", "HEAD"])
+    product = repo / "src" / "pkg" / "feature.py"
+    _ = product.write_text("VALUE = 2\n", encoding="utf-8")
+    _checkpoint(repo=repo, name="preserved", run_id="earlier-run")
+    test_file = repo / "tests" / "test_feature.py"
+    test_file.parent.mkdir()
+    _ = test_file.write_text("def test_feature() -> None:\n    assert False\n", encoding="utf-8")
+    _checkpoint(repo=repo, name="red", run_id="current-run")
+    _handoff(repo=repo, text="## red\nRed test file: tests/test_feature.py\n")
+    hooks = repo / ".git" / "hooks"
+    _ = (hooks / "pre-commit").write_text(
+        "#!/bin/sh\ntest \"$(cat src/pkg/feature.py)\" = 'VALUE = 1'\n", encoding="utf-8"
+    )
+    (hooks / "pre-commit").chmod(0o755)
+
+    red = _run(repo=repo, argv=["bash", str(_RED)], check=False)
+
+    assert red.returncode == 0, red.stderr
+    assert _git(repo=repo, argv=["rev-parse", "HEAD^"]) == base
+    (hooks / "pre-commit").unlink()
+    _git(
+        repo=repo,
+        argv=[
+            "commit",
+            "--amend",
+            "--quiet",
+            "-m",
+            "feat: red",
+            "-m",
+            "Factory-Run-Id: current-run",
+            "-m",
+            "TDD-Red-Test-File-Checksum: red",
+        ],
+    )
+    _git(repo=repo, argv=["config", "--local", "livespec.factoryRunId", "current-run"])
+    _checkpoint(repo=repo, name="green", run_id="current-run")
+    _ = (hooks / "commit-msg").write_text(
+        "#!/bin/sh\n"
+        "git interpret-trailers --in-place --trailer 'TDD-Green-Verified-At: green' \"$1\"\n",
+        encoding="utf-8",
+    )
+    (hooks / "commit-msg").chmod(0o755)
+
+    green = _run(repo=repo, argv=["bash", str(_GREEN)], check=False)
+
+    assert green.returncode == 0, green.stderr
+    assert _git(repo=repo, argv=["rev-parse", "HEAD^"]) == base
+    assert _git(repo=repo, argv=["show", "--format=", "--name-only", "HEAD"]) == (
+        "src/pkg/feature.py\ntests/test_feature.py"
+    )
+    assert "TDD-Green-Verified-At: green" in _git(repo=repo, argv=["log", "-1", "--format=%B"])
+
+
 def test_seeded_routes_and_prompts_direct_the_open_red_path() -> None:
     """The graph and handoff prose send inherited Red evidence through Green."""
     graph = parse_dot_graph(text=_WORKFLOW.read_text(encoding="utf-8"))
@@ -179,3 +238,5 @@ def test_seeded_routes_and_prompts_direct_the_open_red_path() -> None:
     assert "Red test file: <path>" in red
     assert "seeded-open-red" in red
     assert "seeded-open-red" in green
+    assert "never declare `already-satisfied` for such a seed" in " ".join(red.lower().split())
+    assert "dispatch base" in red
