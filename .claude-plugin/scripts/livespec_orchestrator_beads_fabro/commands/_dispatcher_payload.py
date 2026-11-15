@@ -44,6 +44,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_graph_adapters impor
 from livespec_orchestrator_beads_fabro.commands._dispatcher_graph_render import (
     render_workflow_graph,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_implement_mechanical import (
+    apply_mechanical_reentries,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_overlay import workflow_graph_path
 from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_entry import (
     graph_entered_at,
@@ -176,7 +179,11 @@ def prepare_workflow_payload(  # noqa: PLR0913 — kw-only; adapters and entry_n
     # declares no budget, because the Dispatcher's own host-side watchdog
     # enforces it and the engine knows nothing about it.
     payload = replace(payload, run_wall_budget=budget)
-    conflict = node_timeout_conflict(budget=budget, nodes=payload.node_seconds)
+    # The mechanical re-entry budget (bd-ib-pyeiky) is rendered into the payload
+    # graph from this same block read, so its keys and the timeouts agree.
+    conflict = apply_mechanical_reentries(
+        graph=payload.graph, block=block
+    ) or node_timeout_conflict(budget=budget, nodes=payload.node_seconds)
     if conflict is not None:
         return conflict
     journal.append(

@@ -1,7 +1,7 @@
 # pyright: reportMissingImports=none, reportMissingTypeStubs=none
 """_seam_equivalence_findings — what a disagreement between the surfaces IS, and its name.
 
-The comparison half of `seam_equivalence`. It owns the four input FAMILIES the
+The comparison half of `seam_equivalence`. It owns the five input FAMILIES the
 `[run.inputs]` table carries, and the four ways those inputs can fail to say one
 thing: a position the engine will not render, either direction of the
 token/rendered-input equality, a scoping rot, and a schema-leg mismatch. It is
@@ -9,10 +9,12 @@ deliberately free of filesystem and reporting concerns -- every function here
 takes sets and returns findings -- so the rules can be read and tested without a
 payload on disk.
 
-FOUR DISJOINT FAMILIES, AND ONLY THE EQUALITY IS SCOPED TO ONE OF THEM. The
+FIVE DISJOINT FAMILIES, AND ONLY THE EQUALITY IS SCOPED TO ONE OF THEM. The
 `[run.inputs]` table carries the integration inputs, the per-node ACP adapter inputs,
 the PER-ITEM POLICY inputs -- `review_fix_visit_cap`,
-`merge_on_review_cap_outcome` and `merge_hold` -- and the variant's own KIND
+`merge_on_review_cap_outcome` and `merge_hold` -- the implement stage's
+MECHANICAL RE-ENTRY inputs -- `implement_mechanical_targets` and
+`implement_mechanical_reentries` -- and the variant's own KIND
 DECLARATION. The ratified typed-workflow-inputs clause names the first three and
 draws the line between them exactly once: the token/rendered-input EQUALITY
 ranges over the integration inputs alone, because only those are projections of
@@ -32,7 +34,7 @@ payload to declare EVERY name in it, and the reserved workflow deliberately
 declares no kind, because its kind is stated by the contract and answered
 without reading a file. So the kind is classified, and NOT required.
 
-The scoping is checked rather than assumed: the four name sets must be pairwise
+The scoping is checked rather than assumed: the five name sets must be pairwise
 disjoint, and every input the payload declares must fall in one of them, so an
 input added tomorrow cannot be silently dropped out of every comparison by
 belonging to nothing.
@@ -51,6 +53,10 @@ from itertools import combinations
 # can reach and no test can exercise.
 from _seam_equivalence_scan import Occurrence
 from livespec_orchestrator_beads_fabro.commands._acp_node_adapters import NODE_INPUT_CANDIDATES
+from livespec_orchestrator_beads_fabro.commands._dispatcher_implement_mechanical import (
+    MECHANICAL_REENTRIES_INPUT,
+    MECHANICAL_TARGETS_INPUT,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_integration_projection import (
     CONTRACT_INPUT_NAMES,
 )
@@ -63,6 +69,7 @@ from livespec_orchestrator_beads_fabro.commands._workflow_variant_kind import (
 
 __all__: list[str] = [
     "ADAPTER_INPUT_NAMES",
+    "MECHANICAL_REENTRY_INPUT_NAMES",
     "POLICY_INPUT_NAMES",
     "SCHEMA_PROJECTABLE_INPUTS",
     "VARIANT_KIND_INPUT_NAMES",
@@ -96,6 +103,15 @@ POLICY_INPUT_NAMES: frozenset[str] = frozenset(
     {"review_fix_visit_cap", "merge_on_review_cap_outcome", "merge_hold"}
 )
 
+# The implement stage's MECHANICAL RE-ENTRY inputs (bd-ib-pyeiky), read off the
+# module that renders them. They project the repository's stage-wide
+# `dispatcher.implement` keys, which the Dispatcher writes into the payload graph
+# itself, so they are neither integration fields nor per-item policy and impose
+# no every-payload declaration rule.
+MECHANICAL_REENTRY_INPUT_NAMES: frozenset[str] = frozenset(
+    {MECHANICAL_TARGETS_INPUT, MECHANICAL_REENTRIES_INPUT}
+)
+
 # The variant's own KIND declaration, read off the module that reads it from
 # the payload rather than respelled here. That module is the one place that
 # decides which `[run.inputs]` name carries a variant's kind, and a second
@@ -106,9 +122,9 @@ VARIANT_KIND_INPUT_NAMES: frozenset[str] = frozenset({WORKFLOW_KIND_INPUT_NAME})
 
 
 def classified_input_names() -> frozenset[str]:
-    """Every name the four families cover, unioned AT CALL TIME.
+    """Every name the five families cover, unioned AT CALL TIME.
 
-    Read live rather than frozen into a module constant so the four families
+    Read live rather than frozen into a module constant so the five families
     stay the single source of the classification: a test that substitutes one
     family, and any future change that computes one of them, cannot leave a
     stale union behind for a second caller to read.
@@ -117,6 +133,7 @@ def classified_input_names() -> frozenset[str]:
         SCHEMA_PROJECTABLE_INPUTS
         | ADAPTER_INPUT_NAMES
         | POLICY_INPUT_NAMES
+        | MECHANICAL_REENTRY_INPUT_NAMES
         | VARIANT_KIND_INPUT_NAMES
     )
 
@@ -142,7 +159,7 @@ def referenced_integration_inputs(*, occurrences: Iterable[Occurrence]) -> froze
 def non_rendered_occurrences(*, occurrences: Iterable[Occurrence]) -> list[Occurrence]:
     """Every CLASSIFIED token sitting where the pinned engine would not expand it.
 
-    All four families, not just the integration one: the resolved-position rule
+    All five families, not just the integration one: the resolved-position rule
     is about what the ENGINE does with a position, and the engine has never
     known which family a name belongs to. A policy or adapter token in a typed
     attribute leaves the node with no value and reports nothing, which is the

@@ -70,6 +70,7 @@ def test_scenario285_routes_each_implement_commit_through_red_and_green_command_
     )
     assert graph.nodes["commit_green"]["script"] == (
         'bash "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-green.sh"'
+        " {{ inputs.implement_mechanical_reentries }} {{ inputs.implement_mechanical_targets }}"
     )
     assert "commit-runner.py" not in graph.nodes["red"].get("prompt", "")
     assert "commit-runner.py" not in graph.nodes["green"].get("prompt", "")

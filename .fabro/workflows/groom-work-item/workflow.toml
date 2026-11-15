@@ -73,6 +73,12 @@ pull_requests = "write"
 # means the graph can read `inputs.workflow_kind` if it ever needs to.
 workflow_kind = "groom"
 
+# The implement stage's mechanical re-entry inputs, declared because this variant
+# declares the bundle's whole input set (bd-ib-pyeiky). The defaults declare no
+# mechanical target.
+implement_mechanical_targets = ""
+implement_mechanical_reentries = 0
+
 # ONE ADAPTER INPUT PER ACP NODE, the reserved workflow's six names and no
 # others, so `dispatcher.acp_nodes` and `dispatcher.codex_models` move a node
 # here exactly as they move the same node in the bundle. The defaults below are

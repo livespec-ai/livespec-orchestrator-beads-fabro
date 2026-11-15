@@ -290,6 +290,16 @@ proof_verify_adapter = "ANTHROPIC_MODEL=claude-opus-4-8[1m] CLAUDE_CODE_EFFORT_L
 # as a visit guard of four: initial review visit plus three fix rounds.
 review_fix_visit_cap = 4
 
+# The implement stage's MECHANICAL commit-refusal budget (contracts.md
+# "A purely mechanical commit refusal has its own re-entry budget"; bd-ib-pyeiky).
+# The Dispatcher renders both into the payload graph from
+# dispatcher.implement.mechanical_targets (comma-separated here) and
+# dispatcher.implement.mechanical_reentries, and raises the green loop's
+# max_visits by the re-entries. These defaults, seen only by a bare `fabro run`,
+# declare no mechanical target, so every commit_green refusal is ordinary.
+implement_mechanical_targets = ""
+implement_mechanical_reentries = 0
+
 # Disabled by default. The Dispatcher renders this to `succeeded` only when the
 # effective merge_on_review_cap escape hatch is true for the item.
 merge_on_review_cap_outcome = "__merge_on_review_cap_disabled__"
