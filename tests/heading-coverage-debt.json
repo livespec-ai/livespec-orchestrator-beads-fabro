@@ -1297,6 +1297,13 @@
   {
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
+    "heading": "## Scenario 375 — The factory merge refuses a red head rollup, a protection-less target and a held item on every merge path, and merges a green rollup on a protected target",
+    "work_item": "bd-ib-x73d36",
+    "first_seen": "2026-11-15"
+  },
+  {
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
     "heading": "## Scenario 39 — Ratified lesson injects into dispatch briefs",
     "work_item": "bd-ib-heat",
     "first_seen": "2026-07-04"
