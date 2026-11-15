@@ -137,7 +137,12 @@ with these deliberate differences, each with its reason:
   the target's committed `credential_wrapper` through `launch-lib.sh` and strips the slots as the
   innermost hop, the order the live seat's `with-tenant-slotstrip.sh` (`961ccb6f782b`) uses; harness
   case 45 asserts, value-free, that the child holds the org pair, the judge slot's unnumbered token and
-  only the non-excluded slots, with a bare-wrapper control and an unreadable-argv refusal.
+  only the non-excluded slots, with a bare-wrapper control and an unreadable-argv refusal. Two
+  deliberate differences from that live copy: the excluded and judge slots are the `config.sh` values
+  `FLEET_LAUNCH_SLOTNARROW_EXCLUDED_SLOTS` and `FLEET_LAUNCH_SLOTNARROW_JUDGE_SLOT`, not a hand-edited
+  `env -u` list; and an unreadable `credential_wrapper` makes the committed wrapper REFUSE with exit
+  78, where the live copy falls back to the bare family wrapper, because a guessed chain under route C
+  is exactly the personal-App mint this fix exists to prevent.
 - **The gmktec idle gate measures whole-host `mpstat` idle** against `gmk-idle-floor` (live value
   0, fallback 3), exactly as the interim copy did. The spec's factory-class pressure measure is
   implemented by neither copy; that gap is recorded here rather than hidden.
