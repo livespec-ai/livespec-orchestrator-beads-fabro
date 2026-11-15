@@ -102,7 +102,8 @@ append_failing_section() {
     local runner=""
     runner="$(dirname "${BASH_SOURCE[0]}")/livespec-commit-runner.py"
     if [[ -f "$runner" ]]; then
-        python3 "$runner" refusal-section "$output"
+        python3 "$runner" refusal-section "$output" \
+            || printf 'failing files: unavailable (runner exited %s)\n' "$?"
     else
         printf 'failing files: unavailable, because the commit runner is not materialized beside this program\n'
     fi
