@@ -287,6 +287,7 @@ def test_workflow_payload_directory_encodes_dotted_work_item_ids_injectively() -
         "janitor_worktree_add_argv",
         "janitor_worktree_remove_argv",
         "parse_fleet_members",
+        "merge_queue_retry_argv",
         "pr_arm_argv",
         "pr_disarm_argv",
         "pr_update_branch_argv",
