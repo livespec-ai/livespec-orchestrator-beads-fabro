@@ -576,6 +576,8 @@ emitting the summary (and a sibling spot at the end of
   Dispatcher's env via the same with-livespec-env.sh 1Password channel
   that carries the OAuth token). This is the first point where the
   WHOLE wave is visible.
+
+The preceding 1Password store decision is historical. Parameter Store is the canonical source for these declared Honeycomb names, written first; callers use the unchanged wrapper interface throughout staged migration. This does not claim deployed SSM reader bindings or a converted wrapper.
 - **Latency/stability blast radius**: bounded and controllable. It
   runs after every item's verdict is final and after `ledger-close`,
   so it delays only process exit + summary. Time-boxed subprocess with
