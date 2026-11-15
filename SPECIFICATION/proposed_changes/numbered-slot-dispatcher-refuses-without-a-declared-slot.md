@@ -121,7 +121,7 @@ Feature: A fleet dispatcher's Claude credential is always a declared numbered sl
 Revise MUST add a `tests/heading-coverage.json` entry for this new heading in the same change (the `test` MAY be `"TODO"` with a reason naming the R01 implementation work), per this repository's revise co-edit discipline.
 
 
-## Proposal: Under the numbered-slots policy the host judgement does not run rather than fall back to the unnumbered credential
+## Proposal: Under the numbered-slots policy the host judgement selects a declared slot exactly as dispatch does, and does not run only when no declared slot is usable
 
 ### Target specification files
 
@@ -130,11 +130,11 @@ Revise MUST add a `tests/heading-coverage.json` entry for this new heading in th
 
 ### Summary
 
-The pre-admission and pre-dispatch Definition-of-Done judgements currently fall back to the unnumbered Claude credential, with a stderr line, when no pool slot qualifies or no numbered slot is injected. This proposal keeps that fallback only under the explicit legacy-independent policy. Under numbered-slots the judgement does not run, says so on stderr naming the reason, and is recorded and routed as any judgement that cannot be run. The Scenario 174 fallback outline is split to match.
+The pre-admission and pre-dispatch Definition-of-Done judgements currently fall back to the unnumbered Claude credential, with a stderr line, when no pool slot qualifies or no numbered slot is injected. This proposal keeps that fallback only under the explicit legacy-independent policy. Under numbered-slots the judgement selects its credential from the declared numbered slots by exactly the selection admission, the credential-usability probe and Worker credential projection use, so a tenant whose wrapper injects declared numbered slots keeps a working judge after it drops the unnumbered name. Only when no declared numbered slot is usable does the judgement not run, saying so on stderr and being recorded and routed as any judgement that cannot be run. The Scenario 174 outlines are updated to match.
 
 ### Motivation
 
-Plan epic overseer-iyfjbo (central credential service), coordinator-approved cross-repo change plan v4, Wave 1 entries R02 (SPECIFICATION/scenarios.md) and R10 (SPECIFICATION/contracts.md), filed as one propose-change because R01 (the fail-closed numbered-slot selector in commands/_dispatcher_factory_account_selector.py) implements whatever this revise ratifies. The applicability rule below is the normative proposal R01 carries for R02/R10. livespec core has ratified the fleet-secrets change these entries sit beside (livespec v248/v249, livespec#3252: Parameter Store is the single canonical source, /usr/local/bin/with-livespec-env.sh keeps its name and calling convention and changes backend only at each host's conversion, no dual-backend fallback). No host has converted. The dispatcher rule here is independent of any conversion and is not a deployment receipt. Two gates sit outside this specification and are not decided by it: the D03 bare-token consumer census (dolt-server still copies the unnumbered CLAUDE_CODE_OAUTH_TOKEN from the wrapper, so ratifying this does not authorize deleting that token anywhere), and R01's per-dispatcher slot census release gate, which must pass before any release or fleet pin promotion of the implementation. R10 asks that the host-judgement clause be revised to the same no-usable-numbered-slot rule as admission. R02 asks that the fallback scenarios be revised so that the governed numbered-slot fleet mode produces a named did-not-run rather than an unnumbered-token fallback, preserving the independent-adopter mode.
+Plan epic overseer-iyfjbo (central credential service), coordinator-approved cross-repo change plan v4, Wave 1 entries R02 (SPECIFICATION/scenarios.md) and R10 (SPECIFICATION/contracts.md), filed as one propose-change because R01 (the fail-closed numbered-slot selector in commands/_dispatcher_factory_account_selector.py) implements whatever this revise ratifies. The applicability rule below is the normative proposal R01 carries for R02/R10. livespec core has ratified the fleet-secrets change these entries sit beside (livespec v248/v249, livespec#3252: Parameter Store is the single canonical source, /usr/local/bin/with-livespec-env.sh keeps its name and calling convention and changes backend only at each host's conversion, no dual-backend fallback). No host has converted. The dispatcher rule here is independent of any conversion and is not a deployment receipt. Two gates sit outside this specification and are not decided by it: the D03 bare-token consumer census (dolt-server still copies the unnumbered CLAUDE_CODE_OAUTH_TOKEN from the wrapper, so ratifying this does not authorize deleting that token anywhere), and R01's per-dispatcher slot census release gate, which must pass before any release or fleet pin promotion of the implementation. R10 asks that the host-judgement clause be revised to the same no-usable-numbered-slot rule as admission. R02 asks that the fallback scenarios be revised so that the governed numbered-slot fleet mode produces a named did-not-run, rather than an unnumbered-token fallback, only when no declared slot is usable, preserving the independent-adopter mode. Coordinator grade of this proposal (fix 1): today the judge reads the bare CLAUDE_CODE_OAUTH_TOKEN, and tenant-fleet-credentials binds the bare name (hxi#178) precisely so the judge works; a did-not-run whenever the bare name is absent would turn every tenant judgement into did-not-run the day that tenant drops it. The judgement therefore selects a declared numbered slot exactly as a dispatch does.
 
 ### Proposed Changes
 
@@ -146,11 +146,30 @@ Replace
 
 with
 
-> it MUST authenticate with the Claude subscription credential the Dispatcher selects for a dispatch it would launch at that moment, which is the pool slot the Dispatcher's admission would choose for a dispatch at that moment under the "Admission filters candidates by projected Claude session headroom" paragraph. Under the `legacy-independent` policy of `dispatcher.claude_credential_policy`, when no pool slot qualifies or no numbered slot is injected, it MUST authenticate with the unnumbered credential, and when it does so it MUST say so on stderr, naming the reason. Under the `numbered-slots` policy, when no declared slot is injected or no pool slot qualifies, the judgement MUST NOT run its Claude model and MUST NOT authenticate with the unnumbered credential or with any undeclared numbered variable; it MUST say on stderr that it did not run, naming the reason, and it is then a judgement that cannot be run, recorded and routed exactly as this paragraph and the "Judged again before dispatch" paragraph record and route one. When the policy is absent or invalid, the judgement MUST NOT run, and its stderr line and did-not-run record MUST name the configuration defect. It MUST NOT read the account-selection process's selection to choose the credential.
+> it MUST authenticate with the Claude subscription credential the Dispatcher selects for a dispatch it would launch at that moment, which is the pool slot the Dispatcher's admission would choose for a dispatch at that moment under the "Admission filters candidates by projected Claude session headroom" paragraph. Under the `numbered-slots` policy of `dispatcher.claude_credential_policy`, the judgement MUST select its credential from the declared numbered slots by exactly the selection that admission, the credential-usability probe and Worker credential projection use: the same pool of declared, injected, non-empty slots, the same qualification and the same ranking. It MUST authenticate with the slot that selection chooses, and MUST NOT read the unnumbered `CLAUDE_CODE_OAUTH_TOKEN` or any undeclared numbered variable, whether or not either is present. Only when no declared numbered slot is usable, because no declared slot is injected non-empty or no pool slot qualifies, the judgement MUST NOT run its Claude model; it MUST say on stderr that it did not run, naming the reason, and it is then a judgement that cannot be run, recorded and routed exactly as this paragraph and the "Judged again before dispatch" paragraph record and route one. When the policy is absent or invalid, the judgement MUST NOT run, and its stderr line and did-not-run record MUST name the configuration defect. Under the `legacy-independent` policy, when no pool slot qualifies or no numbered slot is injected, it MUST authenticate with the unnumbered credential, and when it does so it MUST say so on stderr, naming the reason. It MUST NOT read the account-selection process's selection to choose the credential.
 
 The trailing sentence "The same rule governs the pre-dispatch judgement of the paragraph that follows." is unchanged.
 
 #### scenarios.md — Scenario 174
+
+Leave the Scenario Outline "The judgement authenticates with the account a dispatch would use" unchanged, and add after it:
+
+```gherkin
+  Scenario Outline: Under the numbered-slots policy the judgement selects a declared slot exactly as a dispatch does
+    Given dispatcher.claude_credential_policy declares mode numbered-slots with slots CLAUDE_CODE_OAUTH_TOKEN__A and CLAUDE_CODE_OAUTH_TOKEN__B
+    And both declared slots are injected non-empty and the pool's admission choice is CLAUDE_CODE_OAUTH_TOKEN__B
+    And the unnumbered Claude credential is <unnumbered state>
+    When the <phase> judgement runs its Claude model on the host
+    Then the judge is started with CLAUDE_CODE_OAUTH_TOKEN__B's credential
+    And the unnumbered Claude credential is not read
+
+    Examples:
+      | phase         | unnumbered state |
+      | pre-admission | present          |
+      | pre-dispatch  | present          |
+      | pre-admission | absent           |
+      | pre-dispatch  | absent           |
+```
 
 Replace the Scenario Outline "The judgement falls back to the unnumbered credential and says so" and its Examples with:
 
@@ -170,7 +189,7 @@ Replace the Scenario Outline "The judgement falls back to the unnumbered credent
       | pre-admission | no pool slot qualifies       |
       | pre-dispatch  | no pool slot qualifies       |
 
-  Scenario Outline: Under the numbered-slots policy the judgement does not run rather than fall back
+  Scenario Outline: Under the numbered-slots policy the judgement does not run only when no declared slot is usable
     Given dispatcher.claude_credential_policy declares mode numbered-slots
     And <selection state>
     And the unnumbered Claude credential is present in the environment
@@ -180,12 +199,11 @@ Replace the Scenario Outline "The judgement falls back to the unnumbered credent
     And the item records that the <phase> judgement did not run and why
 
     Examples:
-      | phase         | selection state              |
-      | pre-admission | no declared slot is injected |
-      | pre-dispatch  | no declared slot is injected |
-      | pre-admission | no pool slot qualifies       |
-      | pre-dispatch  | no pool slot qualifies       |
+      | phase         | selection state                        |
+      | pre-admission | no declared slot is injected non-empty |
+      | pre-dispatch  | no declared slot is injected non-empty |
+      | pre-admission | no declared pool slot qualifies        |
+      | pre-dispatch  | no declared pool slot qualifies        |
 ```
 
 Scenario 174's heading is unchanged, so this edit MUST NOT add or remove any `tests/heading-coverage.json` entry.
-
