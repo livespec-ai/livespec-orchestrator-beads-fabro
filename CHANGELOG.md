@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.332.2](https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/compare/v0.332.1...v0.332.2) (2026-11-15)
+
+
+### Bug Fixes
+
+* **docs:** cite the archived codex-yolo-sandbox plan where the hook, its test and the dogfooding guide point (bd-ib-r4xzme) ([bdce8bd](https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/commit/bdce8bd1f26ff93989b7936ae1f5cb3e69aa9633))
+
 ## [0.332.1](https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/compare/v0.332.0...v0.332.1) (2026-11-15)
 
 
