@@ -47,6 +47,14 @@ _MECHANICAL_AUTHORS = {
         name="thewoolleyman-factory-bot[bot]",
         email="283469463+thewoolleyman-factory-bot[bot]@users.noreply.github.com",
     ),
+    GitAuthor(
+        name="livespec-ai-factory-bot[bot]",
+        email="livespec-ai-factory-bot[bot]@users.noreply.github.com",
+    ),
+    GitAuthor(
+        name="livespec-ai-factory-bot[bot]",
+        email="356738410+livespec-ai-factory-bot[bot]@users.noreply.github.com",
+    ),
 }
 
 
