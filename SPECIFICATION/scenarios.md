@@ -12355,6 +12355,7 @@ Feature: The implement stage separates Red from Green and commits outside agent 
     Then commit_red makes the Red commit directly on the dispatch base
     And the Red commit holds the Red test file and no product file
     And the product change the checkpoint commits carried is still in the working tree
+    And that product change is not staged in the index
 
   Scenario: A seeded run's red turn that changes a product file is refused naming only its own change
     Given a run seeded from a preserved tree whose carried changes include a product file
@@ -15563,4 +15564,47 @@ Feature: repayment entry on an attributed descendant master run
     When the operator drives enter-repayment naming the run whose head is F
     Then it refuses with incident-repayment-master-ci-outstanding naming the fourth condition, that no earlier complete successful descendant run exists
     And the item's phase, generation and authority history are unchanged
+```
+
+## Scenario 375 — The factory merge refuses a red head rollup, a protection-less target and a held item on every merge path, and merges a green rollup on a protected target
+
+```gherkin
+Feature: the factory merge verifies the head rollup and honours every hold
+  As the operator of every repository the factory merges into
+  I want the factory to merge only an all-passing head on a protected target with no hold set
+  So that a red check or a merge hold never lands on a default branch and a refused merge never reports green
+
+  Scenario: A red head rollup on a protection-less target is refused and stays unmerged
+    Given a target branch whose protection and rulesets require no status checks
+    And a factory run whose pull request head carries one check run concluded success and two concluded failure
+    When the factory's merge step reaches the merge
+    Then it refuses with the named cause target-requires-no-checks and names the failed checks under head-rollup-not-green
+    And the pull request is open and unmerged, with no auto-merge request
+    And the dispatch outcome is blocked with blocked_reason needs-human, its exit code is non-zero, and it never reports green or a successful merge
+
+  Scenario: An item carrying merge-hold:on is refused at a direct merge
+    Given a protected target branch that requires a status check
+    And an item whose merge-hold label was set on after its dispatch rendered merge_hold false
+    And its pull request head rollup is all success
+    When the factory's merge step attempts a direct merge without an auto-merge request
+    Then it re-reads the item's hold labels from the ledger and refuses with the named cause merge-hold-active
+    And the pull request is open and unmerged
+    And the dispatch outcome is blocked with blocked_reason needs-human, it never reports green, and the item is not closed
+
+  Scenario: A green head rollup on a protected target merges
+    Given a protected target branch that requires a status check
+    And an item carrying no merge hold and no other merge-time hold is active
+    And its pull request head rollup is non-empty and every check run and commit status concluded success
+    When the factory's merge step reaches the merge
+    Then the pull request merges with the resolved merge method
+    And the item proceeds to acceptance as a successful merge
+
+  Scenario: A path-skipped job beside a green rollup merges
+    Given a protected target branch that requires a status check
+    And an item carrying no merge hold and no other merge-time hold is active
+    And its pull request head rollup holds check runs concluded success and one path-filtered job concluded skipped
+    When the factory's merge step reaches the merge
+    Then the skipped job counts as passing and the merge step does not refuse with head-rollup-not-green
+    And the pull request merges with the resolved merge method
+    And the item proceeds to acceptance as a successful merge
 ```
