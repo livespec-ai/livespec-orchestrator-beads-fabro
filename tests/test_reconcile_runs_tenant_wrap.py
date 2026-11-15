@@ -76,14 +76,23 @@ def _installed_tenant_wrap(*, tmp_path: Path) -> Path:
     return tenant_wrap
 
 
-def _run_pass(*, tmp_path: Path, livespec_jsonc: str) -> list[str]:
+def _invoke(
+    *, tmp_path: Path, livespec_jsonc: str | None
+) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    """Run the installed wrapper from a tenant repository; `None` writes no `.livespec.jsonc`.
+
+    The tenant directory may already exist, so a test can place something
+    other than a file at `.livespec.jsonc` first.
+    """
     tenant_wrap = _installed_tenant_wrap(tmp_path=tmp_path)
     repo = tmp_path / "tenant"
-    repo.mkdir()
-    _ = (repo / ".livespec.jsonc").write_text(livespec_jsonc, encoding="utf-8")
+    repo.mkdir(exist_ok=True)
+    if livespec_jsonc is not None:
+        _ = (repo / ".livespec.jsonc").write_text(livespec_jsonc, encoding="utf-8")
     pass_cmd = _executable(path=tmp_path / "pass.sh", body=_PASS)
     log = tmp_path / "log"
-    env = {k: v for k, v in os.environ.items() if k not in ("BEADS_DOLT_PASSWORD", "TW_REPO")}
+    ambient = ("BEADS_DOLT_PASSWORD", "TW_REPO", "TW_FAMILY_WRAPPER")
+    env = {k: v for k, v in os.environ.items() if k not in ambient}
     completed = subprocess.run(
         [str(tenant_wrap), "--", str(pass_cmd), "reconcile-runs", "--json"],
         cwd=repo,
@@ -92,8 +101,22 @@ def _run_pass(*, tmp_path: Path, livespec_jsonc: str) -> list[str]:
         check=False,
         env={**env, "TW_LOG": str(log)},
     )
+    return completed, repo, log
+
+
+def _run_pass(*, tmp_path: Path, livespec_jsonc: str | None) -> list[str]:
+    completed, _, log = _invoke(tmp_path=tmp_path, livespec_jsonc=livespec_jsonc)
     assert completed.returncode == 0, completed.stderr
     return log.read_text(encoding="utf-8").splitlines()
+
+
+def _assert_refused(*, tmp_path: Path, livespec_jsonc: str | None, cause: str) -> None:
+    """The pass exits 78, names the repository and the cause, and runs nothing."""
+    completed, repo, log = _invoke(tmp_path=tmp_path, livespec_jsonc=livespec_jsonc)
+    assert completed.returncode == 78, completed.stderr
+    assert cause in completed.stderr
+    assert str(repo) in completed.stderr
+    assert not log.exists()
 
 
 def test_a_repository_without_a_credential_wrapper_runs_under_the_family_wrapper(
@@ -138,6 +161,59 @@ def test_a_non_family_wrapper_nests_inside_the_family_wrapper_without_its_passwo
         "arg=reconcile-runs",
         "arg=--json",
     ]
+
+
+def test_a_repository_without_a_livespec_jsonc_runs_under_the_family_wrapper(
+    tmp_path: Path,
+) -> None:
+    lines = _run_pass(tmp_path=tmp_path, livespec_jsonc=None)
+
+    assert lines == ["family pw=unset", "pass pw=family", "arg=reconcile-runs", "arg=--json"]
+
+
+# The refusals below never fall back to the family wrapper: a bare family
+# wrapper mints the wrong GitHub App, which is the failure this wrapper prevents.
+def test_a_malformed_credential_wrapper_refuses_the_pass(tmp_path: Path) -> None:
+    _assert_refused(
+        tmp_path=tmp_path,
+        livespec_jsonc='{\n  "credential_wrapper": ["/bin/sh", \n}\n',
+        cause="credential-wrapper-unreadable",
+    )
+
+
+def test_an_empty_credential_wrapper_refuses_the_pass(tmp_path: Path) -> None:
+    _assert_refused(
+        tmp_path=tmp_path,
+        livespec_jsonc='{\n  "credential_wrapper": []\n}\n',
+        cause="credential-wrapper-unreadable",
+    )
+
+
+def test_a_credential_wrapper_that_is_not_an_argv_refuses_the_pass(tmp_path: Path) -> None:
+    _assert_refused(
+        tmp_path=tmp_path,
+        livespec_jsonc='{\n  "credential_wrapper": "/bin/sh -c x"\n}\n',
+        cause="credential-wrapper-unreadable",
+    )
+
+
+def test_an_unreadable_livespec_jsonc_refuses_the_pass(tmp_path: Path) -> None:
+    # A directory where the file belongs cannot be opened even by root, which a
+    # mode-000 file can be, so the test holds in a root CI container too.
+    (tmp_path / "tenant" / ".livespec.jsonc").mkdir(parents=True)
+
+    _assert_refused(tmp_path=tmp_path, livespec_jsonc=None, cause="credential-wrapper-unreadable")
+
+
+def test_a_credential_wrapper_that_is_not_executable_refuses_the_pass(tmp_path: Path) -> None:
+    missing = tmp_path / "absent" / "with-tenant-env.sh"
+    argv = json.dumps([str(missing), "--"])
+
+    _assert_refused(
+        tmp_path=tmp_path,
+        livespec_jsonc=f'{{\n  "credential_wrapper": {argv}\n}}\n',
+        cause="is not an executable file",
+    )
 
 
 def test_the_installer_removes_the_drop_in_the_committed_unit_supersedes(

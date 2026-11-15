@@ -56,9 +56,9 @@ def test_the_committed_exec_start_names_the_tenant_wrapper_and_the_reconcile_run
     family = [
         line
         for line in _TENANT_WRAP_SOURCE.read_text(encoding="utf-8").splitlines()
-        if line.startswith("FAMILY_WRAPPER=")
+        if line.startswith("family=")
     ]
-    assert family == [f"FAMILY_WRAPPER={_ENV_WRAPPER}"]
+    assert family == [f'family="${{TW_FAMILY_WRAPPER:-{_ENV_WRAPPER}}}"']
 
 
 def test_the_host_timer_surveys_only_the_live_factories() -> None:
@@ -175,7 +175,9 @@ def test_the_installer_renders_both_units_when_the_wrapper_resolves(tmp_path: Pa
     assert exec_start.startswith(f"ExecStart={tenant_wrap} -- ")
     # The installed tenant wrapper runs inside the family wrapper this host has.
     assert os.access(tenant_wrap, os.X_OK)
-    assert f"FAMILY_WRAPPER={wrapper}\n" in tenant_wrap.read_text(encoding="utf-8")
+    assert f'family="${{TW_FAMILY_WRAPPER:-{wrapper}}}"\n' in tenant_wrap.read_text(
+        encoding="utf-8"
+    )
     assert "reconcile-runs" in exec_start
     # Every placeholder is substituted: an unrendered token would make systemd
     # refuse the unit at load time, long after the operator has walked away.
