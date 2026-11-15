@@ -389,11 +389,24 @@ chmod 755 \"$runner\""
     // Green turn is re-entered through `green_incomplete_route`; the single-turn
     // incomplete-route and commit-settle nodes that the Scenario 285 split left
     // unreachable were removed (bd-ib-vvzd3v).
+    // NO `output_schema`, DELIBERATELY. The engine reads an agent turn's final
+    // message through the contract its `output_schema` declares. A JSON-Schema
+    // schema stores the parsed object ONLY as `output.structured` and
+    // `context.output.<node>`; it never writes `output.preferred_label`, the
+    // key every `preferred_label=` edge condition reads, and never applies a
+    // directive's `outcome`. With no schema the last JSON object carrying a
+    // routing field is a directive, so `{"preferred_next_label": ...}` selects
+    // its edge and `{"outcome": "failed", ...}` takes the amendment route, as
+    // on `review`, `proof_capture` and `proof_verify`. Measured on the v0.333.0
+    // canary (bd-ib-st4obs, run 01M7GDPBANKE14DXX4HE4TVZVD): with the schema
+    // every red turn's seeded-open-red label was parsed into `structured` and
+    // the run still fell through to `commit_red` three times.
+    // `tests/integration/test_agent_label_edges_route_under_the_engine_contract.py`
+    // guards every graph against the shape.
     red [
         label="Red: write one failing acceptance test"
         backend="acp"
         acp.command="{{ inputs.implement_adapter }}"
-        output_schema="{\"type\":\"object\",\"properties\":{\"definition_of_done_complete\":{\"type\":\"boolean\"},\"preferred_next_label\":{\"type\":\"string\"}}}"
         timeout="1800s"
         max_retries=1
         goal_gate=true
@@ -419,9 +432,13 @@ chmod 755 \"$runner\""
     // proof_capture found the feature absent and routed to `fix` — which then
     // had to build the whole feature in one turn and died at its ceiling.
     //
-    // WHY THE FINAL REPLY AND THE FILE BOTH MATTER. Petri validates the final
-    // reply against `implement`'s output schema and exposes its parsed object
-    // to this command through stdin. The prompt also directs the turn to write
+    // WHY THE FINAL REPLY AND THE FILE BOTH MATTER. The engine records the
+    // green turn's final reply as `context.response.green`, and this command
+    // reads that text through stdin (the field is read with whitespace deleted,
+    // so a compact object glued to prose still counts). It is the recorded
+    // TEXT, not a schema-parsed object: `green` declares no `output_schema`,
+    // because a JSON-Schema contract would stop its labels and its failed
+    // ending from routing (see the comment above `red`). The prompt also directs the turn to write
     // the same field at `$GIT_DIR/livespec-implement-completion` as its last
     // action; the gate reads that record whenever the reply carries no field
     // (empty, prose, or `{}`), and a later node can read it from this clone.
@@ -461,7 +478,7 @@ chmod 755 \"$runner\""
         timeout="1800s"
         max_visits=4
         output_schema="routing"
-        stdin_source="context.output.green"
+        stdin_source="context.response.green"
         script="record=$(git rev-parse --git-path livespec-implement-completion); cause_path=$(git rev-parse --git-path livespec-stage-cause); response=$(cat); completion=$response; rm -f \"$cause_path\"; livespec_partial_progress() { printf 'stage: %s\\ncause: %s\\n' implement \"$1\" > \"$cause_path\"; printf '%s\\n' \"$1\" >&2; }; compact=$(printf %s \"$completion\" | tr -d ' \\t\\r\\n'); if ! printf %s \"$compact\" | grep -qF '\"definition_of_done_complete\":'; then completion=$(cat \"$record\" 2>/dev/null || true); compact=$(printf %s \"$completion\" | tr -d ' \\t\\r\\n'); fi; if test -z \"$compact\" || ! printf %s \"$compact\" | grep -qF '\"definition_of_done_complete\":'; then livespec_partial_progress 'LIVESPEC_IMPLEMENT_PARTIAL_PROGRESS: the implement turn stated no completion field, so it never said whether the work-item Definition of Done is complete on the committed branch; an unstated completion is read as partial progress rather than as a success, so this run publishes and proves nothing'; printf '%s\\n' '{\"preferred_next_label\":\"incomplete\"}'; exit 0; fi; if printf %s \"$compact\" | grep -qF '\"definition_of_done_complete\":true'; then echo 'LIVESPEC_IMPLEMENT_COMPLETE: the implement turn completion field states the work-item Definition of Done is complete on the committed branch, so the implement stage succeeded and the run proceeds to implementation_diff' >&2; printf '%s\\n' '{\"preferred_next_label\":\"complete\"}'; exit 0; fi; livespec_partial_progress \"LIVESPEC_IMPLEMENT_PARTIAL_PROGRESS: the implement turn completion field does not state the work-item Definition of Done complete on the committed branch, so the implement stage failed rather than publishing and proving partial progress. The recorded field was: $(printf %s \"$completion\" | head -c 500 | tr '\\n' ' ')\"; printf '%s\\n' '{\"preferred_next_label\":\"incomplete\"}'; exit 0"
     ]
 
@@ -495,11 +512,14 @@ chmod 755 \"$runner\""
         script="counter=$(git rev-parse --git-path livespec-red-admission-count); handoff=$(git rev-parse --git-path livespec-implement-handoff.md); cause=$(git rev-parse --git-path livespec-stage-cause); count=$(cat \"$counter\" 2>/dev/null || echo 0); if test \"$count\" -ge 3 2>/dev/null; then section=$(awk '/^## commit_red/{text=$0 RS; seen=1; next} seen && /^## /{seen=0} seen{ text=text $0 RS } END{printf \"%s\", text}' \"$handoff\" 2>/dev/null | tail -c 2000 | tr '\\n' ' '); message=\"LIVESPEC_IMPLEMENT_RED_BOUND_EXHAUSTED: red admission bound exhausted; latest commit_red handoff section: ${section:-absent, so its recorded exit status and failed targets are unavailable}\"; printf 'stage: %s\\ncause: %s\\n' red_admission \"$message\" > \"$cause\"; printf '%s\\n' \"$message\" >&2; exit 1; fi; echo $((count + 1)) > \"$counter\""
     ]
 
+    // No `output_schema`, for the reason given above `red`: its test-wrong label
+    // and its amendment ending route only through the directive contract. The
+    // completion field is read by `implement_completion` from the turn's
+    // recorded text (`context.response.green`) and from the record file.
     green [
         label="Green: implement against the Red handoff"
         backend="acp"
         acp.command="{{ inputs.implement_adapter }}"
-        output_schema="{\"type\":\"object\",\"properties\":{\"definition_of_done_complete\":{\"type\":\"boolean\"},\"preferred_next_label\":{\"type\":\"string\"}}}"
         timeout="1800s"
         max_retries=1
         max_visits=4
@@ -536,6 +556,63 @@ chmod 755 \"$runner\""
         timeout="1800s"
         max_visits=4
         script="counter=$(git rev-parse --git-path livespec-green-admission-count); handoff=$(git rev-parse --git-path livespec-implement-handoff.md); cause=$(git rev-parse --git-path livespec-stage-cause); grant=$(git rev-parse --git-path livespec-green-mechanical-reentry); mspent=$(cat \"$(git rev-parse --git-path livespec-green-mechanical-reentries)\" 2>/dev/null || echo 0); mbudget=$(cat \"$(git rev-parse --git-path livespec-green-mechanical-budget)\" 2>/dev/null || echo 0); if test -s \"$grant\"; then rm -f \"$grant\"; echo \"LIVESPEC_GREEN_MECHANICAL_REENTER: commit_green was refused naming only declared mechanical targets; re-entering green on a mechanical re-entry ($mspent of $mbudget spent) without spending its ordinary re-entry\" >&2; exit 0; fi; count=$(cat \"$counter\" 2>/dev/null || echo 0); if test \"$count\" -ge 3 2>/dev/null; then if test \"$mspent\" -ge \"$mbudget\" 2>/dev/null; then budgets=\"both the mechanical re-entry budget ($mspent of $mbudget spent) and the ordinary re-entry budget (2 of 2 spent) are exhausted\"; else budgets=\"the ordinary re-entry budget (2 of 2 spent) is exhausted and the refusal could not take a mechanical re-entry ($mspent of $mbudget spent)\"; fi; section=$(awk '/^## commit_green/{text=$0 RS; seen=1; next} seen && /^## /{seen=0} seen{ text=text $0 RS } END{printf \"%s\", text}' \"$handoff\" 2>/dev/null | tail -c 2000 | tr '\\n' ' '); message=\"LIVESPEC_IMPLEMENT_GREEN_BOUND_EXHAUSTED: green admission bound exhausted: $budgets; latest commit_green handoff section: ${section:-absent, so its recorded exit status and failed targets are unavailable}\"; printf 'stage: %s\\ncause: %s\\n' green_admission \"$message\" > \"$cause\"; printf '%s\\n' \"$message\" >&2; exit 1; fi; echo $((count + 1)) > \"$counter\""
+    ]
+
+    // THE NEEDS-HUMAN LABEL. The red and green prompts end a human decision
+    // with `{"outcome": "failed", "failure_reason": ...}`, which the amendment
+    // routes read. Measured on the v0.333.0 canary (bd-ib-m5cpnl, run
+    // 01M7GDVE6VKD, red@2 and red@3): a Codex turn asked for the human with
+    // `{"preferred_next_label": "needs-human"}` instead. No red edge matched
+    // that label, so the request fell through the unconditional edge into
+    // `commit_red`, which refused a Red with no test file, and the stage spent
+    // its bound re-entering red. These two nodes give the label a route: the
+    // turn's recorded final message becomes the needs-human cause and the run
+    // rests at `needs_human`, which is what the turn asked for. They always
+    // exit 1; the unconditional success edge exists only so Fabro has a
+    // fallthrough for every node.
+    red_needs_human_route [
+        label="Red asked for a human: rest the run with its final message as the question"
+        shape=parallelogram
+        timeout="1800s"
+        stdin_source="context.response.red"
+        script="cause_path=$(git rev-parse --git-path livespec-stage-cause) || exit $?; response=$(cat); message=\"LIVESPEC_RED_NEEDS_HUMAN_LABEL: the red turn ended with the needs-human label, asking for a human decision rather than writing a Red test; its final message: $(printf %s \"$response\" | tail -c 2000 | tr '\\n' ' ')\"; printf 'stage: %s\\ncause: %s\\n' implement \"$message\" > \"$cause_path\"; printf '%s\\n' \"$message\" >&2; exit 1"
+    ]
+
+    green_needs_human_route [
+        label="Green asked for a human: rest the run with its final message as the question"
+        shape=parallelogram
+        timeout="1800s"
+        stdin_source="context.response.green"
+        script="cause_path=$(git rev-parse --git-path livespec-stage-cause) || exit $?; response=$(cat); message=\"LIVESPEC_GREEN_NEEDS_HUMAN_LABEL: the green turn ended with the needs-human label, asking for a human decision rather than completing its Green; its final message: $(printf %s \"$response\" | tail -c 2000 | tr '\\n' ' ')\"; printf 'stage: %s\\ncause: %s\\n' implement \"$message\" > \"$cause_path\"; printf '%s\\n' \"$message\" >&2; exit 1"
+    ]
+
+    // THE UNKNOWN LABEL. Measured on the same canary (bd-ib-eqtyyr, run
+    // 01M7GE2A69NN, red@2): a turn ended with `{"preferred_next_label":
+    // "publish_draft"}`, a label no prompt invites and no edge carries, and fell
+    // through the unconditional edge into `commit_red`. The catch-all edges on
+    // `red` and `green` (`preferred_label && preferred_label != <each routed
+    // label>`) send every label that is not one of the node's routed labels
+    // here, so an invented label is logged and refused rather than read as the
+    // ordinary ending; the unconditional edge is reached only by a turn that set
+    // no label at all. The red route always re-enters Red through its admission
+    // bound with a handoff section naming the label and the endings this graph
+    // routes. The green route grades a turn that stated its completion field
+    // (the label was noise on an ordinary ending) and otherwise re-enters Green
+    // the same way. The guard test pins the exclusion list to the routed labels.
+    red_unknown_label_route [
+        label="Red ended with a label this graph does not route: refuse it and re-enter Red"
+        shape=parallelogram
+        timeout="1800s"
+        stdin_source="context.response.red"
+        script="handoff=$(git rev-parse --git-path livespec-implement-handoff.md) || exit $?; response=$(cat); label=$(printf %s \"$response\" | grep -o '\"preferred_next_label\" *: *\"[^\"]*\"' | tail -n 1 | sed 's/.*: *\"//; s/\"$//'); message=\"LIVESPEC_RED_UNKNOWN_LABEL: the red turn ended with preferred_next_label '$label', which no edge of this graph routes; the Red stage routes only seeded-open-red, already-satisfied and needs-human, and an ordinary Red ends with its handoff section and no label; re-entering red\"; printf '\\n## red-label-refused\\n\\n%s\\n' \"$message\" >> \"$handoff\"; printf '%s\\n' \"$message\" >&2; exit 1"
+    ]
+
+    green_unknown_label_route [
+        label="Green ended with a label this graph does not route: grade a stated completion, else re-enter Green"
+        shape=parallelogram
+        timeout="1800s"
+        stdin_source="context.response.green"
+        script="handoff=$(git rev-parse --git-path livespec-implement-handoff.md) || exit $?; response=$(cat); label=$(printf %s \"$response\" | grep -o '\"preferred_next_label\" *: *\"[^\"]*\"' | tail -n 1 | sed 's/.*: *\"//; s/\"$//'); if printf %s \"$response\" | tr -d ' \\t\\r\\n' | grep -qF '\"definition_of_done_complete\":'; then echo \"LIVESPEC_GREEN_UNKNOWN_LABEL_GRADED: the green turn ended with preferred_next_label '$label', which no edge of this graph routes, and stated its completion field, so the completion gate grades it as an ordinary Green ending\" >&2; exit 0; fi; message=\"LIVESPEC_GREEN_UNKNOWN_LABEL: the green turn ended with preferred_next_label '$label', which no edge of this graph routes, and stated no completion field; the Green stage routes only test-wrong and needs-human, and an ordinary Green ends with its definition_of_done_complete field; re-entering green\"; printf '\\n## green-label-refused\\n\\n%s\\n' \"$message\" >> \"$handoff\"; printf '%s\\n' \"$message\" >&2; exit 1"
     ]
 
     already_satisfied [
@@ -2542,14 +2619,26 @@ script="cut_root=$(printenv LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT || true); if te
     red -> implement_amendment_route [label="Definition-of-Done amendment", condition="outcome=failed"]
     red -> already_satisfied [label="already satisfied", condition="preferred_label=already-satisfied"]
     red -> green_admission [label="seeded open Red", condition="preferred_label=seeded-open-red"]
+    red -> red_needs_human_route [label="needs-human label", condition="preferred_label=needs-human"]
+    red -> red_unknown_label_route [label="unrouted label", condition="preferred_label && preferred_label != seeded-open-red && preferred_label != already-satisfied && preferred_label != needs-human"]
     red -> commit_red
+    red_unknown_label_route -> red_admission [label="label refused", condition="outcome=failed"]
+    red_unknown_label_route -> red_admission
+    red_needs_human_route -> needs_human [label="red asked for a human", condition="outcome=failed"]
+    red_needs_human_route -> red_admission
     commit_red -> red_admission [label="refused", condition="outcome=failed"]
     commit_red -> green_admission
     green_admission -> needs_human [label="green bound exhausted", condition="outcome=failed"]
     green_admission -> green
     green -> test_wrong_reset [label="test wrong", condition="preferred_label=test-wrong"]
+    green -> green_needs_human_route [label="needs-human label", condition="preferred_label=needs-human"]
+    green -> green_unknown_label_route [label="unrouted label", condition="preferred_label && preferred_label != test-wrong && preferred_label != needs-human"]
     green -> green_amendment_route [label="Blocked", condition="outcome=failed"]
     green -> implement_completion
+    green_unknown_label_route -> green_admission [label="label refused", condition="outcome=failed"]
+    green_unknown_label_route -> implement_completion
+    green_needs_human_route -> needs_human [label="green asked for a human", condition="outcome=failed"]
+    green_needs_human_route -> green_admission
     test_wrong_reset -> needs_human [label="test-wrong bound exhausted", condition="outcome=failed"]
     test_wrong_reset -> red_admission
     commit_green -> green_admission [label="refused", condition="outcome=failed"]

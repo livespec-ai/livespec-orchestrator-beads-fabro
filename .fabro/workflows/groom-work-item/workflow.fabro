@@ -533,6 +533,7 @@ digraph GroomWorkItem {
     // carrying the plan. The Dispatcher discriminates on the payload, and a
     // plan it cannot parse is journaled as a refusal with the item left where
     // the ordinary needs-human escalation rests it.
+    pr -> needs_human [label="done", condition="preferred_label=done"]
     pr -> needs_human [label="Plan published; the Dispatcher files it host-side"]
 
     // `needs_human` exits non-zero under its `on_failure="exit"` policy, so

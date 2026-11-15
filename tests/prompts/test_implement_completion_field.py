@@ -193,10 +193,11 @@ def test_the_completion_gate_reads_the_green_turns_output() -> None:
     assert not isinstance(graph, str), graph
 
     assert "implement" not in graph.nodes
-    assert graph.nodes[_GATE_NODE]["stdin_source"] == "context.output.green"
-    schema = graph.nodes[_GREEN_NODE]["output_schema"]
-    assert '"definition_of_done_complete"' in schema
-    assert '"preferred_next_label"' in schema
+    assert graph.nodes[_GATE_NODE]["stdin_source"] == "context.response.green"
+    # A JSON-Schema `output_schema` would stop the green turn's labels and its
+    # failed ending from routing (the engine never writes `preferred_label`
+    # from a schema contract), so the gate reads the recorded turn text instead.
+    assert "output_schema" not in graph.nodes[_GREEN_NODE]
 
 
 def test_green_endings_route_through_the_completion_gate() -> None:

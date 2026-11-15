@@ -32,8 +32,12 @@ Before Step 1, inspect
 1. Decide whether the Definition of Done already holds on the dispatch base.
    If it does, do not write or run a test. Append a `## already-satisfied`
    section to the handoff file with a declared `already-satisfied` outcome and
-   the evidence for it, then end the turn with that declared
-   `already-satisfied` outcome.
+   the evidence for it, then end the turn with exactly:
+
+       {"preferred_next_label": "already-satisfied"}
+
+   The graph routes that label to `already_satisfied`, which checks the tree
+   still equals the dispatch base.
    When a preserved seed carries changes that meet the Definition of Done but
    the dispatch base does not, this is not already satisfied: continue with
    the failing-test path so the carried changes reach Green and publication.
@@ -114,6 +118,20 @@ recorded question, and the human edits the ledger and releases it with
 wrong Definition of Done, whichever stage notices it — the `dod_gate`
 node that graded the section before you ran takes exactly the same
 route.
+
+## The labels this stage can route
+
+The graph routes exactly the `preferred_next_label` values this prompt names.
+Any other label is refused: the run logs the label, appends a refusal section to
+the handoff file and re-enters this stage through its admission bound, so an
+invented label costs a lap. An ordinary ending carries no label at all. The
+human decision is the failed ending above; if you end instead with
+
+    {"preferred_next_label": "needs-human"}
+
+the run reads it as the same request and rests the item at needs-human with
+your final message as the recorded question, so write the reason for the human
+in that message.
 
 ## Ending the turn — leave nothing running in the background
 

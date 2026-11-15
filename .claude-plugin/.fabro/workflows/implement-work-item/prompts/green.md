@@ -50,7 +50,12 @@ named targets and run the gate preview below before ending.
 
 If the Red test is wrong, do not change it. Append, never rewrite an earlier
 section, a `## test-wrong` section with a declared `test-wrong` outcome and its reason,
-then end the turn with that declared `test-wrong` outcome and its reason.
+then end the turn with exactly:
+
+    {"preferred_next_label": "test-wrong"}
+
+The graph routes that label to `test_wrong_reset`, which returns the lap to the
+dispatch base and re-enters Red.
 
 The handoff is append-only: append your new section to the resolved file and
 never rewrite an earlier section.
@@ -123,6 +128,20 @@ completion gate reads it:
 
 A declared `test-wrong` outcome is not a completion: end that turn with
 the `test-wrong` outcome as directed above, not with this field.
+
+## The labels this stage can route
+
+The graph routes exactly the `preferred_next_label` values this prompt names.
+Any other label is refused: the run logs the label, appends a refusal section to
+the handoff file and re-enters this stage through its admission bound, so an
+invented label costs a lap. An ordinary ending carries no label at all. The
+human decision is the failed ending above; if you end instead with
+
+    {"preferred_next_label": "needs-human"}
+
+the run reads it as the same request and rests the item at needs-human with
+your final message as the recorded question, so write the reason for the human
+in that message.
 
 ## Ending the turn — leave nothing running in the background
 

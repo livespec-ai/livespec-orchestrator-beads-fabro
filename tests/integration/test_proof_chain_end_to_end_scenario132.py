@@ -513,6 +513,10 @@ def _compare(*, operator: str, left: str, right: str) -> bool:
 
 
 def _clause_holds(*, clause: str, state: _State, inputs: dict[str, str]) -> bool:
+    # A bare key is Fabro's truthiness test (`condition.rs`): the red and green
+    # catch-all edges read `preferred_label && preferred_label != <label>...`.
+    if clause.strip() == _PREFERRED_LABEL_TERM:
+        return _resolve(term=clause, state=state, inputs=inputs) != ""
     for operator in _OPERATORS:
         left, separator, right = clause.partition(operator)
         if separator == "":
