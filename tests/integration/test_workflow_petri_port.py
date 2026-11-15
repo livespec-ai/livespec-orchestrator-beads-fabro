@@ -171,6 +171,16 @@ _RED_GREEN_SPLIT_ADDED = {
     "green_amendment_route",
     "green_incomplete_route",
 }
+# The label routes (work-item bd-ib-crvt34): a needs-human label rests the run,
+# and every label the node does not route is refused back through the stage's
+# admission bound, which is a cycle the admission's own `max_visits` already
+# bounds, so the routes close no new budget of their own.
+_LABEL_ROUTES_ADDED = {
+    "red_needs_human_route",
+    "red_unknown_label_route",
+    "green_needs_human_route",
+    "green_unknown_label_route",
+}
 # The `dod_gate` post-turn mutation guard (work-item bd-ib-al54tl), kept as its
 # own constant for the reason every set above gives. It sits on `dod_gate`'s
 # single fallthrough, closes no cycle and is reached once, so it moves no other
@@ -780,6 +790,7 @@ def test_the_ported_graph_derives_the_same_execution_budget_as_the_pre_port_one(
         | _RECAPTURE_ADDED
         | _IMPLEMENT_AMENDMENT_ROUTE_ADDED
         | _RED_GREEN_SPLIT_ADDED
+        | _LABEL_ROUTES_ADDED
         | _COMMIT_SETTLE_ADDED
         | _JANITOR_ADMISSION_ADDED
         | _JANITOR_REFRESH_ROUTE_ADDED
@@ -814,6 +825,7 @@ def test_the_ported_graph_derives_the_same_execution_budget_as_the_pre_port_one(
         | _HOOK_ROUTE_LOOP
         | _IMPLEMENT_AMENDMENT_ROUTE_LOOP
         | _RED_GREEN_SPLIT_ADDED
+        | _LABEL_ROUTES_ADDED
         | _COMMIT_SETTLE_ADDED
         | _JANITOR_ADMISSION_ADDED
         | _JANITOR_REFRESH_ROUTE_ADDED
