@@ -3,9 +3,12 @@
 #
 # This stopgap's first-class replacements are the livespec console application
 # and the committed launch-loop tool bd-ib-jr6w7v.  It gates only WHEN to invoke
-# `resume --item`; the Dispatcher still owns resume admission and execution.
+# `resume --item`; the Dispatcher still owns resume admission and execution. The
+# resume itself is started through resume-repo.sh, beside this file.
 #
 # Usage: resume-capped.sh <item-id>
+#        resume-capped.sh <ticket-number> <repo-path> <item-id>   (the seat's three-argument form)
+# Environment (all optional): REPO_OVERRIDE=<path>, TICKET_NS=<ns>, WRAPPER=<path>, as dispatch-dual.sh.
 set -u
 
 FLEET_LAUNCH_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -16,21 +19,34 @@ FLEET_LAUNCH_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 LAUNCHER_ARGS=("$@")
 SELF=$FLEET_LAUNCH_DIR/$(basename "${BASH_SOURCE[0]}")
-ITEM=${1:?usage: resume-capped.sh <item-id>}
+if [ "$#" -eq 3 ]; then
+  TICKET_NS=$1; REPO_OVERRIDE=$2; ITEM=$3
+else
+  ITEM=${1:?usage: resume-capped.sh <item-id> | resume-capped.sh <ticket-number> <repo-path> <item-id>}
+fi
 REPO=${REPO_OVERRIDE:-$FLEET_LAUNCH_ORCH_REPO}
 REPO_NAME=$(basename "$REPO")
 REPO_HOLD_FILE="$FLEET_LAUNCH_REPO_HOLD_DIR/hold-repo-$REPO_NAME"
 SEAT=$FLEET_LAUNCH_SEAT
-# The gmktec factory hold file: while it exists no launch goes onto a gmktec factory instance. The path
-# is assigned here, in the launcher, from its host value in config.sh, and checked before every launch.
+# The gmktec factory hold file: while it exists no launch goes onto a gmktec factory instance, except
+# one the freeze allowlist or priority 1 releases. The path is assigned here, in the launcher, from its
+# host value in config.sh, and checked before every launch.
 GMK_HOLD_FILE=$FLEET_LAUNCH_HOLD_FILE
 OUT=$FLEET_LAUNCH_STATE_DIR
-FABRO=$FLEET_LAUNCH_FABRO
+FABRO_BOARD=$FLEET_LAUNCH_FABRO_BOARD
 GMK=$FLEET_LAUNCH_GMK_SERVER
+GMK_CANDIDATE=$FLEET_LAUNCH_GMK_CANDIDATE_SERVER
 HL=$FLEET_LAUNCH_HL_SERVER
 INFLIGHT=$FLEET_LAUNCH_INFLIGHT_DIR
 QUEUE=$FLEET_LAUNCH_GMK_QUEUE_DIR
 LOCK=$FLEET_LAUNCH_GMK_LOCK_DIR
+# shellcheck source=fleet-launch/launch-lib.sh
+. "$FLEET_LAUNCH_DIR/launch-lib.sh"
+# The queue scan and the allowlist consume in launch-lib.sh read these.
+# shellcheck disable=SC2034
+FIFO_CLASS=gmk
+# shellcheck disable=SC2034
+build=""
 deadline=$(( $(date +%s) + FLEET_LAUNCH_MAX_WAIT_S ))
 wait_deadline=$(( SECONDS + FLEET_LAUNCH_MAX_WAIT_S ))
 ticket=""
@@ -46,6 +62,7 @@ terminal_written=0
 exit_cause=""
 gmk_live=U
 hl_live=U
+candidate_live=U
 markers=U
 fleet=U
 
@@ -86,9 +103,14 @@ reexec_on_script_change() {
 
 drop_ticket() { [ -n "$ticket" ] && rm -f "$ticket"; ticket=""; }
 yield_ticket() {
-  [ -n "$ticket" ] && [ -f "$ticket" ] && ! grep -q '^held=' "$ticket" && echo "held=$1" >> "$ticket"
+  [ -n "$ticket" ] && [ -f "$ticket" ] && ! grep -q '^held=' "$ticket" && { echo "held=$1" >> "$ticket"; touch "$QUEUE" 2>/dev/null; }
 }
-restore_ticket() { [ -n "$ticket" ] && [ -f "$ticket" ] && sed -i '/^held=/d' "$ticket"; }
+restore_ticket() {
+  [ -n "$ticket" ] && [ -f "$ticket" ] && grep -q '^held=' "$ticket" && { sed -i '/^held=/d' "$ticket"; touch "$QUEUE" 2>/dev/null; }
+}
+log_canary_hold() {
+  echo "$(date -u +%FT%TZ) canary repository hold present ($CANARY_HOLD_FILE): $(canary_hold_text): yield FIFO head"
+}
 repository_hold_applies() {
   local raw compact
   HOLD_KINDS=all
@@ -117,13 +139,9 @@ release_lock() {
   fi
   lock=""
 }
-installed_build() {
-  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print([e["version"] for e in d["plugins"][sys.argv[2]] if e.get("projectPath")==sys.argv[3]][0])' \
-    "$FLEET_LAUNCH_PLUGIN_REGISTRY" "$FLEET_LAUNCH_PLUGIN_KEY" "$REPO" 2>/dev/null
-}
 item_status() {
   local out
-  out=$(cd "$REPO" && "${WRAPPER:-$FLEET_LAUNCH_DEFAULT_WRAPPER}" -- python3 "$FLEET_LAUNCH_DIR/ledger-item.py" status "$plugin" "$REPO" "$ITEM" 2>/dev/null) || return 1
+  out=$(cd "$REPO" && wrap -- python3 "$FLEET_LAUNCH_DIR/ledger-item.py" status "$plugin" "$REPO" "$ITEM" 2>/dev/null) || return 1
   out=$(printf '%s\n' "$out" | sed -n 's/^LEDGER-STATUS //p' | tail -n 1)
   [ -n "$out" ] && printf '%s' "$out"
 }
@@ -140,7 +158,7 @@ report_dropped_ticket() {
   status=$(item_status) || status=unreadable
   [ "$status" = ready ] || return 0
   body="Fleet launcher $SEAT exited for $ITEM before its resume started: ticket ${ticket_number:-none} was dropped and not re-taken (cause: $1). This exit was not a run ending, and the item read $status. Remedy: launch the resume again."
-  (cd "$REPO" && "${WRAPPER:-$FLEET_LAUNCH_DEFAULT_WRAPPER}" -- python3 "$FLEET_LAUNCH_DIR/ledger-item.py" comment "$plugin" "$REPO" "$ITEM" "$body") >/dev/null 2>&1 \
+  (cd "$REPO" && wrap -- python3 "$FLEET_LAUNCH_DIR/ledger-item.py" comment "$plugin" "$REPO" "$ITEM" "$body") >/dev/null 2>&1 \
     || echo "$(date -u +%FT%TZ) ledger comment for $ITEM failed: the dropped ticket ${ticket_number:-none} was not recorded"
 }
 # cleanup: every exit. The terminal line is written before the ticket file is removed.
@@ -170,10 +188,15 @@ on_signal() { exit_cause="signal $1 (this exit was not a run ending)"; exit "$2"
 trap 'on_signal INT 130' INT
 trap 'on_signal HUP 129' HUP
 
-read_fleet_cap() {
-  FLEET_CAP=$(tr -dc 0-9 < "$FLEET_LAUNCH_FLEET_CAP_FILE" 2>/dev/null)
-  FLEET_CAP=${FLEET_CAP:-0}
-}
+# The tenant credential wrapper is resolved once: a target whose committed credential_wrapper
+# cannot be read starts no resume.
+if ! resolve_tenant_wrapper; then
+  write_terminal credential-wrapper-unreadable
+  echo "$(date -u +%FT%TZ) the credential_wrapper of $REPO/.livespec.jsonc cannot be read: no resume"
+  report_dropped_ticket credential-wrapper-unreadable
+  exit 75
+fi
+
 rows_count() { if [ "$1" = U ]; then echo U; else printf '%s' "$1" | grep -c .; fi; }
 # Snapshot the live in-flight markers as "<item>" lines, or U when the
 # directory cannot be read.  Taken BEFORE the boards are read: a launcher drops
@@ -190,6 +213,8 @@ marker_snapshot() {
     [ -r "$f" ] || { echo U; return; }
     pid=$(grep -oE 'pid=[0-9]+' "$f" | head -1 | cut -d= -f2)
     item=$(grep -oE 'item=[^ ]+' "$f" | head -1 | cut -d= -f2)
+    # The arm64 lane runs on its own budget and is outside the shared fleet sum.
+    grep -q 'factory=homelab-worker-arm64' "$f" 2>/dev/null && continue
     if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then continue; fi
     items="$items$item
 "
@@ -211,40 +236,24 @@ EOF_SNAPSHOT
 }
 # read_boards [direct]: the boards come from the shared snapshot (board-snapshot.sh) unless "direct" asks for the
 # factory itself, which is how the binding count under the mutex reads them.
+# The fleet is the gmktec, candidate and mi-homelab boards plus launches not yet listed; the arm64
+# lane is outside that sum.
 read_boards() {
-  local gmk_rows hl_rows snapshot reader=board_rows
+  local gmk_rows hl_rows candidate_rows snapshot reader=board_rows
   [ "${1:-}" = direct ] && reader=board_rows_direct
   snapshot=$(marker_snapshot)
-  gmk_rows=$("$reader" "$FABRO" "$GMK")
-  hl_rows=$("$reader" "$FABRO" "$HL")
+  gmk_rows=$("$reader" "$FABRO_BOARD" "$GMK")
+  hl_rows=$("$reader" "$FABRO_BOARD" "$HL")
+  candidate_rows=$("$reader" "$FABRO_BOARD" "$GMK_CANDIDATE")
   gmk_live=$(rows_count "$gmk_rows")
   hl_live=$(rows_count "$hl_rows")
-  if [ "$gmk_live" = U ] || [ "$hl_live" = U ]; then markers=U; fleet=U; return; fi
-  markers=$(unlisted_markers "$snapshot" "$(printf '%s\n%s\n' "$gmk_rows" "$hl_rows")")
-  if [ "$markers" = U ]; then fleet=U; else fleet=$((gmk_live + hl_live + markers)); fi
-}
-# report_stall <ticket-file> <pid>: a queue reader met a ticket whose launcher is no longer alive. Written to
-# stderr, because the reader runs in a command substitution, and before the ticket is removed.
-report_stall() {
-  local f="$1" it name
-  name=${f##*/}
-  it=$(grep -oE 'item=[^ ]+' "$f" 2>/dev/null | head -1 | cut -d= -f2)
-  echo "$(date -u +%FT%TZ) stall: item=${it:-unknown} ticket=${name%%-*} dead-pid=${2:-none}: the launcher for ticket file $name is gone"
-} >&2
-oldest_live_ticket() {
-  local f pid
-  for f in $(command ls -1 "$QUEUE" 2>/dev/null | sort); do
-    pid=$(grep -oE 'pid=[0-9]+' "$QUEUE/$f" 2>/dev/null | head -1 | cut -d= -f2)
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      grep -q '^held=' "$QUEUE/$f" && continue
-      echo "$QUEUE/$f"; return
-    fi
-    report_stall "$QUEUE/$f" "$pid"
-    rm -f "$QUEUE/$f"
-  done
+  candidate_live=$(rows_count "$candidate_rows")
+  if [ "$gmk_live" = U ] || [ "$hl_live" = U ] || [ "$candidate_live" = U ]; then markers=U; fleet=U; return; fi
+  markers=$(unlisted_markers "$snapshot" "$(printf '%s\n%s\n%s\n' "$gmk_rows" "$candidate_rows" "$hl_rows")")
+  if [ "$markers" = U ]; then fleet=U; else fleet=$((gmk_live + candidate_live + hl_live + markers)); fi
 }
 take_mutex() {
-  [ "$(oldest_live_ticket)" = "$ticket" ] || return 1
+  [ "$(oldest_live_ticket "$QUEUE")" = "$ticket" ] || return 1
   mkdir "$LOCK" 2>/dev/null || return 1
   lock=$LOCK
   echo "owner=$SEAT pid=$$ item=$ITEM at=$(date -u +%FT%TZ)" > "$lock/holder"
@@ -256,7 +265,7 @@ write_marker() {
 wait_for_listing() {
   local rows listing_deadline=""
   while :; do
-    rows=$(board_rows "$FABRO" "$GMK")
+    rows=$(board_rows "$FABRO_BOARD" "$GMK")
     if [ "$rows" != U ] && printf '%s\n' "$rows" | awk -v it="$ITEM" '$4==it {found=1} END{exit !found}'; then
       rm -f "$marker"
       marker=""
@@ -274,7 +283,7 @@ wait_for_listing() {
 }
 
 if [ -z "$ticket" ]; then
-  ticket_number=$(date +%s%N)
+  ticket_number=${TICKET_NS:-$(date +%s%N)}
   ticket="$QUEUE/$ticket_number-$SEAT"
   echo "owner=$SEAT pid=$$ item=$ITEM" > "$ticket"
   echo "$(date -u +%FT%TZ) gmktec FIFO ticket taken at start: ${ticket##*/}"
@@ -293,15 +302,22 @@ while :; do
     sleep "$FLEET_LAUNCH_POLL_S"
     continue
   fi
-  restore_ticket
-  ahead=$(oldest_live_ticket)
-  if [ "$ahead" != "$ticket" ]; then
-    echo "$(date -u +%FT%TZ) queued behind an older gmktec ticket: $(cat "$ahead" 2>/dev/null)"
+  if canary_held; then
+    yield_ticket canary-hold
+    log_canary_hold
     sleep "$FLEET_LAUNCH_POLL_S"
     continue
   fi
-  if [ -e "$GMK_HOLD_FILE" ]; then
-    echo "$(date -u +%FT%TZ) hold file present ($GMK_HOLD_FILE): wait"
+  restore_ticket
+  ahead=$(oldest_live_ticket "$QUEUE")
+  if [ "$ahead" != "$ticket" ]; then
+    echo "$(date -u +%FT%TZ) queued behind an older gmktec ticket: $(tr '\n' ' ' < "$ahead" 2>/dev/null | sed 's/ *$//')"
+    sleep "$FLEET_LAUNCH_POLL_S"
+    continue
+  fi
+  # The gmktec hold, unless the freeze allowlist or priority 1 releases this item.
+  if [ -e "$GMK_HOLD_FILE" ] && gmk_held; then
+    echo "$(date -u +%FT%TZ) hold file present ($GMK_HOLD_FILE): $(gmk_hold_text): wait"
     sleep "$FLEET_LAUNCH_POLL_S"
     continue
   fi
@@ -336,7 +352,16 @@ while :; do
     sleep "$FLEET_LAUNCH_POLL_S"
     continue
   fi
-  if [ -e "$GMK_HOLD_FILE" ]; then
+  if canary_held; then
+    rm -f "$marker"
+    marker=""
+    yield_ticket canary-hold
+    log_canary_hold
+    release_lock
+    sleep "$FLEET_LAUNCH_POLL_S"
+    continue
+  fi
+  if [ -e "$GMK_HOLD_FILE" ] && gmk_held; then
     rm -f "$marker"
     marker=""
     release_lock
@@ -348,7 +373,9 @@ while :; do
   release_lock
   resume_started=1
   echo "$(date -u +%FT%TZ) resume marker written and mutex released: item=$ITEM"
-  "$FLEET_LAUNCH_RESUME_WRAPPER" -- env LIVESPEC_FACTORY_READ_WRAPPER="$FLEET_LAUNCH_DEFAULT_WRAPPER" "$FLEET_LAUNCH_RESUME_COMMAND" --item "$ITEM" > "$OUT/$ITEM-resume.out" 2> "$OUT/$ITEM-resume.err" &
+  # One-shot: this item's freeze-allowlist line is consumed at RESUME, so one line releases one resume.
+  consume_allowlist_line RESUME
+  bash "$FLEET_LAUNCH_DIR/resume-repo.sh" "$REPO" "$ITEM" > "$OUT/$ITEM-resume.out" 2> "$OUT/$ITEM-resume.err" &
   resume_pid=$!
   wait_for_listing "$resume_pid"
   wait "$resume_pid"

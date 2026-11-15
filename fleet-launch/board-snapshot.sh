@@ -47,7 +47,7 @@ board_refresh_lock_stale() {
   [ $(( $(date +%s) - mtime )) -ge "$FLEET_LAUNCH_BOARD_REFRESH_WAIT_S" ]
 }
 
-# board_snapshot_text <fabro> <server>: the raw `fabro ps -a` listing from the shared snapshot, refreshing it when
+# board_snapshot_text <fabro> <server>: the raw `fabro ps` listing from the shared snapshot, refreshing it when
 # it is older than FLEET_LAUNCH_BOARD_TTL_S. Non-zero when the board cannot be read.
 board_snapshot_text() {
   local fabro="$1" server="$2" file lock tmp started waited=0 contended=""
@@ -71,7 +71,7 @@ board_snapshot_text() {
         rm -f "$lock/holder"; rmdir "$lock" 2>/dev/null
         cat "$file" 2>/dev/null; return
       fi
-      if "$fabro" ps -a --server "$server" > "$tmp" 2>/dev/null && mv -f "$tmp" "$file"; then
+      if board_listing "$fabro" "$server" > "$tmp" && mv -f "$tmp" "$file"; then
         rm -f "$lock/holder"; rmdir "$lock" 2>/dev/null
         cat "$file" 2>/dev/null; return
       fi
@@ -105,9 +105,28 @@ board_rows() {
   printf '%s' "$text" | board_parse_rows
 }
 
+# board_listing <fabro> <server>: one plain `fabro ps` listing (live runs only; the server drops
+# terminal rows, which costs it a fraction of a `ps -a`). A failed listing is retried
+# FLEET_LAUNCH_BOARD_RETRIES times, FLEET_LAUNCH_BOARD_RETRY_S times the attempt number apart,
+# before it fails; the client's own timeout is never raised.
+board_listing() {
+  local out rc attempt=0 errf
+  errf=$(mktemp 2>/dev/null) || errf=/dev/null
+  while :; do
+    out=$("$1" ps --server "$2" 2>"$errf"); rc=$?
+    [ "$rc" -eq 0 ] && break
+    attempt=$((attempt + 1))
+    if [ "$attempt" -gt "${FLEET_LAUNCH_BOARD_RETRIES:-0}" ]; then rm -f "$errf"; return 1; fi
+    echo "$(date -u +%FT%TZ) board read retry $attempt: $2 rc=$rc $(head -c 120 "$errf" 2>/dev/null | tr '\n' ' ')" >&2
+    sleep $(( attempt * ${FLEET_LAUNCH_BOARD_RETRY_S:-10} ))
+  done
+  rm -f "$errf"
+  printf '%s' "$out"
+}
+
 # board_rows_direct <fabro> <server>: the same reading taken from the factory itself, for a binding count.
 board_rows_direct() {
   local text
-  text=$("$1" ps -a --server "$2" 2>/dev/null) || { echo U; return; }
+  text=$(board_listing "$1" "$2") || { echo U; return; }
   printf '%s' "$text" | board_parse_rows
 }

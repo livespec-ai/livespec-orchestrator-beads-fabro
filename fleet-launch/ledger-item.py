@@ -2,15 +2,18 @@
 # PROVISIONAL / EXPERIMENTAL — part of fleet-launch/, a stopgap whose first-class
 # replacements are the livespec console application and the committed launch-loop
 # tool bd-ib-jr6w7v (see fleet-launch/README.md).
-"""Read a work-item's ledger status, or append one ledger comment to it.
+"""Read a work-item's ledger status or priority, or append one ledger comment to it.
 
 Usage: ledger-item.py status <plugin-root> <repo-path> <item-id>
+       ledger-item.py priority <plugin-root> <repo-path> <item-id>
        ledger-item.py comment <plugin-root> <repo-path> <item-id> <body>
 
 ``status`` prints ``LEDGER-STATUS <status>`` and exits 0, or prints
-``LEDGER-STATUS not-found`` and exits 3. ``comment`` appends the body as one
-comment through the installed plugin build's own store seam and exits 0. Exit 2
-is a usage error. Run it UNDER the tenant's credential wrapper.
+``LEDGER-STATUS not-found`` and exits 3. ``priority`` prints ``LEDGER-PRIORITY
+<n>`` the same way (the launcher's priority-1 release of the gmktec hold reads
+it once). ``comment`` appends the body as one comment through the installed
+plugin build's own store seam and exits 0. Exit 2 is a usage error. Run it
+UNDER the tenant's credential wrapper.
 """
 
 import sys
@@ -26,7 +29,7 @@ COMMENT_ARGC = 6
 
 def main(*, argv: list[str]) -> int:
     mode = argv[1] if len(argv) > 1 else ""
-    expected = {"status": STATUS_ARGC, "comment": COMMENT_ARGC}.get(mode)
+    expected = {"status": STATUS_ARGC, "priority": STATUS_ARGC, "comment": COMMENT_ARGC}.get(mode)
     if expected is None or len(argv) != expected:
         print(__doc__)
         return USAGE_ERROR
@@ -48,10 +51,11 @@ def main(*, argv: list[str]) -> int:
         append_work_item_comment(path=config, work_item_id=item_id, body=argv[5])
         return 0
     item = next((i for i in read_work_items(path=config) if i.id == item_id), None)
+    label = "LEDGER-PRIORITY" if mode == "priority" else "LEDGER-STATUS"
     if item is None:
-        print("LEDGER-STATUS not-found")
+        print(f"{label} not-found")
         return NOT_FOUND
-    print(f"LEDGER-STATUS {item.status}")
+    print(f"{label} {item.priority if mode == 'priority' else item.status}")
     return 0
 
 

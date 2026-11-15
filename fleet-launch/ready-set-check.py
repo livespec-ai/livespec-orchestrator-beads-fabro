@@ -7,17 +7,17 @@
 It asks the installed plugin build's ``ready_items()``, so the answer cannot diverge
 from the Dispatcher's ``--item`` selection.
 
-Usage: ready-set-check.py <plugin-root> <repo-path> <item-id> [capacity]
-Exit 0: dispatchable (in the ready set, or pending-approval, which the loop admits
-itself). Exit 3: not in the ready set, with the reason printed. Exit 2: usage error.
+Usage: ready-set-check.py <plugin-root> <repo-path> <item-id>
+Exit 0: dispatchable (in the ready set, or pending-approval with clear dependencies,
+which the loop admits itself). Exit 3: not in the ready set, with the reason printed.
+Exit 2: usage error.
 
-With the trailing `capacity` argument it instead prints one JSON object carrying the
-repository's counted-claims count, read through the Dispatcher's side-effect-free
-capacity projection, and its configured `wip_cap`, then exits 0.
+The repository's counted-claims count is NOT read here: wip-claimed-count.py, the
+launcher's WIP-gate helper, reads it through the Dispatcher's capacity projection.
 """
 
-import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 __all__: list[str] = ["main"]
@@ -25,13 +25,10 @@ __all__: list[str] = ["main"]
 NOT_READY = 3
 USAGE_ERROR = 2
 ARGC = 4
-CAPACITY_ARGC = 5
 
 
 def main(*, argv: list[str]) -> int:
-    if len(argv) not in (ARGC, CAPACITY_ARGC) or (
-        len(argv) == CAPACITY_ARGC and argv[4] != "capacity"
-    ):
+    if len(argv) != ARGC:
         print(__doc__)
         return USAGE_ERROR
     plugin, repo, item_id = argv[1], Path(argv[2]), argv[3]
@@ -48,32 +45,21 @@ def main(*, argv: list[str]) -> int:
     from livespec_orchestrator_beads_fabro.store import read_work_items
 
     items = list(read_work_items(path=resolve_store_config(cwd=repo, work_items_arg=None)))
-    if len(argv) == CAPACITY_ARGC:
-        from livespec_orchestrator_beads_fabro.commands._dispatcher_claim_reclaim import (
-            claimed_active_projection,
-        )
-        from livespec_orchestrator_beads_fabro.commands._dispatcher_io import JournalFile
-        from livespec_orchestrator_beads_fabro.commands._dispatcher_valves import (
-            DEFAULT_WIP_CAP,
-            resolve_wip_cap,
-        )
-        from returns.unsafe import unsafe_perform_io
-
-        cap = unsafe_perform_io(resolve_wip_cap(cwd=repo).value_or(DEFAULT_WIP_CAP))
-        accounting = claimed_active_projection(
-            repo=repo,
-            items=items,
-            journal=JournalFile(path=repo / "tmp" / "fabro-dispatch-journal.jsonl"),
-        )
-        print(json.dumps({"counted_claims": accounting.active_count, "wip_cap": cap}))
-        return 0
     me = next((i for i in items if i.id == item_id), None)
     if me is None:
         print(f"READY-CHECK {item_id}: not found")
         return NOT_READY
     if me.status == "pending-approval":
-        print(f"READY-CHECK {item_id}: pending-approval (the loop's admission decides)")
-        return 0
+        # The loop admits a pending-approval row only when its dependencies are clear, so ask the
+        # same ready predicate of a projection that reads the row as ready rather than passing it
+        # blindly (bd-ib-w4hqe2, 2026-10-27).
+        projected = [replace(i, status="ready") if i.id == item_id else i for i in items]
+        if item_id in {i.id for i in ready_items(items=projected, repo=repo)}:
+            print(
+                f"READY-CHECK {item_id}: pending-approval with clear dependencies "
+                "(the loop admits it)"
+            )
+            return 0
     if item_id in {i.id for i in ready_items(items=items, repo=repo)}:
         print(f"READY-CHECK {item_id}: in the ready set")
         return 0

@@ -43,9 +43,9 @@ fi
 
 HARNESS_SLICE=${1:-all}
 case "$HARNESS_SLICE" in
-    all|scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|launcher-reexec) ;;
+    all|scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|launcher-reexec|parity) ;;
     *)
-        echo "usage: run-tests.sh [scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|launcher-reexec]" >&2
+        echo "usage: run-tests.sh [scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|launcher-reexec|parity]" >&2
         exit 2
         ;;
 esac
@@ -80,6 +80,7 @@ fail() { FAIL=$((FAIL + 1)); printf '  FAIL: %s\n' "$1" >&2; }
 GMK_URL="https://stub-gmktec.invalid:32276"
 HL_URL="https://stub-mi-homelab.invalid:32277"
 CANDIDATE_URL="https://stub-candidate.invalid:32278"
+ARM_URL="https://stub-arm64.invalid:32279"
 
 # --- the stubs ---------------------------------------------------------------
 STUB="$WORK/stub"
@@ -105,6 +106,7 @@ case $server in
     "$STUB_SERVER_GMK") board=$STUB_BOARD_GMK ;;
     "$STUB_SERVER_HL") board=$STUB_BOARD_HL ;;
     "$STUB_SERVER_CANDIDATE") board=$STUB_BOARD_CANDIDATE ;;
+    "$STUB_SERVER_ARM") board=$STUB_BOARD_ARM ;;
     *) echo "stub fabro: no board fixture for server '$server'" >&2; exit 1 ;;
 esac
 # Every listing request is recorded, one server per line, so a case can count what the
@@ -173,11 +175,18 @@ cat > "$STUB/wrapper" <<'WRAPPER_STUB'
 set -u
 if [ "${1:-}" = -- ]; then shift; fi
 if [ "${1:-}" = env ]; then
+    # A real wrapper execs `env`, which applies -u and K=V and then runs the command. A nested
+    # tenant wrapper (an executable path, not a bare interpreter) is handed the command exactly as
+    # env would hand it, so the tenant stub observes what reached it.
     shift
-    while [ "$#" -gt 0 ] && [ "${1:-}" != "${1#*=}" ]; do
-        export "$1"
-        shift
+    while [ "$#" -gt 0 ]; do
+        case $1 in
+            -u) unset "$2"; shift 2 ;;
+            *=*) export "$1"; shift ;;
+            *) break ;;
+        esac
     done
+    if [ "${1:-}" != "${1#/}" ] && [ -x "$1" ]; then exec "$@"; fi
 fi
 for argument in "$@"; do
     case ${argument##*/} in
@@ -201,16 +210,17 @@ for argument in "$@"; do
                     exit 3
                 fi
             fi
-            if [ "${!#}" = capacity ]; then
-                # The capacity projection read: a counted-claims count and a wip_cap, both from files
-                # a case rewrites while a launcher runs, or an unreadable answer.
-                [ ! -e "${STUB_WIP_UNREADABLE_FILE:-/nonexistent}" ] || exit 1
-                printf '{"counted_claims": %s, "wip_cap": %s}\n' \
-                    "$(cat "$STUB_WIP_COUNT_FILE")" "$(cat "$STUB_WIP_CAP_FILE")"
-                exit 0
-            fi
             printf 'READY-CHECK stub: in the ready set\n'
             exit "${STUB_READY_EXIT:-0}"
+            ;;
+        wip-claimed-count.py)
+            # The capacity projection read: a counted-claims count and a wip_cap, both from files
+            # a case rewrites while a launcher runs, or an unreadable answer. Every call is recorded.
+            printf '%s\n' "$(date +%s%N)" >> "$STUB_WIP_CALLS"
+            [ ! -e "${STUB_WIP_UNREADABLE_FILE:-/nonexistent}" ] || exit 1
+            printf '{"counted_claims": %s, "in_flight_addition": 0, "wip_cap": %s, "cache": "stub"}\n' \
+                "$(cat "$STUB_WIP_COUNT_FILE")" "$(cat "$STUB_WIP_CAP_FILE")"
+            exit 0
             ;;
         dod-preflight.sh)
             item=${!#}
@@ -282,10 +292,47 @@ for argument in "$@"; do
                     printf 'LEDGER-STATUS %s\n' "$item_status"
                     ;;
                 comment) printf '%s\n' "${!#}" >> "$STUB_LEDGER_COMMENTS" ;;
+                priority) printf 'LEDGER-PRIORITY %s\n' "$(cat "$STUB_ITEM_PRIORITY_FILE" 2>/dev/null || echo 2)" ;;
             esac
             exit 0
             ;;
         dispatcher.py)
+            subcommand=""
+            seen=0
+            for token in "$@"; do
+                if [ "$seen" = 1 ] && [ -z "$subcommand" ]; then subcommand=$token; fi
+                case ${token##*/} in dispatcher.py) seen=1 ;; esac
+            done
+            case $subcommand in
+                host-only)
+                    # The shared factory-safety predicate: a case supplies the verdict JSON, or the
+                    # command cannot answer, or the item is not host-only.
+                    [ ! -e "${STUB_HOST_ONLY_UNANSWERABLE_FILE:-/nonexistent}" ] || exit 1
+                    if [ -s "${STUB_HOST_ONLY_JSON:-/nonexistent}" ]; then cat "$STUB_HOST_ONLY_JSON"; else printf '{"work_item_id": "stub", "host_only": false}\n'; fi
+                    exit 0
+                    ;;
+                resume)
+                    item=""
+                    repo=""
+                    previous=""
+                    for token in "$@"; do
+                        if [ "$previous" = --item ]; then item=$token; fi
+                        if [ "$previous" = --repo ]; then repo=$token; fi
+                        previous=$token
+                    done
+                    printf '%s\n' "$item" >> "$STUB_RESUME_LOG"
+                    printf '%s %s\n' "$repo" "$item" >> "$STUB_RESUME_ARGV_LOG"
+                    marker_state=missing
+                    if find "$STUB_INFLIGHT_DIR" -type f -print -quit | grep . >/dev/null; then marker_state=present; fi
+                    lock_state=released
+                    if [ -d "$STUB_LOCK_DIR" ]; then lock_state=held; fi
+                    printf '%s marker=%s mutex=%s\n' "$item" "$marker_state" "$lock_state" >> "$STUB_RESUME_OBSERVATION_LOG"
+                    if [ -z "${STUB_RESUME_UNLISTED:-}" ]; then
+                        printf '%s %s\n' "$STUB_SERVER_GMK" "$item" > "$STUB_RESUMED_DIR/$item"
+                    fi
+                    exit 0
+                    ;;
+            esac
             printf 'stub: the Claude credential is usable (HTTP 200)\n'
             exit 0
             ;;
@@ -305,9 +352,21 @@ for argument in "$@"; do
                 petri) server=$STUB_SERVER_GMK ;;
                 mi-homelab) server=$STUB_SERVER_HL ;;
                 candidate) server=$STUB_SERVER_CANDIDATE ;;
+                homelab-worker-arm64) server=$STUB_SERVER_ARM ;;
                 *) server="" ;;
             esac
             printf '%s\n' "${LIVESPEC_FACTORY_READ_WRAPPER:-missing}" >> "$STUB_FACTORY_READ_WRAPPER_LOG"
+            # The configured routing the drive received: its --acp-node arguments in order, and the
+            # judge-model variables set in its environment.
+            acp_nodes=""
+            previous=""
+            for token in "$@"; do
+                if [ "$previous" = --acp-node ]; then acp_nodes="$acp_nodes$token;"; fi
+                previous=$token
+            done
+            printf '%s acp=%s dod=%s drift=%s reflector=%s password=%s\n' "$item" "$acp_nodes" \
+                "${LIVESPEC_DOD_JUDGEMENT_MODEL:-unset}" "${LIVESPEC_DRIFT_JUDGE_MODEL:-unset}" "${LIVESPEC_REFLECTOR_MODEL:-unset}" \
+                "${BEADS_DOLT_PASSWORD:+present}" >> "$STUB_DRIVE_ENV_LOG"
             printf '%s\n' "$item" >> "$STUB_DRIVE_LOG"
             if [ -n "${STUB_DRIVE_FAIL_TIMES:-}" ] \
                 && [ "$(grep -cxF -- "$item" "$STUB_DRIVE_LOG")" -le "$STUB_DRIVE_FAIL_TIMES" ]; then
@@ -413,24 +472,6 @@ for argument in "$@"; do
                 done
             fi
             printf '{"status": "stub-dispatched", "work_item_id": "%s"}\n' "$item"
-            exit 0
-            ;;
-        resume)
-            item=""
-            previous=""
-            for token in "$@"; do
-                if [ "$previous" = --item ]; then item=$token; fi
-                previous=$token
-            done
-            printf '%s\n' "$item" >> "$STUB_RESUME_LOG"
-            marker_state=missing
-            if find "$STUB_INFLIGHT_DIR" -type f -print -quit | grep . >/dev/null; then marker_state=present; fi
-            lock_state=released
-            if [ -d "$STUB_LOCK_DIR" ]; then lock_state=held; fi
-            printf '%s marker=%s mutex=%s\n' "$item" "$marker_state" "$lock_state" >> "$STUB_RESUME_OBSERVATION_LOG"
-            if [ -z "${STUB_RESUME_UNLISTED:-}" ]; then
-                printf '%s %s\n' "$STUB_SERVER_GMK" "$item" > "$STUB_RESUMED_DIR/$item"
-            fi
             exit 0
             ;;
     esac
@@ -572,6 +613,10 @@ new_case() {
     BOARD_GMK="$CASE_DIR/boards/gmktec"
     BOARD_HL="$CASE_DIR/boards/mi-homelab"
     BOARD_CANDIDATE="$CASE_DIR/boards/candidate"
+    BOARD_ARM="$CASE_DIR/boards/arm64"
+    # The candidate board is always counted in the fleet, so every case starts with it idle; a case
+    # that needs it unreadable removes the fixture.
+    : > "$BOARD_CANDIDATE"
     CAP_FILE="$CASE_DIR/state/fleet-cap"
     HOLD_FILE="$CASE_DIR/state/hold-gmktec"
 
@@ -582,6 +627,16 @@ new_case() {
     export STUB_BOARD_GMK="$BOARD_GMK"
     export STUB_BOARD_HL="$BOARD_HL"
     export STUB_BOARD_CANDIDATE="$BOARD_CANDIDATE"
+    export STUB_SERVER_ARM="$ARM_URL"
+    export STUB_BOARD_ARM="$BOARD_ARM"
+    export STUB_DRIVE_ENV_LOG="$CASE_DIR/drive-env-log"
+    : > "$STUB_DRIVE_ENV_LOG"
+    export STUB_RESUME_ARGV_LOG="$CASE_DIR/resume-argv-log"
+    : > "$STUB_RESUME_ARGV_LOG"
+    export STUB_WIP_CALLS="$CASE_DIR/wip-calls"
+    : > "$STUB_WIP_CALLS"
+    export STUB_ITEM_PRIORITY_FILE="$CASE_DIR/item-priority"
+    unset STUB_HOST_ONLY_JSON STUB_HOST_ONLY_UNANSWERABLE_FILE
     # The repository WIP gate reads its counted claims and wip_cap through the stub capacity projection.
     export STUB_WIP_COUNT_FILE="$CASE_DIR/wip-count"
     export STUB_WIP_CAP_FILE="$CASE_DIR/wip-cap"
@@ -643,6 +698,32 @@ new_case() {
     export FLEET_LAUNCH_GMK_CANDIDATE_SERVER="$CANDIDATE_URL"
     export FLEET_LAUNCH_GMK_TARGET_FILE="$CASE_DIR/state/gmk-target"
     export FLEET_LAUNCH_GMK_CANDIDATE_CAP=2
+    export FLEET_LAUNCH_GMK_CANDIDATE_CAP_FILE="$CASE_DIR/state/candidate-cap"
+    export FLEET_LAUNCH_GMK_CAP_FILE="$CASE_DIR/state/gmk-cap"
+    export FLEET_LAUNCH_HL_CAP_FILE="$CASE_DIR/state/hl-cap"
+    export FLEET_LAUNCH_GMK_IDLE_FLOOR_FILE="$CASE_DIR/state/gmk-idle-floor"
+    export FLEET_LAUNCH_ARM_SERVER="$ARM_URL"
+    export FLEET_LAUNCH_ARM_ENROLLED_FILE="$CASE_DIR/state/arm64-enrolled"
+    export FLEET_LAUNCH_ARM_CAP=1
+    export FLEET_LAUNCH_FREEZE_ALLOWLIST_FILE="$CASE_DIR/state/freeze-allowlist"
+    export FLEET_LAUNCH_FREEZE_ALLOWLIST_LOCK="$CASE_DIR/state/freeze-allowlist.lock"
+    export FLEET_LAUNCH_FREEZE_ALLOWLIST_CONSUMED_LOG="$CASE_DIR/state/freeze-allowlist.consumed"
+    export FLEET_LAUNCH_CANARY_HOLD_DIR="$CASE_DIR/state"
+    export FLEET_LAUNCH_CANARY_EXEMPT_FILE="$CASE_DIR/state/canary-hold-exempt"
+    export FLEET_LAUNCH_ITEM_HOLD_DIR="$CASE_DIR/state"
+    export FLEET_LAUNCH_ACP_OVERRIDES_FILE="$CASE_DIR/state/acp-overrides.txt"
+    export FLEET_LAUNCH_WIP_SHARED_DIR="$CASE_DIR/state"
+    export FLEET_LAUNCH_WIP_CACHE_DIR="$CASE_DIR/state"
+    # The shared WIP caches are off by default so a case that rewrites the count sees it on the next
+    # poll; the cache case below turns them on.
+    export FLEET_LAUNCH_WIP_SHARED_TTL_S=0
+    export FLEET_LAUNCH_WIP_CACHE_TTL_S=0
+    export FLEET_LAUNCH_WIP_POLL_S=0.01
+    export FLEET_LAUNCH_QUEUE_WAIT_S=0.05
+    export FLEET_LAUNCH_BOARD_RETRIES=0
+    export FLEET_LAUNCH_SIZE_SCREEN=0
+    export FLEET_LAUNCH_SIZE_SCREEN_COMMAND="$CASE_DIR/size-screen-stub.py"
+    export FLEET_LAUNCH_RETICKET_MAX_IN_WINDOW=6
     export FLEET_LAUNCH_BREAKAGE_EXCEPTION_FILE="$CASE_DIR/breakage-exception"
     export FLEET_LAUNCH_RETICKET_STATE_DIR="$CASE_DIR/state/reticket-state"
     export FLEET_LAUNCH_RETICKET_DELAY_1_S=0
@@ -654,6 +735,7 @@ new_case() {
     export FLEET_LAUNCH_HL_CAP=2
     export FLEET_LAUNCH_GMK_MIN_IDLE=25
     export FLEET_LAUNCH_FABRO="$STUB/fabro"
+    export FLEET_LAUNCH_FABRO_BOARD="$STUB/fabro"
     export FLEET_LAUNCH_INFLIGHT_DIR="$CASE_DIR/inflight"
     export FLEET_LAUNCH_GMK_QUEUE_DIR="$CASE_DIR/queue"
     export FLEET_LAUNCH_GMK_LOCK_DIR="$CASE_DIR/lock"
@@ -664,7 +746,6 @@ new_case() {
     export FLEET_LAUNCH_PLUGIN_KEY="$PLUGIN_KEY"
     export FLEET_LAUNCH_DEFAULT_WRAPPER="$STUB/wrapper"
     export FLEET_LAUNCH_RESUME_WRAPPER="$STUB/wrapper"
-    export FLEET_LAUNCH_RESUME_COMMAND=resume
     # The launchers use their smallest useful non-zero poll, so a queued
     # launcher rechecks FIFO almost immediately after the harness changes it.
     export FLEET_LAUNCH_MAX_WAIT_S=4
@@ -684,7 +765,7 @@ new_case() {
     export FLEET_LAUNCH_LISTING_WAIT_S=60
     export FLEET_LAUNCH_STOP_GRACE_S=5
     unset STUB_RESUME_UNLISTED STUB_READY_BLOCKED_UNTIL_RELEASE
-    unset ONLY_GMK ONLY_HL CAPTURE_NULL CAPTURE_EXPECT TICKET_NS REWORK RELEASE_BLOCKED
+    unset ONLY_GMK ONLY_HL ONLY_ARM CAPTURE_NULL CAPTURE_EXPECT TICKET_NS REWORK RELEASE_BLOCKED
 }
 
 # run_launcher <item> [log]: one launcher invocation, captured. Sets RC.
@@ -829,6 +910,24 @@ line_has_all() {
 set_hold() {
     printf '%b\n' "$2" > "$1.new"
     mv "$1.new" "$1"
+}
+# wait_gone <pid> <seconds>: succeeds when the process has exited within the bound.
+wait_gone() {
+    local pid="$1" limit="$2" deadline
+    deadline=$(( $(date +%s) + limit ))
+    while kill -0 "$pid" 2>/dev/null; do
+        [ "$(date +%s)" -lt "$deadline" ] || return 1
+        sleep "$HARNESS_POLL_S"
+    done
+    return 0
+}
+# ticket_held_lines <ticket-file>: how many lines beginning held= the ticket carries.
+ticket_held_lines() { grep -c '^held=' "$1" 2>/dev/null || true; }
+# open_boards: both factory boards idle and a shared fleet cap with room.
+open_boards() {
+    : > "$BOARD_GMK"
+    : > "$BOARD_HL"
+    printf '8\n' > "$CAP_FILE"
 }
 echo "=== fleet-launch hermetic harness"
 
@@ -2848,24 +2947,6 @@ fi
 # refuses everything.
 if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = scenario307 ]; then
 
-# wait_gone <pid> <seconds>: succeeds when the process has exited within the bound.
-wait_gone() {
-    local pid="$1" limit="$2" deadline
-    deadline=$(( $(date +%s) + limit ))
-    while kill -0 "$pid" 2>/dev/null; do
-        [ "$(date +%s)" -lt "$deadline" ] || return 1
-        sleep "$HARNESS_POLL_S"
-    done
-    return 0
-}
-# ticket_held_lines <ticket-file>: how many lines beginning held= the ticket carries.
-ticket_held_lines() { grep -c '^held=' "$1" 2>/dev/null || true; }
-# open_boards: both factory boards idle and a shared fleet cap with room.
-open_boards() {
-    : > "$BOARD_GMK"
-    : > "$BOARD_HL"
-    printf '8\n' > "$CAP_FILE"
-}
 
 echo "--- 23. a repository at its wip_cap yields the FIFO head without a preflight"
 new_case wip-at-cap
@@ -3109,6 +3190,7 @@ fi
 new_case gmk-target-unreadable-candidate
 export FLEET_LAUNCH_MAX_WAIT_S=120
 open_boards
+rm -f "$BOARD_CANDIDATE"
 printf 'candidate\n' > "$FLEET_LAUNCH_GMK_TARGET_FILE"
 ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-candidate-unreadable > "$CASE_LOG" 2>&1 &
 unreadable_pid=$!
@@ -3238,6 +3320,483 @@ if [ "$blocker_rc" = 3 ] && grep -qF 'bd-dep-open=ready' <<<"$blocker_line" \
     pass "a done dependency is not listed as an open blocker, a closed one is not, and an open one is; the refusal stands"
 else
     fail "the refusal line mislists blockers (rc=$blocker_rc): $blocker_line"
+fi
+
+fi
+
+# --- parity with the running launcher copies (bd-ib-yax6gv, 2026-11-15) ---------------------------
+# The gates the dispatching host's interim launcher copies carried that the committed launchers lacked.
+# Each refusal carries its own positive control.
+if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = parity ]; then
+
+echo "--- 32. the fleet count sums the gmktec, candidate and mi-homelab lanes and leaves arm64 out"
+new_case fleet-sum-candidate
+export FLEET_LAUNCH_MAX_WAIT_S=120
+write_board "$BOARD_GMK" 1 gmk
+: > "$BOARD_HL"
+write_board "$BOARD_CANDIDATE" 2 cand
+: > "$FLEET_LAUNCH_ARM_ENROLLED_FILE"
+write_board "$BOARD_ARM" 1 arm
+printf '3\n' > "$CAP_FILE"
+ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-fleet-sum > "$CASE_LOG" 2>&1 &
+sum_pid=$!
+if wait_for_line "$CASE_LOG" "fleet not green: gmktec=1 hl=0 markers=0 fleet=3 cap=3 candidate=2 arm64=1" 5 \
+    && kill -0 "$sum_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ] \
+    && [ -e "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat" ]; then
+    pass "a fleet at the cap only because of candidate-lane runs launches nothing and keeps its ticket; arm64 is outside the sum"
+else
+    fail "the fleet count did not include the candidate lane or did include the arm64 lane"
+    tail -5 "$CASE_LOG" >&2
+fi
+printf '4\n' > "$CAP_FILE"
+if wait_gone "$sum_pid" 15 && wait "$sum_pid" && [ "$(drive_log_items)" = bd-ib-fleet-sum ] \
+    && [ "$(cut -d' ' -f1 "$STUB_DRIVEN_DIR/bd-ib-fleet-sum")" = "$GMK_URL" ]; then
+    pass "control: one slot of headroom in the same sum launches onto the default instance"
+else
+    fail "control: the launcher did not launch with headroom in the fleet sum"
+    tail -6 "$CASE_LOG" >&2
+    stop_launcher "$sum_pid"; wait "$sum_pid" 2>/dev/null
+fi
+
+echo "--- 33. the arm64 lane launches against its own cap only once enrolled"
+new_case arm64-lane
+export FLEET_LAUNCH_MAX_WAIT_S=120
+write_board "$BOARD_GMK" 8 gmk
+: > "$BOARD_HL"
+printf '8\n' > "$CAP_FILE"
+: > "$BOARD_ARM"
+ONLY_ARM=1 TICKET_NS=100 "$LAUNCHER" bd-ib-arm-unenrolled > "$CASE_DIR/unenrolled.log" 2>&1 &
+arm_pid=$!
+if wait_for_line "$CASE_DIR/unenrolled.log" "homelab-worker-arm64 not green: enrolled=no" 5 \
+    && kill -0 "$arm_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ]; then
+    pass "an arm64 launcher launches nothing while the instance is not enrolled"
+else
+    fail "an unenrolled arm64 lane did not hold the launch"
+    tail -5 "$CASE_DIR/unenrolled.log" >&2
+fi
+: > "$FLEET_LAUNCH_ARM_ENROLLED_FILE"
+if wait_gone "$arm_pid" 15 && wait "$arm_pid" && [ "$(drive_log_items)" = bd-ib-arm-unenrolled ] \
+    && [ "$(cut -d' ' -f1 "$STUB_DRIVEN_DIR/bd-ib-arm-unenrolled")" = "$ARM_URL" ] \
+    && grep -q 'LAUNCH target=homelab-worker-arm64' "$CASE_DIR/unenrolled.log"; then
+    pass "control: once enrolled the arm64 launcher launches onto the arm64 instance with the fleet at its cap"
+else
+    fail "the enrolled arm64 lane did not launch (dispatches: $(drive_log_items))"
+    tail -6 "$CASE_DIR/unenrolled.log" >&2
+    stop_launcher "$arm_pid"; wait "$arm_pid" 2>/dev/null
+fi
+: > "$DRIVE_LOG"
+# The first launch's driven row has left the board; the fixture alone holds one live run.
+rm -f "$STUB_DRIVEN_DIR/bd-ib-arm-unenrolled"
+write_board "$BOARD_ARM" 1 arm
+ONLY_ARM=1 TICKET_NS=200 "$LAUNCHER" bd-ib-arm-capped > "$CASE_DIR/capped.log" 2>&1 &
+arm_capped_pid=$!
+if wait_for_line "$CASE_DIR/capped.log" "homelab-worker-arm64 not green: enrolled=yes arm_inflight=1 cap=1" 5 \
+    && kill -0 "$arm_capped_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ]; then
+    pass "an arm64 launcher holds at the arm64 cap, whatever the fleet sum"
+else
+    fail "the arm64 cap did not hold the launch"
+    tail -5 "$CASE_DIR/capped.log" >&2
+fi
+stop_launcher "$arm_capped_pid"; wait "$arm_capped_pid" 2>/dev/null
+
+echo "--- 34. the freeze allowlist releases a listed item from the gmktec hold exactly once"
+new_case allowlist-one-shot
+export FLEET_LAUNCH_MAX_WAIT_S=120
+open_boards
+: > "$HOLD_FILE"
+printf 'bd-ib-other\nbd-ib-listed\n' > "$FLEET_LAUNCH_FREEZE_ALLOWLIST_FILE"
+run_launcher bd-ib-listed
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-listed ] \
+    && [ "$(cat "$FLEET_LAUNCH_FREEZE_ALLOWLIST_FILE")" = bd-ib-other ] \
+    && grep -q 'bd-ib-listed consumed at LAUNCH' "$FLEET_LAUNCH_FREEZE_ALLOWLIST_CONSUMED_LOG" \
+    && log_has "$CASE_LOG" "ONE-SHOT: freeze-allowlist line for bd-ib-listed consumed at LAUNCH"; then
+    pass "an allowlisted item launches through the hold and its line is consumed at LAUNCH, other lines kept"
+else
+    fail "the allowlisted item did not launch once through the hold (rc=$RC, dispatches: $(drive_log_items), allowlist: $(tr '\n' ' ' < "$FLEET_LAUNCH_FREEZE_ALLOWLIST_FILE"))"
+    tail -6 "$CASE_LOG" >&2
+fi
+: > "$DRIVE_LOG"
+ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-listed > "$CASE_DIR/second.log" 2>&1 &
+second_pid=$!
+if wait_for_line "$CASE_DIR/second.log" "hold file present" 5 && kill -0 "$second_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ]; then
+    pass "a second launcher for the same item is held: one line releases one launch"
+else
+    fail "the consumed allowlist line released a second launch"
+    tail -5 "$CASE_DIR/second.log" >&2
+fi
+rm -f "$HOLD_FILE"
+if wait_gone "$second_pid" 15 && wait "$second_pid" && [ "$(drive_log_items)" = bd-ib-listed ]; then
+    pass "control: removing the hold releases the held second launcher"
+else
+    fail "control: the second launcher did not launch once the hold was removed"
+    stop_launcher "$second_pid"; wait "$second_pid" 2>/dev/null
+fi
+
+echo "--- 35. a priority-1 item launches through the gmktec hold without an allowlist line"
+new_case priority-one-release
+open_boards
+: > "$HOLD_FILE"
+printf 'bd-ib-other\n' > "$FLEET_LAUNCH_FREEZE_ALLOWLIST_FILE"
+printf '1\n' > "$STUB_ITEM_PRIORITY_FILE"
+run_launcher bd-ib-p1
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-p1 ] && [ "$(cat "$FLEET_LAUNCH_FREEZE_ALLOWLIST_FILE")" = bd-ib-other ]; then
+    pass "a priority-1 item launches through the hold and the allowlist is unchanged"
+else
+    fail "a priority-1 item was held, or consumed an allowlist line (rc=$RC, dispatches: $(drive_log_items))"
+    tail -5 "$CASE_LOG" >&2
+fi
+new_case priority-two-held
+export FLEET_LAUNCH_MAX_WAIT_S=120
+open_boards
+: > "$HOLD_FILE"
+printf '2\n' > "$STUB_ITEM_PRIORITY_FILE"
+ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-p2 > "$CASE_LOG" 2>&1 &
+p2_pid=$!
+if wait_for_line "$CASE_LOG" "hold file present" 5 && kill -0 "$p2_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ]; then
+    pass "control: a priority-2 item without an allowlist line is held"
+else
+    fail "control: a priority-2 item launched through the hold"
+fi
+stop_launcher "$p2_pid"; wait "$p2_pid" 2>/dev/null
+
+echo "--- 36. a held queue head does not block a released ticket behind it"
+new_case held-head-skipped
+export FLEET_LAUNCH_MAX_WAIT_S=120
+open_boards
+: > "$HOLD_FILE"
+printf 'bd-ib-released\n' > "$FLEET_LAUNCH_FREEZE_ALLOWLIST_FILE"
+ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-held-head > "$CASE_DIR/held.log" 2>&1 &
+held_pid=$!
+wait_for_line "$CASE_DIR/held.log" "hold file present" 5 || fail "the held head never parked on the hold"
+ONLY_GMK=1 TICKET_NS=200 "$LAUNCHER" bd-ib-released > "$CASE_DIR/released.log" 2>&1 &
+released_pid=$!
+if wait_gone "$released_pid" 15 && wait "$released_pid" && [ "$(drive_log_items)" = bd-ib-released ] \
+    && kill -0 "$held_pid" 2>/dev/null && [ -e "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat" ]; then
+    pass "the allowlisted ticket behind a held head binds and launches; the held head keeps its ticket number"
+else
+    fail "the held head blocked the released ticket (dispatches: $(drive_log_items))"
+    tail -5 "$CASE_DIR/released.log" >&2
+    stop_launcher "$released_pid"; wait "$released_pid" 2>/dev/null
+fi
+rm -f "$HOLD_FILE"
+if wait_gone "$held_pid" 15 && wait "$held_pid" && [ "$(drive_log_items)" = "bd-ib-released bd-ib-held-head" ]; then
+    pass "control: the held head takes its place back and launches when the hold is removed"
+else
+    fail "control: the held head did not launch after the lift (dispatches: $(drive_log_items))"
+    stop_launcher "$held_pid"; wait "$held_pid" 2>/dev/null
+fi
+
+echo "--- 37. a canary repository hold yields every launch except an exempt item"
+new_case canary-hold
+export FLEET_LAUNCH_MAX_WAIT_S=120
+open_boards
+set_hold "$FLEET_LAUNCH_CANARY_HOLD_DIR/canary-hold-repo-$(basename "$TENANT")" "canary v0.0.0-stub adopting"
+printf 'bd-ib-exempt\n' > "$FLEET_LAUNCH_CANARY_EXEMPT_FILE"
+ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-canary-held > "$CASE_DIR/held.log" 2>&1 &
+canary_pid=$!
+if wait_for_line "$CASE_DIR/held.log" "canary repository hold present" 5 && kill -0 "$canary_pid" 2>/dev/null \
+    && grep -qx 'held=canary-hold' "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat" && [ ! -s "$DRIVE_LOG" ]; then
+    pass "an unlisted item yields on the canary hold, marks its ticket held=canary-hold and launches nothing"
+else
+    fail "the canary hold did not yield the unlisted item"
+    tail -5 "$CASE_DIR/held.log" >&2
+fi
+run_launcher bd-ib-exempt "$CASE_DIR/exempt.log"
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-exempt ]; then
+    pass "an exempt item launches normally under the canary hold"
+else
+    fail "the exempt item did not launch under the canary hold (rc=$RC)"
+    tail -5 "$CASE_DIR/exempt.log" >&2
+fi
+rm -f "$FLEET_LAUNCH_CANARY_HOLD_DIR/canary-hold-repo-$(basename "$TENANT")"
+if wait_gone "$canary_pid" 15 && wait "$canary_pid" && [ "$(drive_log_items)" = "bd-ib-exempt bd-ib-canary-held" ]; then
+    pass "control: removing the canary hold releases the held launcher in the order of its ticket"
+else
+    fail "control: the held launcher did not launch after the canary hold was removed"
+    stop_launcher "$canary_pid"; wait "$canary_pid" 2>/dev/null
+fi
+
+echo "--- 38. launch-time commands run under the target repository's committed credential wrapper"
+TENANT_STUB_WRAPPER="$STUB/tenant-wrapper"
+cat > "$TENANT_STUB_WRAPPER" <<'TENANT_WRAPPER_STUB'
+#!/usr/bin/env bash
+# The stub tenant wrapper: records that it ran and whether the family password reached it, then
+# answers through the stub default wrapper.
+set -u
+[ "${1:-}" = -- ] && shift
+printf 'tenant-wrapper password=%s %s\n' "${BEADS_DOLT_PASSWORD:+present}" "$*" >> "$STUB_TENANT_WRAPPER_LOG"
+exec "$STUB_DEFAULT_WRAPPER" -- "$@"
+TENANT_WRAPPER_STUB
+chmod +x "$TENANT_STUB_WRAPPER"
+new_case tenant-wrapper
+open_boards
+unset WRAPPER
+export STUB_TENANT_WRAPPER_LOG="$CASE_DIR/tenant-wrapper-log"
+: > "$STUB_TENANT_WRAPPER_LOG"
+export STUB_DEFAULT_WRAPPER="$STUB/wrapper"
+printf '{"credential_wrapper": ["%s", "--"]}\n' "$TENANT_STUB_WRAPPER" > "$TENANT/.livespec.jsonc"
+BEADS_DOLT_PASSWORD=family-stub run_launcher bd-ib-tenant
+rm -f "$TENANT/.livespec.jsonc"
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-tenant ] \
+    && grep -q 'ready-set-check.py' "$STUB_TENANT_WRAPPER_LOG" && grep -q 'dod-preflight.sh' "$STUB_TENANT_WRAPPER_LOG" \
+    && grep -q 'ledger-item.py\|wip-claimed-count.py' "$STUB_TENANT_WRAPPER_LOG" && grep -q 'drive.py' "$STUB_TENANT_WRAPPER_LOG" \
+    && ! grep -q 'password=present' "$STUB_TENANT_WRAPPER_LOG" \
+    && log_has "$CASE_LOG" "wrapper: tenant tenant-wrapper nested in wrapper"; then
+    pass "the ready-set check, the preflight, the ledger reads and the drive run under the tenant wrapper nested in the default one, with the family password absent"
+else
+    fail "launch-time commands did not run under the tenant wrapper as required (rc=$RC)"
+    head -5 "$STUB_TENANT_WRAPPER_LOG" >&2
+    head -2 "$CASE_LOG" >&2
+    tail -3 "$CASE_LOG" >&2
+fi
+new_case tenant-wrapper-family
+open_boards
+unset WRAPPER
+printf '{"credential_wrapper": ["/elsewhere/%s", "--"]}\n' "$(basename "$STUB/wrapper")" > "$TENANT/.livespec.jsonc"
+run_launcher bd-ib-family
+rm -f "$TENANT/.livespec.jsonc"
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-family ] && log_has "$CASE_LOG" "wrapper: default wrapper"; then
+    pass "a target whose credential_wrapper is the family wrapper runs under the default wrapper as is"
+else
+    fail "a family-wrapper target did not run under the default wrapper (rc=$RC)"
+    tail -4 "$CASE_LOG" >&2
+fi
+new_case tenant-wrapper-absent
+open_boards
+unset WRAPPER
+run_launcher bd-ib-no-key
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-no-key ] && log_has "$CASE_LOG" "wrapper: default wrapper"; then
+    pass "a target declaring no credential_wrapper runs under the default wrapper"
+else
+    fail "a target without a credential_wrapper did not run under the default wrapper (rc=$RC)"
+fi
+new_case tenant-wrapper-unreadable
+open_boards
+unset WRAPPER
+printf '{"credential_wrapper": ["not", "closed"\n' > "$TENANT/.livespec.jsonc"
+run_launcher bd-ib-unreadable-wrapper
+rm -f "$TENANT/.livespec.jsonc"
+if [ "$RC" != 0 ] && [ ! -s "$DRIVE_LOG" ] && [ ! -s "$PREFLIGHT_LOG" ] \
+    && grep -qF 'terminal: item=bd-ib-unreadable-wrapper ticket=none cause=credential-wrapper-unreadable' "$CASE_LOG"; then
+    pass "a target whose credential_wrapper cannot be read launches nothing and leaves a credential-wrapper-unreadable terminal line"
+else
+    fail "an unreadable credential_wrapper did not stop the launcher (rc=$RC)"
+    tail -4 "$CASE_LOG" >&2
+fi
+
+echo "--- 39. the configured ACP overrides and judge-model environment reach every drive"
+new_case routing
+open_boards
+printf '# a comment\nNODE_A={"a": 1}\n\nNODE_B={"b": 2}\n' > "$FLEET_LAUNCH_ACP_OVERRIDES_FILE"
+FLEET_LAUNCH_DOD_JUDGEMENT_MODEL=stub-dod FLEET_LAUNCH_DRIFT_JUDGE_MODEL=stub-drift FLEET_LAUNCH_REFLECTOR_MODEL='' run_launcher bd-ib-routed
+if [ "$RC" = 0 ] && grep -q 'bd-ib-routed acp=NODE_A={"a": 1};NODE_B={"b": 2}; dod=stub-dod drift=stub-drift reflector=unset' "$STUB_DRIVE_ENV_LOG" \
+    && log_has "$CASE_LOG" "acp overrides: 2 --acp-node arguments"; then
+    pass "two override lines reach the drive as two --acp-node arguments in order; non-empty judge models are exported and an empty one is not"
+else
+    fail "the configured routing did not reach the drive: $(cat "$STUB_DRIVE_ENV_LOG")"
+    tail -4 "$CASE_LOG" >&2
+fi
+rm -f "$FLEET_LAUNCH_ACP_OVERRIDES_FILE"
+: > "$STUB_DRIVE_ENV_LOG"
+run_launcher bd-ib-unrouted
+if [ "$RC" = 0 ] && grep -q 'bd-ib-unrouted acp= ' "$STUB_DRIVE_ENV_LOG" && log_has "$CASE_LOG" "acp overrides: 0 --acp-node arguments"; then
+    pass "control: an absent overrides file adds no --acp-node argument"
+else
+    fail "an absent overrides file still routed the drive: $(cat "$STUB_DRIVE_ENV_LOG")"
+fi
+
+echo "--- 40. a host-only item exits before the mutex and the preflight with one comment"
+new_case host-only
+open_boards
+export STUB_HOST_ONLY_JSON="$CASE_DIR/host-only.json"
+printf '{"work_item_id": "bd-ib-hostonly", "host_only": true, "reason": "declares an edit under .github/workflows/"}\n' > "$STUB_HOST_ONLY_JSON"
+ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-hostonly > "$CASE_LOG" 2>&1
+host_only_rc=$?
+if [ "$host_only_rc" = 5 ] && [ ! -s "$DRIVE_LOG" ] && [ ! -s "$PREFLIGHT_LOG" ] && [ ! -d "$FLEET_LAUNCH_GMK_LOCK_DIR" ] \
+    && grep -qF 'terminal: item=bd-ib-hostonly ticket=100 cause=host-only' "$CASE_LOG" \
+    && [ "$(grep -c . "$STUB_LEDGER_COMMENTS")" = 1 ] && grep -q 'ticket 100' "$STUB_LEDGER_COMMENTS" \
+    && grep -q 'declares an edit under .github/workflows/' "$STUB_LEDGER_COMMENTS" \
+    && [ -z "$(find "$FLEET_LAUNCH_GMK_QUEUE_DIR" -type f -print -quit)" ]; then
+    pass "a host-only verdict is a non-run exit naming the item, ticket 100 and the cause host-only, with one comment naming the reason"
+else
+    fail "the host-only screen did not stop the launcher as required (rc=$host_only_rc, comments: $(tr '\n' ' ' < "$STUB_LEDGER_COMMENTS"))"
+    tail -5 "$CASE_LOG" >&2
+fi
+new_case host-only-unanswerable
+open_boards
+export STUB_HOST_ONLY_UNANSWERABLE_FILE="$CASE_DIR/unanswerable"
+: > "$STUB_HOST_ONLY_UNANSWERABLE_FILE"
+run_launcher bd-ib-unanswered
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-unanswered ] && log_has "$CASE_LOG" "host-only screen could not answer"; then
+    pass "control: a host-only command that cannot answer is not read as host_only false, and the launch proceeds to the Dispatcher's own refusal"
+else
+    fail "an unanswerable host-only screen stopped the launch (rc=$RC)"
+fi
+
+echo "--- 41. a ticket marked wip-wait=1 by the interim launcher is skipped like a held= ticket"
+new_case wip-wait-skipped
+open_boards
+mkdir -p "$FLEET_LAUNCH_GMK_QUEUE_DIR"
+sleep 600 &
+legacy_pid=$!
+printf 'owner=legacy pid=%s item=bd-ib-legacy\nwip-wait=1\n' "$legacy_pid" > "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-legacy"
+ONLY_GMK=1 TICKET_NS=200 run_launcher bd-ib-behind-legacy
+kill "$legacy_pid" 2>/dev/null; wait "$legacy_pid" 2>/dev/null
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-behind-legacy ] && [ -e "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-legacy" ]; then
+    pass "a launcher behind a live wip-wait=1 ticket binds and launches; the marked ticket keeps its number"
+else
+    fail "a wip-wait=1 ticket blocked the launcher behind it (rc=$RC)"
+    tail -5 "$CASE_LOG" >&2
+fi
+
+echo "--- 42. the repository WIP count is read once per time-to-live and shared"
+new_case wip-shared-cache
+export FLEET_LAUNCH_MAX_WAIT_S=120
+export FLEET_LAUNCH_WIP_SHARED_TTL_S=600
+open_boards
+printf '5\n' > "$STUB_WIP_COUNT_FILE"
+ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-cache-a > "$CASE_DIR/a.log" 2>&1 &
+cache_a=$!
+wait_for_line "$CASE_DIR/a.log" "repository WIP at cap: counted=5 cap=5" 5 || fail "the first launcher did not read the count"
+ONLY_GMK=1 TICKET_NS=200 "$LAUNCHER" bd-ib-cache-b > "$CASE_DIR/b.log" 2>&1 &
+cache_b=$!
+wait_for_line "$CASE_DIR/b.log" "repository WIP at cap: counted=5 cap=5" 5 || fail "the second launcher did not read the count"
+sleep 0.3
+calls=$(grep -c . "$STUB_WIP_CALLS")
+if [ "$calls" = 1 ] && [ "$(cut -d' ' -f2- "$FLEET_LAUNCH_WIP_SHARED_DIR/wip-act.$(basename "$TENANT")" 2>/dev/null)" = "5 5" ]; then
+    pass "two launchers polling within one time-to-live computed the count once and shared it through the per-repository file"
+else
+    fail "the shared WIP count was computed $calls times within one time-to-live"
+fi
+stop_launcher "$cache_a" "$cache_b"; wait "$cache_a" 2>/dev/null; wait "$cache_b" 2>/dev/null
+new_case wip-cache-disabled
+open_boards
+export FLEET_LAUNCH_WIP_SHARED_TTL_S=0
+printf '4\n' > "$STUB_WIP_COUNT_FILE"
+run_launcher bd-ib-uncached
+if [ "$RC" = 0 ] && [ "$(grep -c . "$STUB_WIP_CALLS")" -ge 1 ] && [ ! -e "$FLEET_LAUNCH_WIP_SHARED_DIR/wip-act.$(basename "$TENANT")" ]; then
+    pass "control: a time-to-live of 0 disables the shared file and asks the helper every pass"
+else
+    fail "a time-to-live of 0 still wrote the shared file or skipped the helper (rc=$RC)"
+fi
+
+echo "--- 43. a resume honours the gmktec hold with its allowlist release, consumed at RESUME, through the resume helper"
+new_case resume-allowlist
+export FLEET_LAUNCH_MAX_WAIT_S=120
+open_boards
+: > "$HOLD_FILE"
+TICKET_NS=100 "$RESUME_LAUNCHER" bd-ib-resume-held > "$CASE_DIR/held.log" 2>&1 &
+resume_held_pid=$!
+if wait_for_line "$CASE_DIR/held.log" "hold file present" 5 && kill -0 "$resume_held_pid" 2>/dev/null && [ ! -s "$RESUME_LOG" ]; then
+    pass "a resume whose item is not allowlisted waits on the gmktec hold"
+else
+    fail "a resume launched through the gmktec hold"
+    tail -4 "$CASE_DIR/held.log" >&2
+fi
+printf 'bd-ib-resume-held\n' > "$FLEET_LAUNCH_FREEZE_ALLOWLIST_FILE"
+if wait_gone "$resume_held_pid" 15 && wait "$resume_held_pid" && [ "$(cat "$RESUME_LOG")" = bd-ib-resume-held ] \
+    && [ ! -s "$FLEET_LAUNCH_FREEZE_ALLOWLIST_FILE" ] && grep -q 'consumed at RESUME' "$FLEET_LAUNCH_FREEZE_ALLOWLIST_CONSUMED_LOG" \
+    && grep -q "^$TENANT bd-ib-resume-held$" "$STUB_RESUME_ARGV_LOG"; then
+    pass "an allowlisted resume starts through resume-repo.sh in the target repository and its line is consumed at RESUME"
+else
+    fail "the allowlisted resume did not start as required (resumes: $(tr '\n' ' ' < "$RESUME_LOG"), argv: $(tr '\n' ' ' < "$STUB_RESUME_ARGV_LOG"))"
+    tail -6 "$CASE_DIR/held.log" >&2
+    stop_launcher "$resume_held_pid"; wait "$resume_held_pid" 2>/dev/null
+fi
+new_case resume-three-args
+open_boards
+"$RESUME_LAUNCHER" 300 "$TENANT" bd-ib-three-args > "$CASE_LOG" 2>&1
+three_rc=$?
+if [ "$three_rc" = 0 ] && [ "$(cat "$RESUME_LOG")" = bd-ib-three-args ] && log_has "$CASE_LOG" "300-harness-seat"; then
+    pass "the seat's three-argument form names the ticket number, the repository and the item"
+else
+    fail "the three-argument resume form did not resume (rc=$three_rc)"
+    tail -4 "$CASE_LOG" >&2
+fi
+
+echo "--- 44. the size screen holds an item whose materialized workflow would exceed the cap"
+new_case size-screen-hold
+open_boards
+export FLEET_LAUNCH_SIZE_SCREEN=1
+printf '#!/usr/bin/env python3\nimport sys\nprint("HOLD   bd-ib-big  worst=524,900 threshold=520,000")\nsys.exit(3)\n' > "$FLEET_LAUNCH_SIZE_SCREEN_COMMAND"
+ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-big > "$CASE_LOG" 2>&1
+size_rc=$?
+hold_item="$FLEET_LAUNCH_ITEM_HOLD_DIR/hold-item-bd-ib-big"
+if [ "$size_rc" = 4 ] && [ ! -s "$DRIVE_LOG" ] && [ ! -s "$PREFLIGHT_LOG" ] && [ -e "$hold_item" ] \
+    && grep -q '^OWNER: ' "$hold_item" && grep -q '^END CONDITION: ' "$hold_item" && grep -q '^NEXT STEP: ' "$hold_item" \
+    && grep -qF 'terminal: item=bd-ib-big ticket=100 cause=size-screen verdict=OVER-THRESHOLD rc=3' "$CASE_LOG" \
+    && [ "$(grep -c . "$STUB_LEDGER_COMMENTS")" = 1 ]; then
+    pass "a HOLD verdict writes hold-item with owner, end condition and next step, runs no preflight and leaves a size-screen terminal line and one comment"
+else
+    fail "the size screen did not hold the item as required (rc=$size_rc)"
+    tail -5 "$CASE_LOG" >&2
+fi
+new_case size-screen-launch
+open_boards
+export FLEET_LAUNCH_SIZE_SCREEN=1
+printf '#!/usr/bin/env python3\nprint("LAUNCH bd-ib-small worst=100,000 threshold=520,000")\n' > "$FLEET_LAUNCH_SIZE_SCREEN_COMMAND"
+run_launcher bd-ib-small
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-small ] && log_has "$CASE_LOG" "size screen LAUNCH"; then
+    pass "control: a LAUNCH verdict lets the same launch proceed"
+else
+    fail "a LAUNCH size verdict did not launch (rc=$RC)"
+fi
+
+echo "--- 45. the slot-narrowing wrapper removes the excluded slots and keeps a judge credential"
+new_case slotnarrow
+cat > "$CASE_DIR/passthrough-wrapper" <<'PASSTHROUGH'
+#!/usr/bin/env bash
+[ "${1:-}" = -- ] && shift
+exec "$@"
+PASSTHROUGH
+chmod +x "$CASE_DIR/passthrough-wrapper"
+narrowed=$(CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_1=stub-one CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_4=stub-four CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_7=stub-seven CLAUDE_CODE_OAUTH_TOKEN=stub-plain \
+    FLEET_LAUNCH_DEFAULT_WRAPPER="$CASE_DIR/passthrough-wrapper" FLEET_LAUNCH_SLOTNARROW_EXCLUDED_SLOTS="ANTHROPIC_1 ANTHROPIC_3" FLEET_LAUNCH_SLOTNARROW_JUDGE_SLOT=ANTHROPIC_4 \
+    "$LAUNCH_DIR/wrappers/with-livespec-env-slotnarrow.sh" -- env | grep '^CLAUDE_CODE_OAUTH_TOKEN' | sort | tr '\n' ' ')
+if [ "$narrowed" = "CLAUDE_CODE_OAUTH_TOKEN=stub-four CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_4=stub-four CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_7=stub-seven " ]; then
+    pass "the excluded slots are absent from the command's environment, the others remain, and the unnumbered token is the judge slot's"
+else
+    fail "the slot-narrowing wrapper produced: $narrowed"
+fi
+
+echo "--- 46. early exits are bounded per window, and a -refused stage is a permanent refusal"
+new_case reticket-bound
+open_boards
+export FLEET_LAUNCH_MAX_WAIT_S=120
+export FLEET_LAUNCH_RETICKET_MAX_IN_WINDOW=1
+export STUB_DRIVE_FAIL_TIMES=5
+export STUB_DRIVE_FAIL_RC=1
+ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-bounded > "$CASE_LOG" 2>&1
+bound_rc=$?
+if [ "$bound_rc" = 1 ] && [ "$(drive_log_items)" = "bd-ib-bounded bd-ib-bounded" ] \
+    && grep -qF 'cause=reticket-bound early-exits-in-window=2' "$CASE_LOG" && [ "$(grep -c . "$STUB_LEDGER_COMMENTS")" = 1 ]; then
+    pass "the second early exit inside the window exceeds a bound of one: no third ticket, a reticket-bound terminal line and one comment"
+else
+    fail "the re-ticket bound was not applied (rc=$bound_rc, dispatches: $(drive_log_items))"
+    tail -6 "$CASE_LOG" >&2
+fi
+new_case reticket-refused-stage
+open_boards
+export FLEET_LAUNCH_MAX_WAIT_S=120
+export STUB_DRIVE_FAIL_TIMES=5
+export STUB_DRIVE_FAIL_RC=1
+export STUB_DRIVE_FAIL_STDOUT='{"dispatcher": {"exit_code": 1, "stdout_json": [{"stage": "host-only-refused", "status": "failed", "detail": "needs-host-secrets"}]}}'
+ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-stage-refused > "$CASE_LOG" 2>&1
+stage_rc=$?
+if [ "$stage_rc" = 1 ] && [ "$(drive_log_items)" = bd-ib-stage-refused ] \
+    && grep -qF 'terminal: item=bd-ib-stage-refused ticket=100 cause=refused' "$CASE_LOG" && [ "$(grep -c . "$STUB_LEDGER_COMMENTS")" = 1 ]; then
+    pass "a stage ending in -refused is a permanent refusal: one drive, a refused terminal line, one comment, no re-ticket"
+else
+    fail "a -refused stage was re-ticketed (rc=$stage_rc, dispatches: $(drive_log_items))"
+    tail -6 "$CASE_LOG" >&2
+fi
+
+echo "--- 47. the homelab wrapper argv names the committed homelab credential wrapper, never a parameter value"
+if [ "$(sed -n 1p "$LAUNCH_DIR/wrappers/homelab-wrapper.argv")" = "/home/ubuntu/workspace/homelab/with-homelab-credentials.sh" ] \
+    && [ "$(sed -n 2p "$LAUNCH_DIR/wrappers/homelab-wrapper.argv")" = "--" ] && [ "$(grep -c . "$LAUNCH_DIR/wrappers/homelab-wrapper.argv")" = 2 ]; then
+    pass "homelab-wrapper.argv is the homelab repository's committed credential wrapper followed by --"
+else
+    fail "homelab-wrapper.argv does not carry the homelab credential wrapper route"
 fi
 
 fi
