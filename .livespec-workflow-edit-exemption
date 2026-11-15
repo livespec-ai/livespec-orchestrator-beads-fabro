@@ -1,2 +1,2 @@
 work_item=bd-ib-qokmf7
-reason=carve incident-ci and acceptance runs-on onto CI_INCIDENT_RUNNER_LABELS so expedited PRs reach the tailnet-only observer (coordinator ruling option B; logically additive routing change, maintainer 2026-11-03)
+reason=carve check-metadata runs-on onto CI_INCIDENT_RUNNER_LABELS and pass the incident observer URL, connect address and query token to its check-red-green-replay leg only (guarded exactly as livespec-dev-tooling ci.yml), so an expedited PR touching product Python can be admitted through the tailnet-only observer /provenance; logically additive routing and env change (maintainer 2026-11-03), authorized by legacy-coordinator-agent under section 12 on 2026-11-15
