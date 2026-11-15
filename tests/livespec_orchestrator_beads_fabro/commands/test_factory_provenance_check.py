@@ -515,3 +515,24 @@ def test_main_refuses_when_the_diff_cannot_be_read(
     assert code == 2
     assert f"{_BASE}...{_HEAD}" in captured.err
     assert "fetch-depth: 0" in captured.err
+
+
+# The livespec-ai org cutover moves the fleet repositories' factory GitHub App
+# from the personal-account thewoolleyman-factory-bot (App 3668528) to the org
+# livespec-ai-factory-bot (App 5761962). Both identities must be recognized:
+# the org App authors pull requests on the transferred repositories, while the
+# personal App keeps authoring on personal-account adopters.
+@pytest.mark.parametrize(
+    "login",
+    [
+        "app/thewoolleyman-factory-bot",
+        "thewoolleyman-factory-bot[bot]",
+        "app/livespec-ai-factory-bot",
+        "livespec-ai-factory-bot[bot]",
+    ],
+)
+def test_personal_and_org_factory_app_logins_are_factory_authored(login: str) -> None:
+    verdict = decide(event=_event(login=login), changed_paths=(_PRODUCT_PY,), policy=_POLICY)
+    assert verdict.factory_authored is True
+    assert verdict.outcome == "pass"
+    assert permits_merge(verdict=verdict) is True

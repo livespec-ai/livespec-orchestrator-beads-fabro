@@ -34,11 +34,17 @@ __all__: list[str] = [
     "render_verdict",
 ]
 
-# BOTH spellings the forge uses for the one factory GitHub App. The webhook
+# BOTH spellings the forge uses for each factory GitHub App. The webhook
 # payload emits the `[bot]`-suffixed form; `gh` emits the `app/`-prefixed one.
+# Two Apps: the personal-account thewoolleyman-factory-bot (App 3668528), which
+# personal-account adopters keep using, and the livespec-ai org's
+# livespec-ai-factory-bot (App 5761962), which authors on the fleet
+# repositories after the org cutover.
 FACTORY_APP_LOGINS = (
     "app/thewoolleyman-factory-bot",
     "thewoolleyman-factory-bot[bot]",
+    "app/livespec-ai-factory-bot",
+    "livespec-ai-factory-bot[bot]",
 )
 # The declared-exception label. Its REASON belongs in the pull request body,
 # where a reviewer and the bypass audit can both read it.
