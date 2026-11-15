@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.332.3](https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/compare/v0.332.2...v0.332.3) (2026-11-15)
+
+
+### Bug Fixes
+
+* **fleet-launch:** cap case 10b load workers ([96b4319](https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/commit/96b43196d7cac6aee43adf3c91fb26640e94183f))
+* the DoD judgement subject omits the incident chain's livespec-incident-* records (bd-ib-ikmfr4) ([483408a](https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/commit/483408aa9b52f54b75dd3587a362c74495dd5982))
+
 ## [0.332.2](https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/compare/v0.332.1...v0.332.2) (2026-11-15)
 
 
