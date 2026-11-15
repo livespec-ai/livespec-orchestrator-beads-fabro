@@ -22,8 +22,10 @@ _SERVICE_DIR = _REPO_ROOT / "orchestrator-image" / "services" / "reconcile-runs"
 _SERVICE = _SERVICE_DIR / "reconcile-runs.service"
 _TIMER = _SERVICE_DIR / "reconcile-runs.timer"
 _INSTALL = _SERVICE_DIR / "install.sh"
+_TENANT_WRAP_SOURCE = _SERVICE_DIR / "tenant-wrap.sh"
 
 _ENV_WRAPPER = "/usr/local/bin/with-livespec-env.sh"
+_TENANT_WRAP = "/usr/local/libexec/livespec-tenant-wrap.sh"
 
 
 def _exec_start(*, unit: Path) -> str:
@@ -36,17 +38,27 @@ def _exec_start(*, unit: Path) -> str:
     return lines[0]
 
 
-def test_the_committed_exec_start_names_the_env_wrapper_and_the_reconcile_runs_verb() -> None:
-    """Without the wrapper the timer runs `bd` with no tenant password."""
+def test_the_committed_exec_start_names_the_tenant_wrapper_and_the_reconcile_runs_verb() -> None:
+    """Without a credential wrapper the timer runs `bd` with no tenant password.
+
+    The wrapper is the tenant wrapper, which reads the tenant repository's
+    committed `credential_wrapper` at run time (bd-ib-ft426g), and which itself
+    runs inside the family wrapper.
+    """
     exec_start = _exec_start(unit=_SERVICE)
 
-    assert _ENV_WRAPPER in exec_start
     # The wrapper is the COMMAND, not an argument buried later: it is the first
     # token after `ExecStart=` and it is followed by the `--` separator, which
     # is what makes it wrap the dispatcher rather than merely be mentioned.
-    assert exec_start.startswith(f"ExecStart={_ENV_WRAPPER} -- ")
+    assert exec_start.startswith(f"ExecStart={_TENANT_WRAP} -- ")
     assert "scripts/bin/dispatcher.py reconcile-runs" in exec_start
     assert "--repo @PRIMARY_REPO@" in exec_start
+    family = [
+        line
+        for line in _TENANT_WRAP_SOURCE.read_text(encoding="utf-8").splitlines()
+        if line.startswith("FAMILY_WRAPPER=")
+    ]
+    assert family == [f"FAMILY_WRAPPER={_ENV_WRAPPER}"]
 
 
 def test_the_host_timer_surveys_only_the_live_factories() -> None:
@@ -159,7 +171,11 @@ def test_the_installer_renders_both_units_when_the_wrapper_resolves(tmp_path: Pa
     assert completed.returncode == 0, completed.stderr
     rendered = tmp_path / "units" / "reconcile-runs.service"
     exec_start = _exec_start(unit=rendered)
-    assert exec_start.startswith(f"ExecStart={wrapper} -- ")
+    tenant_wrap = tmp_path / "libexec" / "livespec-tenant-wrap.sh"
+    assert exec_start.startswith(f"ExecStart={tenant_wrap} -- ")
+    # The installed tenant wrapper runs inside the family wrapper this host has.
+    assert os.access(tenant_wrap, os.X_OK)
+    assert f"FAMILY_WRAPPER={wrapper}\n" in tenant_wrap.read_text(encoding="utf-8")
     assert "reconcile-runs" in exec_start
     # Every placeholder is substituted: an unrendered token would make systemd
     # refuse the unit at load time, long after the operator has walked away.
@@ -212,6 +228,7 @@ def _run(
         env={
             **os.environ,
             "LIVESPEC_ENV_WRAPPER": env_wrapper,
+            "LIVESPEC_TENANT_WRAP": str(tmp_path / "libexec" / "livespec-tenant-wrap.sh"),
             "UNIT_DIR": str(tmp_path / "units"),
             "DRY_RUN": "1",
         },

@@ -9,12 +9,26 @@
 # `@PLUGIN_ROOT@`, `@PRIMARY_REPO@` and `@RUN_AS_USER@` are substituted by
 # `install.sh` in this directory. Do NOT install this file verbatim.
 #
-# The ExecStart runs THROUGH the project's env wrapper. That is load-bearing,
-# not decoration: `bd` reads the tenant password from a bare
-# `BEADS_DOLT_PASSWORD` that only the wrapper injects, so a bare invocation
-# fails with "Access denied" / "no beads database found" and reads as a missing
-# tenant rather than as a missing credential. `install.sh` refuses to install
-# a unit whose wrapper is not an executable file on this host.
+# The ExecStart runs THROUGH the tenant credential wrapper, `tenant-wrap.sh` in
+# this directory, which `install.sh` installs at the fixed path named below.
+# That is load-bearing, not decoration, for two reasons:
+#
+# - `bd` reads the tenant password from a bare `BEADS_DOLT_PASSWORD` that only
+#   a credential wrapper injects, so a bare invocation fails with "Access
+#   denied" / "no beads database found" and reads as a missing tenant rather
+#   than as a missing credential.
+# - The wrapper must be the one the TENANT repository commits as
+#   `credential_wrapper` in its `.livespec.jsonc`, read at run time, not a fixed
+#   `/usr/local/bin/with-livespec-env.sh`: that family wrapper alone projects
+#   the family's default GitHub App pair, which livespec-ai repositories refuse
+#   (bd-ib-ft426g). `tenant-wrap.sh` resolves the tenant from the working
+#   directory below and still runs everything inside the family wrapper.
+#
+# The path is fixed rather than a placeholder so the rendered ExecStart is the
+# same on every host and matches the override this unit replaces (the
+# `60-tenant-wrap.conf` drop-in, which `install.sh` removes). `install.sh`
+# refuses to install while the family wrapper is not an executable file on
+# this host.
 
 [Unit]
 Description=livespec reconcile-runs — reconcile factory run inventory against the ledger
@@ -26,7 +40,7 @@ Wants=network-online.target
 Type=oneshot
 User=@RUN_AS_USER@
 WorkingDirectory=@PRIMARY_REPO@
-ExecStart=/usr/local/bin/with-livespec-env.sh -- /usr/bin/python3 @PLUGIN_ROOT@/scripts/bin/dispatcher.py reconcile-runs --repo @PRIMARY_REPO@ --invoker timer:reconcile-runs --json
+ExecStart=/usr/local/libexec/livespec-tenant-wrap.sh -- /usr/bin/python3 @PLUGIN_ROOT@/scripts/bin/dispatcher.py reconcile-runs --repo @PRIMARY_REPO@ --invoker timer:reconcile-runs --json
 # One pass surveys every declared factory over the network; the reconciler's own
 # per-factory `fabro ps` timeout is 60s, so this bounds the whole pass rather
 # than any single call. 1800s, not 600s: measured 2026-10-27 on v0.243.15, a live
