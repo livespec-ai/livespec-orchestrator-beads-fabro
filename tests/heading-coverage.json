@@ -433,7 +433,7 @@
     "heading": "## Scenario 20 \u2014 Review gate routes a green build through code review before PR",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "tests.integration.test_workflow_acp_adapter_parameterized.test_each_acp_node_has_its_own_adapter_input",
+    "test": "tests.integration.test_workflow_acp_adapter_parameterized.test_each_acp_node_has_the_declared_stage_adapter_input",
     "reason": "Integration-tier acceptance for Scenario 20: the bound node id inspects the shipped implement-work-item Fabro graph and verifies each ACP node rides its own adapter input, so the implementer nodes and the review-only node are configured independently; sibling tests in the same module prove the review adapter pin, the conditioned approve edge, the label-only routing, the unconditional needs-human fallback and the bounded review-fix loop. The gate is BLOCKING by default: a past-cap blocking finding escalates the item to blocked / needs-human unless the effective merge_on_review_cap ships it (contracts.md \u00a7\"Dispatcher policy settings\"); the graph's approve/fix edge behavior is codified in the workflow DOT, and the blocking/ship-on-cap disposition binds its test when the dispatcher-policy-settings implementation slice lands."
   },
   {
@@ -530,8 +530,8 @@
     "heading": "## Scenario 32 \u2014 Adopter-target dispatch compatibility",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "tests.integration.test_adopter_dispatch_app_reach_scenario32.test_scenario32_an_unreachable_adopter_target_refuses_before_any_run_exists, tests.integration.test_adopter_dispatch_prepare_steps_scenario32.test_scenario32_an_adopter_carrying_its_own_workflow_runs_its_own_prepare_chain, tests.integration.test_adopter_dispatch_pull_primary_scenario32.test_scenario32_the_pull_primary_stage_pulls_the_targets_own_default_branch",
-    "reason": "Bound by bd-ib-7fcmla, which re-owned this entry under coordinator ruling R662 (gitops-fleet-capacity-monitoring, 2026-10-22): every owner the previous reason named (bd-ib-z2ctra, bd-ib-hkzcfb, bd-ib-w4iaaf) is done, so the entry had no live owner and check-no-todo-registry could not see the debt. One integration-tier node id per gherkin block, each driving production code against the committed adopter fixture: the App-reach preflight through the REAL pre-dispatch wall, so \"refuses BEFORE launching\" is observable as a refusal that reached no admission; the target-local workflow resolution plus the prepare-parameter projection, because the steps that run come from the dispatched workflow AND from the typed values it reads and either alone can smuggle a fleet constant; and the post-merge janitor's pull-primary stage through the REAL post_merge, since the argv builder alone cannot show the flow reaches it. Each module carries its own positive control, because every assertion here is an ABSENCE and an absence reported by an instrument that cannot return a hit is not evidence.",
+    "test": "tests.integration.test_adopter_dispatch_app_reach_scenario32.test_scenario32_an_unreachable_adopter_target_refuses_before_any_run_exists",
+    "reason": "Bound by bd-ib-7fcmla, which re-owned this entry under coordinator ruling R662 (gitops-fleet-capacity-monitoring, 2026-10-22): every owner the previous reason named (bd-ib-z2ctra, bd-ib-hkzcfb, bd-ib-w4iaaf) is done, so the entry had no live owner and check-no-todo-registry could not see the debt. This integration-tier node drives the App-reach preflight through the real pre-dispatch wall, so \"refuses BEFORE launching\" is observable as a refusal that reached no admission. Its instruments include the identity and reach probes and the journaled preflight refusal, so an absence of a launch is not inferred from an uninformative exit code.",
     "work_item": "bd-ib-heat"
   },
   {
@@ -832,7 +832,7 @@
     "heading": "## ACP node timeouts",
     "spec_root": "SPECIFICATION",
     "spec_file": "contracts.md",
-    "test": "tests.livespec_orchestrator_beads_fabro.commands.test_dispatcher_node_timeouts.test_configured_node_keeps_its_value_and_others_take_the_default",
+    "test": "tests.livespec_orchestrator_beads_fabro.commands.test_dispatcher_node_timeouts.test_configured_node_keeps_its_value_and_others_keep_their_declaration",
     "work_item": "bd-ib-cnkf",
     "reason": "Bound by bd-ib-cnkf: a configured node timeout renders as its own literal duration while every unconfigured node resolves to the 1800-second default. A contracts.md heading MAY bind a unit-tier test; the same module covers the validation refusals, the no-template-opener rendering, and the derived subprocess ceiling."
   },
@@ -1026,7 +1026,7 @@
     "heading": "## Scenario 89 \u2014 Node timeouts resolve from configuration and land as literal durations",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "tests.integration.test_node_timeouts_scenario89.test_configured_node_keeps_its_value_and_others_default",
+    "test": "tests.integration.test_node_timeouts_scenario89.test_configured_node_keeps_its_value_and_others_keep_workflow_defaults",
     "work_item": "bd-ib-cnkf",
     "reason": "Bound by bd-ib-cnkf to the integration-tier journey: a real dispatch through dispatcher.main reads back the workflow graph the run receives and asserts the configured node keeps its value while the others take the 1800-second default. The same module carries the scenario's other three cases \u2014 the all-default render with no template opener, the derived subprocess ceiling, and the refusal before any run exists."
   },
@@ -1719,8 +1719,8 @@
     "heading": "## Scenario 171 \u2014 A still-running master CI run makes the preflight wait, not refuse",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "tests.integration.test_master_ci_pending_wait_scenario171.test_scenario171_pending_master_ci_green_within_bound_dispatches_and_journals_pass, tests.integration.test_master_ci_pending_wait_scenario171.test_scenario171_pending_master_ci_red_within_bound_refuses_naming_run, tests.integration.test_master_ci_pending_wait_scenario171.test_scenario171_newer_green_master_ci_run_replaces_wait_target, tests.integration.test_master_ci_pending_wait_scenario171.test_scenario171_pending_master_ci_expiry_defers_without_claim",
-    "reason": "Bound to integration-tier Dispatcher journeys for the master-CI preflight's bounded wait on a still-running default-branch run: green proceeds, red refuses, a newer run is followed, and bound expiry defers with reason master-ci-pending. Bound by bd-ib-yzk2h2, which re-owns the completed bd-ib-ex35cb test debt.",
+    "test": "tests.integration.test_master_ci_pending_wait_scenario171.test_scenario171_pending_master_ci_green_within_bound_dispatches_and_journals_pass",
+    "reason": "Bound to an integration-tier Dispatcher journey for the master-CI preflight's bounded wait on a still-running default-branch run: green proceeds after the pending run completes and journals the pass. Bound by bd-ib-yzk2h2, which re-owns the completed bd-ib-ex35cb test debt.",
     "work_item": "bd-ib-yzk2h2"
   },
   {
