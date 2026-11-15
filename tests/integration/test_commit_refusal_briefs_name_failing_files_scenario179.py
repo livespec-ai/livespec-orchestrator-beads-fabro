@@ -4,10 +4,11 @@
 re-entry brief names the failing files from the full recorded output". The Red
 and Green command programs are materialized into a plugins root beside the
 commit runner, exactly as a dispatch lands them, and refused by a real commit
-hook whose output ends in the per-target timing table; the `fix_open_red_route`
-and `review_fix_open_red_route` nodes are executed from the committed graph.
+hook whose output ends in the per-target timing table; the
+`review_fix_open_red_route` node is executed from the committed graph (a failed
+fix settle re-enters `fix` directly, so `fix_open_red_route` never sees one).
 Each brief must carry the same failing-file section the runner's builder prints
-for that output.
+for that output, and a runner that fails still leaves the hook tail in place.
 """
 
 from __future__ import annotations
@@ -178,20 +179,14 @@ def test_a_program_without_the_runner_beside_it_says_the_section_is_unavailable(
     assert "failing files: unavailable, because the commit runner is not materialized" in handoff
 
 
-@pytest.mark.parametrize(
-    ("route", "live", "brief"),
-    [
-        ("fix_open_red_route", "livespec-fix-live-commit", "livespec-fix-open-red-brief"),
-        (
-            "review_fix_open_red_route",
-            "livespec-review-fix-live-commit",
-            "livespec-review-fix-open-red-brief",
-        ),
-    ],
-)
-def test_an_open_red_brief_carries_the_settled_failed_run_s_failing_files(
-    tmp_path: Path, route: str, live: str, brief: str
+def test_the_review_fix_open_red_brief_carries_the_settled_failed_run_s_failing_files(
+    tmp_path: Path,
 ) -> None:
+    route, live, brief = (
+        "review_fix_open_red_route",
+        "livespec-review-fix-live-commit",
+        "livespec-review-fix-open-red-brief",
+    )
     plugins = _plugins(tmp_path=tmp_path)
     repo = _repository(tmp_path=tmp_path)
     tests = repo / "tests"
@@ -215,3 +210,25 @@ def test_an_open_red_brief_carries_the_settled_failed_run_s_failing_files(
     assert routed.returncode == 0, routed.stderr
     assert "- pkg/a.py: uncovered lines 4-5" in section
     assert written.startswith(section)
+
+
+def test_a_failing_runner_still_hands_off_the_tail_and_says_why_the_section_is_missing(
+    tmp_path: Path,
+) -> None:
+    repo = _repository(tmp_path=tmp_path)
+    _green_ready(repo=repo)
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    program = broken / COMMIT_GREEN_PROGRAM_FILENAME
+    landed = _plugins(tmp_path=tmp_path) / COMMIT_GREEN_PROGRAM_FILENAME
+    _ = program.write_text(landed.read_text(encoding="utf-8"), encoding="utf-8")
+    _ = (broken / COMMIT_RUNNER_PROGRAM_FILENAME).write_text("raise SystemExit(3)\n", "utf-8")
+
+    green = _run(cwd=repo, argv=["bash", str(program)])
+
+    handoff = _git_path(repo=repo, name="livespec-implement-handoff.md").read_text(encoding="utf-8")
+    section = handoff.split("## commit_green", 1)[1]
+    assert green.returncode == 1, green.stderr
+    assert "failing files: unavailable (runner exited 3)" in section
+    assert "Hook output (last 80 lines):" in section
+    assert "0.99s check-target-99" in section
