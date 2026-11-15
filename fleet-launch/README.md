@@ -143,6 +143,14 @@ with these deliberate differences, each with its reason:
   `env -u` list; and an unreadable `credential_wrapper` makes the committed wrapper REFUSE with exit
   78, where the live copy falls back to the bare family wrapper, because a guessed chain under route C
   is exactly the personal-App mint this fix exists to prevent.
+- **The drive is exec'd in its subshell, and the harness runs under a non-reaping subreaper.** The
+  drive's subshell ends in `exec` of the resolved wrapper chain, so the chain is the launcher's direct
+  child and `wait` reaps it; a subshell ending in the `wrap` function left the chain a grandchild
+  that stop_drive's kill turned into a zombie wherever PID 1 does not reap orphans, which CI
+  containers do not. Scenario 330 cases 20a and 20e failed in CI alone on 2026-11-15 for that reason
+  (`kill -0` read the stopped drive as alive) while passing on every developer host, so
+  `dev-tooling/just-check-fleet-launch.sh` now runs the harness under `PR_SET_CHILD_SUBREAPER` with
+  a parent that reaps only its one child, and the same leak fails locally.
 - **The gmktec idle gate measures whole-host `mpstat` idle** against `gmk-idle-floor` (live value
   0, fallback 3), exactly as the interim copy did. The spec's factory-class pressure measure is
   implemented by neither copy; that gap is recorded here rather than hidden.

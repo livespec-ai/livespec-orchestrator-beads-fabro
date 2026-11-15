@@ -1035,7 +1035,14 @@ while :; do
   # One-shot: this item's freeze-allowlist line is consumed at LAUNCH, so a pre-listing re-ticket
   # waits behind the hold like any other ticket.
   [ "$target" = mi-homelab ] || [ "$target" = homelab-worker-arm64 ] || consume_allowlist_line LAUNCH
-  (cd "$REPO" && wrap -- env LIVESPEC_FACTORY_READ_WRAPPER="$FLEET_LAUNCH_DEFAULT_WRAPPER" "${JUDGE_ENV[@]}" python3 "$plugin/scripts/bin/drive.py" --repo "$REPO" --action "impl:$ITEM" --invoker "claude:$SEAT" "${ACP_ARGS[@]}" --json) > "$OUT/$ITEM-r267.json" 2>"$OUT/$ITEM-r267.stderr" &
+  # The drive is EXEC'd in its subshell so the wrapper chain is this launcher's direct child and
+  # `wait "$drive_pid"` reaps it. A subshell that ends in the `wrap` function instead leaves the
+  # chain a grandchild: when stop_drive kills both, the chain is re-parented to PID 1 (or a
+  # subreaper) and stays a zombie wherever that parent does not reap orphans, as CI containers do
+  # not, so `kill -0` keeps reading the stopped drive as alive (Scenario 330 cases 20a and 20e
+  # failed only in CI on 2026-11-15). The harness runs under a non-reaping subreaper for the same
+  # reason, so this shape is now checked everywhere.
+  (cd "$REPO" && wrapper_chain && exec "${WRAP_CHAIN[@]}" env LIVESPEC_FACTORY_READ_WRAPPER="$FLEET_LAUNCH_DEFAULT_WRAPPER" "${JUDGE_ENV[@]}" python3 "$plugin/scripts/bin/drive.py" --repo "$REPO" --action "impl:$ITEM" --invoker "claude:$SEAT" "${ACP_ARGS[@]}" --json) > "$OUT/$ITEM-r267.json" 2>"$OUT/$ITEM-r267.stderr" &
   drive_pid=$!
   if [ -n "${CAPTURE_NULL:-}" ]; then
     # Watch for the first fabro run of THIS item and check that its argv names the expected server.
