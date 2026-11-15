@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.333.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.333.0...v0.333.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* recognize the livespec-ai org factory App in factory provenance ([fcb169f](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/fcb169f15cd51c4c7e68660f91d3a5d9273fb1f6))
+* red and green route their labels under the engine's output contract, and refuse labels the graph does not route (bd-ib-crvt34) ([1e6b349](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/1e6b349283ba8b058bcfa7bb615a1c59898f3f5b))
+
 ## [0.333.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.332.3...v0.333.0) (2026-11-15)
 
 
