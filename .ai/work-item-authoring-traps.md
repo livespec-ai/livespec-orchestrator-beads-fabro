@@ -176,3 +176,18 @@ already gave to plan-level proof; moving it to Context gave `tier none`.
 `bd-ib-vc6o5q` was held for collect-alone and import-order bullets, which needed
 a proposal. `bd-ib-nq2wim` was held for exit statuses, HUP and a 200-trial bar;
 rewriting it to the ratified Terminal line clause released it.)
+
+**When you repair an item's Definition of Done in its description, also clear
+the native `acceptance_criteria` field.** Once the description has a gradeable
+`## Definition of Done`, the effective-criteria resolution reads the field no
+longer, and the filing display reports `resolved from
+description-definition-of-done` with no findings. The DoD judge, however, still
+receives the field (`_dispatcher_dod_judgement.py` appends any
+`acceptance_criteria` value to the text it grades), so stale lines left there
+from filing are graded too. Run `bd update <id> --acceptance ""` under the env
+wrapper, then confirm with `bd show <id> --json` that the field is absent before
+you hand the item to the factory. (Measured 2026-10-25: `bd-ib-yq4x4g`'s run
+`01M5T9XDVX9Y` stopped at needs-human before implement. A test-existence
+assertion and internal identifiers left in the field were graded, while the
+repaired description was clean. Moved here from a host-local agent memory note
+by `bd-ib-ftq3oh`.)
