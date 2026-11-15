@@ -399,11 +399,26 @@ delegated_gate = true
 # - check-per-file-coverage test run: 929.22 s at 8 workers, 796.70 s at 12.
 # - working set: 4.10 GiB at 8 workers, 5.22 GiB at 12 (87% of the 6Gi default).
 # The 6Gi default leaves too little headroom at 12 workers, so 8Gi is declared.
-# gate_cpu stays at the renderer default of 5: the Job has no CPU limit, so the
-# request only reserves CPU and does not cap it.
-# Source: livespec-dev-tooling plan gate-job-resources, research note 003 (plan
-# assertion 5, epic livespec-dev-tooling-ukoeah).
-gate_parallelism = 12
+# The memory figures stand; 8Gi is kept.
+#
+# CPU, 2026-11-15: request and workers are now BOTH 10, so a Kueue gate lane
+# counts the cores this gate really burns. At gate_cpu 5 / 12 workers the Job
+# (no CPU limit) drew about 16 cores against a 5-cpu request: Honeycomb
+# k8s.pod.cpu.usage over the 12 h to ~07:00Z read P90 26.2 cores on
+# gmktec-xubuntu, 14.7 on gamingpc-xubuntu (its whole allocatable) and 48.4 on
+# poweredge-xubuntu. gmktec's 10-cpu lane admitted two of them (32.4 of 32 cores
+# by node cgroups, gates gt5tv and 9jmnf), starving the BestEffort CI runners,
+# and gamingpc read 0.14% idle on gate h5f9x. At 10 cpu a gate fits gmktec's lane
+# once and the PowerEdge's twice, and no 5-cpu lane (gamingpc, hp, the M4) takes
+# one. 10 workers sits between the measured 929 s (8) and 797 s (12) test runs,
+# under the yljbpf 900 s line. REVERT: restore gate_parallelism = 12 and drop
+# gate_cpu, if any node stays under 5% idle with BestEffort full avg60 over 30
+# across two 10-minute windows WORSE than the pre-change read, or if orchestrator
+# gate queue waits exceed five minutes.
+# Source: livespec-dev-tooling plan gate-job-resources, research notes 003 and
+# 004, epic livespec-dev-tooling-ukoeah, item (i).
+gate_cpu = 10
+gate_parallelism = 10
 gate_memory = "8Gi"
 # The dev host delegates a hand commit's aggregate when it can submit a gates
 # Job; sandbox and credentialless hosts retain the local pre-commit gate. The
