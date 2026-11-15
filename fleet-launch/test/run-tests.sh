@@ -3756,21 +3756,47 @@ else
     fail "a LAUNCH size verdict did not launch (rc=$RC)"
 fi
 
-echo "--- 45. the slot-narrowing wrapper removes the excluded slots and keeps a judge credential"
+echo "--- 45. the slot-narrowing wrapper strips slots INSIDE the target's committed credential_wrapper chain"
+# The stub family wrapper projects what the host wrapper projects: a personal App pair, the org pair
+# and the slot tokens. Values are stubs; the probe prints which pair the child holds, whether the
+# unnumbered token is the judge slot's, and the NAMES of the numbered slots left, never a value.
 new_case slotnarrow
-cat > "$CASE_DIR/passthrough-wrapper" <<'PASSTHROUGH'
+cat > "$CASE_DIR/family-wrapper" <<'FAMILY_STUB'
 #!/usr/bin/env bash
 [ "${1:-}" = -- ] && shift
+GITHUB_APP_ID=personal-stub GITHUB_PRIVATE_KEY=personal-key-stub GITHUB_APP_ID_ORG=org-stub GITHUB_PRIVATE_KEY_ORG=org-key-stub \
+CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_1=stub-one CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_4=stub-four CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_7=stub-seven CLAUDE_CODE_OAUTH_TOKEN=stub-plain \
 exec "$@"
-PASSTHROUGH
-chmod +x "$CASE_DIR/passthrough-wrapper"
-narrowed=$(CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_1=stub-one CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_4=stub-four CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_7=stub-seven CLAUDE_CODE_OAUTH_TOKEN=stub-plain \
-    FLEET_LAUNCH_DEFAULT_WRAPPER="$CASE_DIR/passthrough-wrapper" FLEET_LAUNCH_SLOTNARROW_EXCLUDED_SLOTS="ANTHROPIC_1 ANTHROPIC_3" FLEET_LAUNCH_SLOTNARROW_JUDGE_SLOT=ANTHROPIC_4 \
-    "$LAUNCH_DIR/wrappers/with-livespec-env-slotnarrow.sh" -- env | grep '^CLAUDE_CODE_OAUTH_TOKEN' | sort | tr '\n' ' ')
-if [ "$narrowed" = "CLAUDE_CODE_OAUTH_TOKEN=stub-four CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_4=stub-four CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_7=stub-seven " ]; then
-    pass "the excluded slots are absent from the command's environment, the others remain, and the unnumbered token is the judge slot's"
+FAMILY_STUB
+chmod +x "$CASE_DIR/family-wrapper"
+mkdir -p "$CASE_DIR/route-c-tenant" "$CASE_DIR/bare-tenant"
+printf '{"credential_wrapper": ["%s", "--", "/bin/sh", "-c", "GITHUB_APP_ID=\\"$GITHUB_APP_ID_ORG\\" GITHUB_PRIVATE_KEY=\\"$GITHUB_PRIVATE_KEY_ORG\\" exec \\"$@\\"", "sh"]}\n' "$CASE_DIR/family-wrapper" > "$CASE_DIR/route-c-tenant/.livespec.jsonc"
+slot_probe='if [ "$GITHUB_APP_ID" = "$GITHUB_APP_ID_ORG" ] && [ "$GITHUB_PRIVATE_KEY" = "$GITHUB_PRIVATE_KEY_ORG" ]; then printf org-app; else printf personal-app; fi
+if [ "${CLAUDE_CODE_OAUTH_TOKEN:-}" = "${CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_4:-unset}" ]; then printf " judge=slot4"; else printf " judge=other"; fi
+printf " slots=%s" "$(env | sed -n "s/^\(CLAUDE_CODE_OAUTH_TOKEN__[A-Z0-9_]*\)=.*/\1/p" | sort | tr "\n" ",")"'
+narrow_in() {
+    (cd "$1" && FLEET_LAUNCH_DEFAULT_WRAPPER="$CASE_DIR/family-wrapper" FLEET_LAUNCH_SLOTNARROW_EXCLUDED_SLOTS="ANTHROPIC_1 ANTHROPIC_3" FLEET_LAUNCH_SLOTNARROW_JUDGE_SLOT=ANTHROPIC_4 \
+        WRAPPER="$LAUNCH_DIR/wrappers/with-livespec-env-slotnarrow.sh" "$LAUNCH_DIR/wrappers/with-livespec-env-slotnarrow.sh" -- sh -c "$slot_probe")
+}
+narrowed=$(narrow_in "$CASE_DIR/route-c-tenant")
+if [ "$narrowed" = "org-app judge=slot4 slots=CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_4,CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_7," ]; then
+    pass "a slot-narrowed launch of a route C repository holds the org App pair, the judge slot's unnumbered token, and only the slots not excluded"
 else
-    fail "the slot-narrowing wrapper produced: $narrowed"
+    fail "the slot-narrowing wrapper did not compose with route C's committed argv: $narrowed"
+fi
+bare=$(narrow_in "$CASE_DIR/bare-tenant")
+if [ "$bare" = "personal-app judge=slot4 slots=CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_4,CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_7," ]; then
+    pass "control: with no committed argv the same narrowing runs under the bare family wrapper, which holds the personal App pair"
+else
+    fail "control: the undeclared case did not narrow under the bare family wrapper: $bare"
+fi
+printf '{"credential_wrapper": ["not", "closed"\n' > "$CASE_DIR/bare-tenant/.livespec.jsonc"
+unreadable_rc=0; unreadable_out=$(narrow_in "$CASE_DIR/bare-tenant" 2>&1) || unreadable_rc=$?
+rm -f "$CASE_DIR/bare-tenant/.livespec.jsonc"
+if [ "$unreadable_rc" = 78 ] && [ -z "${unreadable_out##*cannot be read*}" ]; then
+    pass "an unreadable credential_wrapper makes the slot-narrowing wrapper refuse (rc=78) instead of guessing a chain"
+else
+    fail "an unreadable credential_wrapper did not make the slot-narrowing wrapper refuse (rc=$unreadable_rc): $unreadable_out"
 fi
 
 echo "--- 46. early exits are bounded per window, and a -refused stage is a permanent refusal"

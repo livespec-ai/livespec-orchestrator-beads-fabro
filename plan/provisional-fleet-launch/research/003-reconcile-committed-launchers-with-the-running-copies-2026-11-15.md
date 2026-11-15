@@ -115,3 +115,24 @@ Rule K sweep for the same special case, each placement reported:
   `/usr/local/libexec/livespec-tenant-wrap.sh` on vps (read over ssh, 2026-11-15 ~11:3xZ): CLEAN of the
   drop. Both test the basename but exec `"${cw[@]}" "$@"` whole and fall back to the bare family
   wrapper only when no argv is declared.
+
+### Slot narrowing composes with the committed argv (coordinator ruling, same head)
+
+legacy-coordinator-agent ruled the `WRAPPER=` finding above is not a design call: legacy-dispatcher-agent
+had already composed the two live. Per its answer (session 3aa1c4): the old seat
+`with-livespec-env-slotnarrow.sh` (92f3c43da2d1) is RETIRED for placements; the live file is
+`/var/tmp/ldseat/with-tenant-slotstrip.sh` (961ccb6f782b, read over ssh), passed as `WRAPPER=` by the
+three placers `t-widen-fresh.sh`, `t-widen-seeded.sh` and `t-ticket-only.sh` through `ticket.sh`; the
+launcher `dispatch-dual-r681b.sh` (f0eeecfea2a2) is unchanged. Its order: resolve the target's committed
+argv (as `tenant_wrap`), then run `bash -c '<set CLAUDE_CODE_OAUTH_TOKEN to _4; env -u the excluded
+slots>' <cmd>` INSIDE that chain, so the route C hop runs before the strip and the strip touches only
+Claude slot variables. Proof on xowhol 10:27:08Z: `GITHUB_APP_ID == _ORG`, only slot `_4` present, token
+equals `_4`; the 10:48:58Z mint probe reached installation 182016479 through the same chain.
+
+The committed `fleet-launch/wrappers/with-livespec-env-slotnarrow.sh` now does the same through
+`launch-lib.sh` (`resolve_tenant_wrapper`, then the new `wrapper_chain`, then `exec` of the chain with
+the strip innermost). Harness case 45 asserts the child under route C's argv holds the org pair, the
+judge slot's unnumbered token and only the non-excluded slot names; the control (no committed argv)
+narrows under the bare family wrapper and holds the personal pair; an unreadable argv refuses with
+rc 78. `/usr/local/libexec/livespec-tenant-wrap.sh` (003e543956c8) is the reconcile-runs variant
+without the strip; its backfill bd-ib-ft426g is central-credential-service's.

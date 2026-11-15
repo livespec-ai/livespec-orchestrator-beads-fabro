@@ -43,7 +43,7 @@ for the Dispatcher's own admission conditions.
 | `release-hold-on-caam-rotation.sh` | Keeps the hold file in place until caam's active Claude profile changes, then removes it. |
 | `resolve-default-factory.sh` | Prints a repository's committed `dispatcher.default_factory` from its origin default branch. |
 | `host-capture-payload.py` | Builds a `host_recorded` Proof-of-Done payload from a registry-resolved capture dispatch; refuses, writing nothing, when any evidence is missing. |
-| `wrappers/` | PATH-keeping shims around each independent tenant's committed credential wrapper, passed as `WRAPPER=` to `dispatch-dual.sh` when the default (the target's own `credential_wrapper`) is not wanted. `homelab-wrapper.argv` is the homelab repository's committed credential wrapper route. `with-livespec-env-slotnarrow.sh` narrows a family launch's Claude credential pool to the slots the seat allows (slot names only; `FLEET_LAUNCH_SLOTNARROW_EXCLUDED_SLOTS` and `FLEET_LAUNCH_SLOTNARROW_JUDGE_SLOT`). |
+| `wrappers/` | PATH-keeping shims around each independent tenant's committed credential wrapper, passed as `WRAPPER=` to `dispatch-dual.sh` when the default (the target's own `credential_wrapper`) is not wanted. `homelab-wrapper.argv` is the homelab repository's committed credential wrapper route. `with-livespec-env-slotnarrow.sh` narrows a family launch's Claude credential pool to the slots the seat allows (slot names only; `FLEET_LAUNCH_SLOTNARROW_EXCLUDED_SLOTS` and `FLEET_LAUNCH_SLOTNARROW_JUDGE_SLOT`), resolving the target repository's committed `credential_wrapper` chain exactly as an un-overridden launch does and stripping the slots as the innermost hop of that chain, so route C's org-App hop is kept (the live seat's `with-tenant-slotstrip.sh` order). |
 | `test/run-tests.sh` | The hermetic harness run by `just check-fleet-launch`; it uses stub boards, credentials, preflights, queue, lock, in-flight and state directories, never a live factory. |
 
 ## Running a launch
@@ -131,6 +131,13 @@ with these deliberate differences, each with its reason:
   execs the argv whole, so it never had the defect. Harness cases 38 and 48 cover both shapes with
   a positive control; a value-free host check through the fixed chain minted livespec-ai
   installation 182016479 as App 5761962, and the bare wrapper minted App 3668528.
+- **The slot-narrowing wrapper composes with the committed argv.** `WRAPPER=` overrides the
+  launcher's chain, so the first committed slot-narrowing wrapper ran the bare default wrapper and a
+  slot-narrowed launch of a route C repository would have minted as the personal App. It now resolves
+  the target's committed `credential_wrapper` through `launch-lib.sh` and strips the slots as the
+  innermost hop, the order the live seat's `with-tenant-slotstrip.sh` (`961ccb6f782b`) uses; harness
+  case 45 asserts, value-free, that the child holds the org pair, the judge slot's unnumbered token and
+  only the non-excluded slots, with a bare-wrapper control and an unreadable-argv refusal.
 - **The gmktec idle gate measures whole-host `mpstat` idle** against `gmk-idle-floor` (live value
   0, fallback 3), exactly as the interim copy did. The spec's factory-class pressure measure is
   implemented by neither copy; that gap is recorded here rather than hidden.
