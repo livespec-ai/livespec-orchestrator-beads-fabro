@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.333.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.332.3...v0.333.0) (2026-11-15)
+
+
+### Features
+
+* a purely mechanical commit_green refusal re-enters green on its own budget (bd-ib-pyeiky) ([cede252](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/cede252172d07e7905b8e0403acb9359fe2d120c))
+* **config:** route petri runs and host mints through the livespec-ai org App ([c9130f5](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/c9130f559a88733a7f3b4c2e332fbd4922ce8b5b))
+
+
+### Bug Fixes
+
+* a refusal is mechanical only when the check aggregate is the one failed hook command (bd-ib-pyeiky) ([87c4b3b](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/87c4b3b583bc709ad1251a95297af0bd5b57c01b))
+* codex_yolo_gate fleet-lists an adopter under its resolved owner (bd-ib-2sdcgk) ([e808d57](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/e808d5706bcfcdfd0d5ca4db5fdf61c8e380d4a0))
+* drive arms without --delete-branch on merge-queue repositories (bd-ib-hnj3td) ([8ec8481](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/8ec84818d108f9a10c8470318e23f6d47ce3f164))
+* **fleet-launch:** exec the drive's wrapper chain so a stopped drive is reaped by the launcher (bd-ib-yax6gv) ([9707337](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/9707337438e302ccc73d8d38bde64b357b68190f))
+* **fleet-launch:** reconcile the committed launchers with the running copies (bd-ib-yax6gv) ([efa6305](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/efa630523c633bef3fcf004a5f3a5137d523160f))
+* **fleet-launch:** run a declared credential_wrapper argv whole, never dropped on its basename (bd-ib-yax6gv fix 3) ([b95b53b](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/b95b53bd1eaad349ba904994e17cceeb455cd2f4))
+* **fleet-launch:** strip credential slots inside the target's committed wrapper chain (bd-ib-yax6gv) ([b64fbb7](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/b64fbb7b492edc27da8f55b545683bb96233238a))
+* **reconcile-runs:** match the family wrapper by resolved path, not basename (bd-ib-ft426g) ([9d27a8c](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/9d27a8c3be20a9f1d1722db2199823068474ad12))
+* **reconcile-runs:** refuse an unreadable credential_wrapper instead of falling back (bd-ib-ft426g) ([c80b809](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/c80b8094bf64ad8652c91422aa71b61ba34befc1))
+* **reconcile-runs:** run the pass under the tenant's committed credential_wrapper (bd-ib-ft426g) ([2fa740c](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/2fa740cdc744929518ded7fe2b3e3e98e9059c90))
+
 ## [0.332.3](https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/compare/v0.332.2...v0.332.3) (2026-11-15)
 
 
