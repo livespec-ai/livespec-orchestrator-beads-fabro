@@ -24,6 +24,8 @@ to open a comment with.
 
 from __future__ import annotations
 
+import re
+
 __all__: list[str] = [
     "JUDGEMENT_COMMENT_MARKER",
     "UNAVAILABLE_COMMENT_MARKER",
@@ -47,6 +49,13 @@ _RECORD_MARKERS = frozenset({JUDGEMENT_COMMENT_MARKER, UNAVAILABLE_COMMENT_MARKE
 _SPEC_CHANGE_TIER_MARKER = "livespec-spec-change-tier"
 _MECHANICAL_FINDING_PREFIX = "definition-of-done finding (mechanical):"
 
+# The expedited incident chain's own records on the canonical item (entry,
+# authority, local gates, PR run records, ...). Each is a versioned machine
+# record, never operator brief, and eleven local-gates records alone overflowed
+# the dod-preflight input bound (bd-ib-ikmfr4). The whole marker line must have
+# the record shape, so prose that merely opens with the prefix stays a rider.
+_INCIDENT_RECORD_MARKER = re.compile(r"livespec-incident-[a-z0-9]+(?:-[a-z0-9]+)*-v[0-9]+")
+
 
 def comment_marker(*, body: str) -> str:
     """One comment's first non-blank line, or the empty string for a blank one."""
@@ -68,8 +77,9 @@ def is_judgement_record(*, body: str) -> bool:
 def is_receipt_comment(*, body: str) -> bool:
     """Whether one comment is a receipt the subject and the goal both leave out.
 
-    A judgement receipt, a spec-change tier record, or a filing-time mechanical
-    finding comment. Any other comment is an operator rider. Omitting a comment
+    A judgement receipt, a spec-change tier record, a filing-time mechanical
+    finding comment, or an expedited incident record. Any other comment is an
+    operator rider. Omitting a comment
     here never removes it from the ledger: needs-attention and the filer read it.
     """
     marker = comment_marker(body=body)
@@ -77,4 +87,5 @@ def is_receipt_comment(*, body: str) -> bool:
         is_judgement_record(body=body)
         or marker == _SPEC_CHANGE_TIER_MARKER
         or marker.startswith(_MECHANICAL_FINDING_PREFIX)
+        or _INCIDENT_RECORD_MARKER.fullmatch(marker) is not None
     )
