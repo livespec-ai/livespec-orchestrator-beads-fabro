@@ -3,8 +3,9 @@
 # replacements are the livespec console application and the committed launch-loop
 # tool bd-ib-jr6w7v (see fleet-launch/README.md).
 #
-# Runs a command under homelab's committed credential wrapper, whose argv (parameter-store
-# PATHS, not secret values) is in homelab-wrapper.argv beside this file. It keeps PATH.
+# Runs a command under homelab's committed credential wrapper, whose argv (homelab's own
+# shared-credentials launcher, no secret values) is in homelab-wrapper.argv beside this file.
+# It keeps PATH.
 # Usage: with-homelab-wrapper-keep-path.sh -- <command...>
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)

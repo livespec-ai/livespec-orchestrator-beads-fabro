@@ -39,7 +39,7 @@ for the Dispatcher's own admission conditions.
 | `release-hold-on-caam-rotation.sh` | Keeps the hold file in place until caam's active Claude profile changes, then removes it. |
 | `resolve-default-factory.sh` | Prints a repository's committed `dispatcher.default_factory` from its origin default branch. |
 | `host-capture-payload.py` | Builds a `host_recorded` Proof-of-Done payload from a registry-resolved capture dispatch; refuses, writing nothing, when any evidence is missing. |
-| `wrappers/` | PATH-keeping shims around each independent tenant's committed credential wrapper, passed as `WRAPPER=` to `dispatch-dual.sh`. `homelab-wrapper.argv` holds parameter-store PATHS, never secret values. |
+| `wrappers/` | PATH-keeping shims around each independent tenant's committed credential wrapper, passed as `WRAPPER=` to `dispatch-dual.sh`. `homelab-wrapper.argv` holds the argv of homelab's own shared-credentials launcher (`with-homelab-credentials.sh`, homelab#1204), never secret values. |
 | `test/run-tests.sh` | The hermetic harness run by `just check-fleet-launch`; it uses stub boards, credentials, preflights, queue, lock, in-flight and state directories, never a live factory. |
 
 ## Running a launch
