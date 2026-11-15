@@ -15577,8 +15577,9 @@ Feature: the factory merge verifies the head rollup and honours every hold
   Scenario: A red head rollup on a protection-less target is refused and stays unmerged
     Given a target branch whose protection and rulesets require no status checks
     And a factory run whose pull request head carries one check run concluded success and two concluded failure
-    When the factory's merge step reaches the merge
-    Then it refuses with the named cause target-requires-no-checks and names the failed checks under head-rollup-not-green
+    When the pr stage reaches its decision to arm auto-merge
+    Then it refuses with the named cause target-requires-no-checks
+    And its outcome detail also names head-rollup-not-green and the two failed checks with their conclusions
     And the pull request is open and unmerged, with no auto-merge request
     And the dispatch outcome is blocked with blocked_reason needs-human, its exit code is non-zero, and it never reports green or a successful merge
 
@@ -15586,25 +15587,56 @@ Feature: the factory merge verifies the head rollup and honours every hold
     Given a protected target branch that requires a status check
     And an item whose merge-hold label was set on after its dispatch rendered merge_hold false
     And its pull request head rollup is all success
-    When the factory's merge step attempts a direct merge without an auto-merge request
-    Then it re-reads the item's hold labels from the ledger and refuses with the named cause merge-hold-active
-    And the pull request is open and unmerged
+    When the pr stage reaches its decision to arm auto-merge
+    Then it re-reads the item's merge-hold label from the ledger and refuses with the named cause merge-hold-active
+    And the pull request is open and unmerged, with no auto-merge request
     And the dispatch outcome is blocked with blocked_reason needs-human, it never reports green, and the item is not closed
 
   Scenario: A green head rollup on a protected target merges
     Given a protected target branch that requires a status check
-    And an item carrying no merge hold and no other merge-time hold is active
+    And an item whose merge-hold label is not set
     And its pull request head rollup is non-empty and every check run and commit status concluded success
-    When the factory's merge step reaches the merge
+    When the pr stage reaches its decision to arm auto-merge
     Then the pull request merges with the resolved merge method
     And the item proceeds to acceptance as a successful merge
 
   Scenario: A path-skipped job beside a green rollup merges
     Given a protected target branch that requires a status check
-    And an item carrying no merge hold and no other merge-time hold is active
+    And an item whose merge-hold label is not set
     And its pull request head rollup holds check runs concluded success and one path-filtered job concluded skipped
-    When the factory's merge step reaches the merge
+    When the pr stage reaches its decision to arm auto-merge
     Then the skipped job counts as passing and the merge step does not refuse with head-rollup-not-green
     And the pull request merges with the resolved merge method
     And the item proceeds to acceptance as a successful merge
+
+  Scenario: A pending rollup is armed only once every entry passes
+    Given a protected target branch that requires a status check
+    And an item whose merge-hold label is not set
+    And its pull request head rollup holds one required check run concluded success and one non-required check run still in progress
+    When the pr stage reaches its decision to arm auto-merge
+    Then it readies the pull request without arming auto-merge and reports ROLLUP=pending
+    And the merge wait polls the head rollup and does not arm while the check run is in progress
+    When the in-progress check run concludes success
+    Then the merge wait re-reads the merge-hold label and arms auto-merge with the resolved merge method
+    And the item proceeds to acceptance as a successful merge
+
+  Scenario: A pending rollup still running when the merge wait's budget ends is handed off and armed by reconciliation
+    Given a protected target branch that requires a status check
+    And an item whose merge-hold label is not set
+    And its pull request head rollup holds one required check run concluded success and one non-required check run still in progress
+    When the pr stage readies the pull request without arming auto-merge
+    And the merge wait's poll budget is exhausted while the check run is still in progress
+    Then the dispatch reports exit code 0, the item stays active under its claim, and the merge-wait-handed-off row records rollup pending and auto-merge not armed
+    When the check run concludes success and a reconciliation pass reads the pull request
+    Then hold 8 re-reads the merge-hold label, arms auto-merge with the journaled merge method, and keeps the claim held naming merge-wait-handed-off
+
+  Scenario: A pending rollup whose running check fails is refused and never armed
+    Given a protected target branch that requires a status check
+    And an item whose merge-hold label is not set
+    And its pull request head rollup holds one required check run concluded success and one non-required check run still in progress
+    When the pr stage readies the pull request without arming auto-merge
+    And the in-progress check run then concludes failure while the merge wait polls
+    Then the merge wait refuses with the named cause head-rollup-not-green, naming the failed check
+    And the pull request is open and unmerged, with no auto-merge request
+    And the dispatch outcome is blocked with blocked_reason needs-human, and it never reports green or a successful merge
 ```
