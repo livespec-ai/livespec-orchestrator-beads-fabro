@@ -407,10 +407,12 @@ delegated_gate = true
 # and gamingpc read 0.14% idle on gate h5f9x. At 10 cpu a gate fits gmktec's lane
 # once and the PowerEdge's twice, and no 5-cpu lane (gamingpc, hp, the M4) takes
 # one. 10 workers sits between the measured 929 s (8) and 797 s (12) test runs,
-# under the yljbpf 900 s line. REVERT: restore gate_parallelism = 12 and drop
-# gate_cpu, if any node stays under 5% idle with BestEffort full avg60 over 30
-# across two 10-minute windows WORSE than the pre-change read, or if orchestrator
-# gate queue waits exceed five minutes.
+# under the yljbpf 900 s line; 10 is interpolated between those two
+# measurements, not itself measured. REVERT: restore gate_parallelism = 12 and
+# drop gate_cpu, if any node stays under 5% idle with BestEffort full avg60 over
+# 30 across two 10-minute windows and is no better than its 2026-11-15 ~06:58Z
+# baseline (research note 004), or if any gates-cq workload waits more than
+# 10 minutes for admission.
 # Source: livespec-dev-tooling plan gate-job-resources, research notes 003 and
 # 004, epic livespec-dev-tooling-ukoeah, item (i).
 gate_cpu = 10
