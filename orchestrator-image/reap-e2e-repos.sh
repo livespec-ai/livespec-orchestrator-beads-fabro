@@ -51,7 +51,7 @@
 #     never printed.
 #
 # Supplied by:
-#   ~/workspace/1password-env-wrapper/with-livespec-env.sh -- <command>
+#   /usr/local/bin/with-livespec-env.sh -- <command>
 
 set -euo pipefail
 
@@ -94,7 +94,7 @@ Required env (normally from the 1Password wrapper):
     Fine-grained token scoped to the `livespec-e2e` org. Mapped to GH_TOKEN.
     Presence is checked by byte count only; the value is never printed.
 
-  ~/workspace/1password-env-wrapper/with-livespec-env.sh -- \
+  /usr/local/bin/with-livespec-env.sh -- \
     bash orchestrator-image/reap-e2e-repos.sh --dry-run
 USAGE
 }

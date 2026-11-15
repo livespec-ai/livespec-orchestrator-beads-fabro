@@ -181,6 +181,6 @@ note ≥0.256 re-breaks the workflow via #474 — see `bd-ib-6qu`.)
 ## Standing disciplines
 
 Worktree → PR → rebase-merge; `mise exec -- git`; NEVER `--no-verify`; ledger/git under
-the env wrapper (`/data/projects/1password-env-wrapper/with-livespec-env.sh --`); secrets
+the env wrapper (`/usr/local/bin/with-livespec-env.sh --`); secrets
 probe-only; "done means exercised live"; **surface before any outward-facing action**
 (upstream PRs, cross-repo).
