@@ -37,10 +37,22 @@ Before Step 1, inspect
    When a preserved seed carries changes that meet the Definition of Done but
    the dispatch base does not, this is not already satisfied: continue with
    the failing-test path so the carried changes reach Green and publication.
+   Write the test the same way and prove its failure on the dispatch base, as
+   Step 3 says. `commit_red` makes the Red commit on the dispatch base with the
+   carried changes set aside, then restores them, so `green` and `commit_green`
+   take them to publication. Never declare `already-satisfied` for such a seed.
 2. Otherwise, continue with the failing-test path. Write one failing test for one Definition of Done assertion.
    The test must fail on a genuine assertion rather than during collection or
    import.
 3. Run only that test and capture its failure output. Do not make a commit.
+   On a seeded tree whose earlier checkpoint commits already carry the
+   implementation, the test passes on the working tree, so run it against the
+   dispatch base instead: the nearest non-checkpoint commit below every
+   `fabro(...)` checkpoint. Add a scratch `git worktree` of that commit outside
+   this clone, copy only the test file into it, run the test there and capture
+   its failure, then remove the scratch worktree. The failure must be a genuine
+   assertion failure on the dispatch base. If the test also fails there for a
+   reason unrelated to the Definition of Done, fix the test, never the product.
 4. Before ending, run
 
        "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-implement-gate-preview.py" red <path of the test file you wrote>
