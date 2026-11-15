@@ -5,10 +5,7 @@
 # `reconcile-runs.service` names in its ExecStart,
 # /usr/local/libexec/livespec-tenant-wrap.sh. livespec-dev-tooling's Ansible role
 # reconcile_runs installs ITS copy (files/livespec-tenant-wrap.sh) at the same
-# path, so the two bodies are kept identical apart from comments. The one
-# deliberate difference: the refusals for a credential_wrapper that cannot be
-# read name the cause `credential-wrapper-unreadable`, which spec proposal
-# #5365 adds to contracts.md §"Self-contained plugin dispatch".
+# path, so the two bodies are kept identical apart from comments.
 #
 # install.sh reads the family wrapper's default from the `family=` line below and
 # rewrites that default when LIVESPEC_ENV_WRAPPER names another path, so keep it
@@ -27,11 +24,14 @@
 #
 # The family wrapper is $TW_FAMILY_WRAPPER, else /usr/local/bin/with-livespec-env.sh.
 #   - No credential_wrapper:          <family> -- <command...>
-#   - A wrapper whose first element has the family wrapper's basename runs as
-#     committed, including any hop after its "--":
+#   - A wrapper whose first element IS the family wrapper (both paths resolved
+#     with `realpath -e` and equal) runs as committed, including any hop after
+#     its "--":
 #                                     <argv...> <command...>
 #   - Any other tenant's wrapper runs nested in the family wrapper, with the
-#     family BEADS_DOLT_PASSWORD removed so the tenant's wrapper injects its own:
+#     family BEADS_DOLT_PASSWORD removed so the tenant's wrapper injects its own.
+#     That includes a different file that merely shares the family wrapper's
+#     basename, such as a tenant's own or vendored copy:
 #                                     <family> -- env -u BEADS_DOLT_PASSWORD <argv...> <command...>
 # A relative first element resolves against the repository, as the dispatcher
 # resolves it.
@@ -165,7 +165,11 @@ else
   [[ "${argv[0]}" == /* ]] || argv[0]="${repo}/${argv[0]#./}"
   [[ -f "${argv[0]}" && -x "${argv[0]}" ]] \
     || refuse "credential_wrapper ${argv[0]} from ${config} is not an executable file"
-  if [[ "${argv[0]##*/}" == "${family##*/}" ]]; then
+  family_real="$(realpath -e -- "${family}")" \
+    || refuse "family wrapper ${family} is not an executable file"
+  wrapper_real="$(realpath -e -- "${argv[0]}")" \
+    || refuse "credential_wrapper ${argv[0]} from ${config} is not an executable file"
+  if [[ "${wrapper_real}" == "${family_real}" ]]; then
     mode=family
     chain=("${argv[@]}")
   else
