@@ -82,6 +82,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_codex_headroom_io im
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_selector import (
     injected_credential_slots,
+    install_claude_credential_policy,
     register_admission_slot_chooser,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_policy_settings import (
@@ -216,6 +217,11 @@ def session_headroom_policy(
             DEFAULT_SESSION_HEADROOM_HORIZON_MINUTES
         )
     )
+    # The declared credential policy is read with the dials and registered before
+    # the pool is assessed, so the pool and every downstream consumer see the
+    # same allow-list. A policy that is written but unreadable fails CLOSED to an
+    # empty declared pool rather than open to whatever the wrapper injects.
+    install_claude_credential_policy(repo=repo)
     taken: list[PoolSelection] = []
 
     def pool_once() -> PoolSelection:

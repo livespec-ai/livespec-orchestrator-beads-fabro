@@ -701,11 +701,14 @@ def _hermetic_admission_slot_chooser() -> Iterator[None]:
     """
     from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_selector import (
         register_admission_slot_chooser,
+        register_claude_credential_policy,
     )
 
     register_admission_slot_chooser(chooser=None)
+    register_claude_credential_policy(policy=None)
     yield
     register_admission_slot_chooser(chooser=None)
+    register_claude_credential_policy(policy=None)
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
