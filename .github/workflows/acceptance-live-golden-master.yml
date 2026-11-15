@@ -44,7 +44,7 @@
 #       "pr_number":         <int>,
 #       "source_repo":       "livespec-dev-tooling"
 #     }
-#   - Callback: a GitHub commit status POSTed to thewoolleyman/livespec-dev-tooling
+#   - Callback: a GitHub commit status POSTed to livespec-ai/livespec-dev-tooling
 #     at head_sha with context = "codex-acp-golden-master", state =
 #     success (gate green) | failure (gate red or run error), target_url = this
 #     run's URL, plus a short description.
@@ -187,7 +187,7 @@ jobs:
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: thewoolleyman
+          owner: livespec-ai
           repositories: livespec-dev-tooling
 
       - name: Post codex-acp-golden-master status to livespec-dev-tooling
@@ -209,7 +209,7 @@ jobs:
           fi
           echo "Posting state=$state to livespec-dev-tooling@$HEAD_SHA (bump PR #$PR_NUMBER)"
           gh api --method POST \
-            "/repos/thewoolleyman/livespec-dev-tooling/statuses/${HEAD_SHA}" \
+            "/repos/livespec-ai/livespec-dev-tooling/statuses/${HEAD_SHA}" \
             -f "state=${state}" \
             -f "context=codex-acp-golden-master" \
             -f "target_url=${RUN_URL}" \
@@ -229,4 +229,4 @@ jobs:
         run: |
           set -euo pipefail
           echo "Gate green — enabling auto-merge on livespec-dev-tooling PR #${PR_NUMBER}"
-          gh pr merge "${PR_NUMBER}" --repo thewoolleyman/livespec-dev-tooling --rebase --auto
+          gh pr merge "${PR_NUMBER}" --repo livespec-ai/livespec-dev-tooling --rebase --auto
