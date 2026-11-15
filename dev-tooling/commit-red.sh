@@ -20,17 +20,56 @@ checkpoint_commit() {
     [[ "$subject" =~ $CHECKPOINT_SUBJECT ]] && grep -q '^Fabro-Run: ' <<<"$message"
 }
 
+checkpoint_run_id() {
+    local ref="$1"
+    git log -1 --format=%B "$ref" 2>/dev/null | awk '
+        /^Fabro-Run: / { value = $0; sub(/^Fabro-Run: /, "", value) }
+        END { print value }
+    '
+}
+
+checkpoint_for_run() {
+    local ref="$1"
+    local run_id="$2"
+    checkpoint_commit "$ref" && [[ "$(checkpoint_run_id "$ref")" == "$run_id" ]]
+}
+
+current_engine_run_id() {
+    local branch=""
+    if [[ -n "${FABRO_RUN_ID:-}" ]]; then
+        printf '%s\n' "$FABRO_RUN_ID"
+        return 0
+    fi
+    branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+    if [[ "$branch" == fabro/run/?* ]]; then
+        printf '%s\n' "${branch#fabro/run/}"
+    fi
+}
+
+red_turn_base() {
+    local ref="HEAD"
+    local run_id=""
+    run_id="$(current_engine_run_id)"
+    [[ -n "$run_id" ]] || return 1
+    while checkpoint_for_run "$ref" "$run_id"; do
+        ref="${ref}~1"
+    done
+    git rev-parse "$ref"
+}
+
 fold_checkpoints() {
     local depth=0
     local ref="HEAD"
+    local dispatch_base=""
     while (( depth < CHECKPOINT_LIMIT )) && checkpoint_commit "$ref"; do
         ((depth += 1))
         ref="HEAD~${depth}"
     done
+    dispatch_base="$(git rev-parse "$ref")"
     if (( depth > 0 )); then
-        git reset --soft "HEAD~${depth}"
+        git reset --soft "$dispatch_base"
     fi
-    printf '%s\n' "$depth"
+    printf '%s\n' "$dispatch_base"
 }
 
 product_prefixes() {
@@ -61,12 +100,15 @@ product_prefixes() {
 
 changed_product_paths() {
     local allowed="$1"
+    local turn_base="$2"
+    local source_head="$3"
     local prefixes=""
     local path=""
     local prefix=""
     prefixes="$(product_prefixes)"
     {
-        git diff --name-only --no-renames HEAD --
+        git diff --name-only --no-renames "$turn_base" "$source_head" --
+        git diff --name-only --no-renames "$source_head" --
         git ls-files --others --exclude-standard
     } | sort -u | while IFS= read -r path; do
         [[ "$path" == "$allowed" || "$path" != *.py || "$path" == tests/* ]] && continue
@@ -84,9 +126,9 @@ latest_red_test_file() {
     awk '
         /^##[[:space:]]+red([[:space:]]|$)/ { in_red = 1; latest = ""; next }
         /^##[[:space:]]/ { in_red = 0 }
-        in_red && /^Red test file:[[:space:]]*/ {
+        in_red && /^(Red test file|Test file):[[:space:]]*/ {
             value = $0
-            sub(/^Red test file:[[:space:]]*/, "", value)
+            sub(/^(Red test file|Test file):[[:space:]]*/, "", value)
             sub(/^`/, "", value)
             sub(/`$/, "", value)
             sub(/::.*/, "", value)
@@ -134,11 +176,34 @@ return_to_dispatch_base() {
     git clean -fd >/dev/null
 }
 
+restore_carried_changes() {
+    local dispatch_base="$1"
+    local source_head="$2"
+    local test_file="$3"
+    if ! git diff --quiet "$dispatch_base" "$source_head" -- . ":(exclude)$test_file"; then
+        git diff --binary --no-ext-diff "$dispatch_base" "$source_head" -- . ":(exclude)$test_file" \
+            | git apply --whitespace=nowarn
+    fi
+}
+
+restore_patch() {
+    local patch="$1"
+    if [[ -s "$patch" ]]; then
+        git apply --whitespace=nowarn "$patch"
+    fi
+    rm -f -- "$patch"
+}
+
 main() {
     local handoff=""
     local output=""
     local test_file=""
     local product_paths=""
+    local source_head=""
+    local turn_base=""
+    local dispatch_base=""
+    local test_snapshot=""
+    local working_changes=""
     local status=0
     handoff="$(git rev-parse --git-path "$HANDOFF_NAME")"
     output="$(git rev-parse --git-path "$OUTPUT_NAME")"
@@ -149,8 +214,13 @@ main() {
         printf '%s\n' "commit_red: latest red section names no test file" >&2
         return 2
     fi
-    fold_checkpoints >/dev/null
-    product_paths="$(changed_product_paths "$test_file")"
+    source_head="$(git rev-parse HEAD)"
+    turn_base="$(red_turn_base)" || {
+        printf '%s\n' "commit_red: current engine run id is unknown" >&2
+        return 2
+    }
+    product_paths="$(changed_product_paths "$test_file" "$turn_base" "$source_head")"
+    dispatch_base="$(fold_checkpoints)"
     if [[ -n "$product_paths" ]]; then
         : > "$output"
         append_verdict "$handoff" 3 "$output" \
@@ -159,6 +229,14 @@ main() {
         return_to_dispatch_base
         return 3
     fi
+    working_changes="$(mktemp "$(git rev-parse --git-path livespec-commit-red-working.XXXXXX)")"
+    git diff --binary --no-ext-diff "$source_head" -- . ":(exclude)$test_file" > "$working_changes"
+    test_snapshot="$(mktemp "$(git rev-parse --git-path livespec-commit-red-test.XXXXXX)")"
+    cp -- "$test_file" "$test_snapshot"
+    git reset --hard HEAD >/dev/null
+    mkdir -p "$(dirname "$test_file")"
+    cp -- "$test_snapshot" "$test_file"
+    rm -f -- "$test_snapshot"
     git reset
     git add -- "$test_file"
     set +e
@@ -166,6 +244,8 @@ main() {
     status=$?
     set -e
     cat "$output"
+    restore_carried_changes "$dispatch_base" "$source_head" "$test_file"
+    restore_patch "$working_changes"
     append_verdict "$handoff" "$status" "$output"
     return "$status"
 }

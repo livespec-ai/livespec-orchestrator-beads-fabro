@@ -367,6 +367,7 @@ def test_an_implement_amendment_rests_the_item_at_blocked_needs_human_and_publis
     assert _edge_conditions(source="red") == {
         "implement_amendment_route": "outcome=failed",
         "already_satisfied": "preferred_label=already-satisfied",
+        "green_admission": "preferred_label=seeded-open-red",
         "commit_red": "",
     }
     assert _edge_conditions(source="implement_amendment_route") == {
