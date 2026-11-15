@@ -14,17 +14,24 @@
 # --- tenant credential wrapper -----------------------------------------------
 # Every launch-time command that reaches the target repository's ledger or
 # Dispatcher runs under that repository's committed `credential_wrapper`, the
-# argv its own .livespec.jsonc declares. A family wrapper (one whose basename is
-# the default wrapper's) runs as is. Any other tenant's wrapper runs NESTED inside
-# the default wrapper, which supplies the Claude and fabro credentials the
-# launcher's own steps need, with the family BEADS_DOLT_PASSWORD removed so the
-# tenant's wrapper injects its own. WRAPPER=<path> still overrides the whole chain.
+# argv its own .livespec.jsonc declares, and a declared argv is ALWAYS run as
+# written: the launcher never drops or shortens it. (A 2026-11-15 defect keyed on
+# argv[0]'s BASENAME collapsed route C's argv -- the family wrapper followed by a
+# /bin/sh hop that maps GITHUB_APP_ID_ORG onto GITHUB_APP_ID -- to the bare family
+# wrapper, so launches minted as the personal App, which livespec-ai repositories
+# refuse.) The resolver decides only NESTING: an argv whose first word is the
+# default wrapper path itself runs as written (mode `committed`); any other
+# tenant's argv runs NESTED inside the default wrapper, which supplies the Claude
+# and fabro credentials the launcher's own steps need, with the family
+# BEADS_DOLT_PASSWORD removed so the tenant's wrapper injects its own (mode
+# `tenant`). No declared argv is the bare default wrapper (mode `default`).
+# WRAPPER=<path> still overrides the whole chain (mode `override`).
 TENANT_WRAPPER=()
 TENANT_WRAPPER_MODE=default
-# resolve_tenant_wrapper: sets TENANT_WRAPPER_MODE to override, default, tenant
-# or unreadable, and TENANT_WRAPPER to the tenant argv. Returns 1 on unreadable.
+# resolve_tenant_wrapper: sets TENANT_WRAPPER_MODE to override, default, committed,
+# tenant or unreadable, and TENANT_WRAPPER to the declared argv. Returns 1 on unreadable.
 resolve_tenant_wrapper() {
-  local argv_file="$REPO/.livespec.jsonc" line default_name
+  local argv_file="$REPO/.livespec.jsonc" line
   TENANT_WRAPPER=()
   if [ -n "${WRAPPER:-}" ]; then TENANT_WRAPPER_MODE=override; return 0; fi
   if [ ! -e "$argv_file" ]; then TENANT_WRAPPER_MODE=default; return 0; fi
@@ -60,8 +67,9 @@ PY
   for line in "${TENANT_WRAPPER[@]}"; do
     [ "$line" = UNREADABLE ] && { TENANT_WRAPPER=(); TENANT_WRAPPER_MODE=unreadable; return 1; }
   done
-  default_name=${FLEET_LAUNCH_DEFAULT_WRAPPER##*/}
-  if [ "${TENANT_WRAPPER[0]##*/}" = "$default_name" ]; then TENANT_WRAPPER=(); TENANT_WRAPPER_MODE=default; return 0; fi
+  # Keyed on the declared argv's PRESENCE and its first word's exact path, never on a basename:
+  # the argv is kept whole in both modes and only the nesting differs.
+  if [ "${TENANT_WRAPPER[0]}" = "$FLEET_LAUNCH_DEFAULT_WRAPPER" ]; then TENANT_WRAPPER_MODE=committed; return 0; fi
   TENANT_WRAPPER_MODE=tenant
   return 0
 }
@@ -70,14 +78,16 @@ wrap() {
   [ "${1:-}" = "--" ] && shift
   case $TENANT_WRAPPER_MODE in
     override) "$WRAPPER" -- "$@" ;;
+    committed) "${TENANT_WRAPPER[@]}" "$@" ;;
     tenant) "$FLEET_LAUNCH_DEFAULT_WRAPPER" -- env -u BEADS_DOLT_PASSWORD "${TENANT_WRAPPER[@]}" "$@" ;;
     *) "$FLEET_LAUNCH_DEFAULT_WRAPPER" -- "$@" ;;
   esac
 }
-# wrapper_description: one word for the log line.
+# wrapper_description: one phrase for the log line.
 wrapper_description() {
   case $TENANT_WRAPPER_MODE in
     override) printf 'WRAPPER=%s' "$WRAPPER" ;;
+    committed) printf 'committed %s argv, %d words, run as written' "${TENANT_WRAPPER[0]##*/}" "${#TENANT_WRAPPER[@]}" ;;
     tenant) printf 'tenant %s nested in %s' "${TENANT_WRAPPER[0]##*/}" "${FLEET_LAUNCH_DEFAULT_WRAPPER##*/}" ;;
     *) printf 'default %s' "${FLEET_LAUNCH_DEFAULT_WRAPPER##*/}" ;;
   esac

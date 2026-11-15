@@ -32,7 +32,7 @@ for the Dispatcher's own admission conditions.
 | --- | --- |
 | `config.sh` | The one place a host-specific value is set: factory server URLs, the fabro client path, the fleet-cap and hold files, the queue, lock and in-flight directories, the plugin registry and cache, the wrappers and the timings. Every value can be overridden from the environment. |
 | `board-snapshot.sh` | The shared factory-board reader both launchers source. Every launcher on the host reads a factory's board through one snapshot file refreshed at most once per `FLEET_LAUNCH_BOARD_TTL_S`, because one run listing costs the petri server 25-40 s; an unreadable refresh is an unknown count, never zero, and the binding count under the launch mutex reads the factory directly. |
-| `launch-lib.sh` | The functions both launchers and the resume helper share: the tenant credential wrapper (the target repository's committed `credential_wrapper`, a non-family one nested inside the default wrapper with the family `BEADS_DOLT_PASSWORD` removed), the installed-build lookup, caps read live from state files, the gmktec hold with its freeze-allowlist and priority-1 releases and the one-shot consume, the canary repository hold, and the FIFO queue scan (class `server=hl` tickets, `held=` and `wip-wait=1` yields, and the held-head skip). |
+| `launch-lib.sh` | The functions both launchers and the resume helper share: the tenant credential wrapper (the target repository's committed `credential_wrapper`, always run as written whole; a non-family one is nested inside the default wrapper with the family `BEADS_DOLT_PASSWORD` removed, and one that starts with the default wrapper path runs as declared, so route C's org-App hop is kept), the installed-build lookup, caps read live from state files, the gmktec hold with its freeze-allowlist and priority-1 releases and the one-shot consume, the canary repository hold, and the FIFO queue scan (class `server=hl` tickets, `held=` and `wip-wait=1` yields, and the held-head skip). |
 | `dispatch-dual.sh` | Launches one work-item. Gates, in order: the Dispatcher's ready set (a bounded number of retries), the host-only screen (the Dispatcher's own `host-only` command), the repository hold file and the canary repository hold (with its exemption list), the repository WIP gate (counted claims plus this repository's not-yet-active in-flight launches against `wip_cap`, one above for an item in `breakage-exception`; an unreadable count never holds; the count is shared per repository and read before any process is spawned), the per-factory FIFO (a launcher behind the head re-checks only its place and preflights while queued, within `FLEET_LAUNCH_PREFLIGHT_AHEAD_MAX` of the head), the shared fleet cap (the gmktec, candidate and mi-homelab boards plus launches not yet listed; the arm64 lane is outside the sum), the gmktec hold (released for an allowlisted item, whose line is consumed at LAUNCH, and for a priority-1 item), a fast-forward of the checkout to origin's default branch, the size screen of the materialized workflow and then the launch-time Definition-of-Done preflight under the judge-model environment, the target's own ceiling and gmktec idle CPU (the gmktec target setting selects the default or candidate instance; `ONLY_HL=1` and `ONLY_ARM=1` select the mi-homelab and arm64 instances), the mutex, the launch-point re-read of every hold, a binding re-count including this launch's in-flight marker, a second checkout fast-forward and a usable-credential probe, and the configured ACP overrides on the drive. A drive that exits before its run lists re-takes a ticket at the same ticket number after the delay its consecutive early-exit count selects, except a failed `goal-minijinja-preflight` stage or an exit `5`, which end the launcher with a terminal line and one ledger comment. After it invokes the drive it re-reads every applicable hold on each poll until the item reads `active`, the run lists or the drive exits; a hold set while the item still reads `ready` stops the drive with TERM, keeps the FIFO ticket at its number and logs the hold, and a stop that finds the item `active` makes a `stopped-after-admission` non-run exit with one ledger comment (Scenario 330). |
 | `ledger-item.py` | Reads a work-item's ledger status or priority, or appends one ledger comment to it, through the installed plugin build's own store seam; the launcher uses it to tell `ready` from `active` after a stop and to read the priority-1 release once. |
 | `wip-claimed-count.py` | The repository WIP claim count the WIP gate compares against `wip_cap`: the installed build's own `claimed_active_projection` plus this repository's in-flight launches not yet active, computed once per `FLEET_LAUNCH_WIP_CACHE_TTL_S` per repository under a lock into a JSON cache beside a `.statuses` sidecar the launcher reads without Python. |
@@ -56,9 +56,9 @@ mise exec -- just gate-start -- bash -c 'env ONLY_GMK=1 fleet-launch/dispatch-du
 ```
 
 For another tenant, add `REPO_OVERRIDE="$HOME/workspace/<repo>"`; the launcher runs every
-launch-time command under that repository's committed `credential_wrapper` (a non-family one
-nested inside the family wrapper), so `WRAPPER=` is needed only to override that chain, as the
-slot-narrowing wrapper does. For a registry-resolved capture dispatch, add
+launch-time command under that repository's committed `credential_wrapper`, run as written (a
+non-family one nested inside the family wrapper), so `WRAPPER=` is needed only to override that
+chain, as the slot-narrowing wrapper does. For a registry-resolved capture dispatch, add
 `CAPTURE_NULL=1 CAPTURE_EXPECT=petri`. To keep a queue position across a restart, pass the old
 ticket's number as `TICKET_NS`. A resume is launched the same way through
 `fleet-launch/resume-capped.sh <item-id>` (or `<ticket> <repo> <item>`).
@@ -120,6 +120,17 @@ with these deliberate differences, each with its reason:
   claim-count cache").
 - **Poll intervals** are config values (`FLEET_LAUNCH_POLL_S`, `FLEET_LAUNCH_WIP_POLL_S`,
   `FLEET_LAUNCH_QUEUE_WAIT_S`); the interim copy used 20 s to 120 s literals.
+- **A declared `credential_wrapper` argv is run as written, whole.** The resolver keys on the
+  argv's presence and on whether its first word is the default wrapper path itself (run as
+  declared) or another tenant's wrapper (nested inside the default wrapper with the family
+  `BEADS_DOLT_PASSWORD` removed); it never shortens the argv. The first committed copy keyed on
+  argv[0]'s basename and collapsed route C's argv (the family wrapper followed by the `/bin/sh` hop
+  that maps `GITHUB_APP_ID_ORG` onto `GITHUB_APP_ID`) to the bare family wrapper, so a launch
+  minted as the personal App, which livespec-ai repositories refuse (found by
+  central-credential-service, 2026-11-15). The interim `tenant_wrap` tests the basename too but
+  execs the argv whole, so it never had the defect. Harness cases 38 and 48 cover both shapes with
+  a positive control; a value-free host check through the fixed chain minted livespec-ai
+  installation 182016479 as App 5761962, and the bare wrapper minted App 3668528.
 - **The gmktec idle gate measures whole-host `mpstat` idle** against `gmk-idle-floor` (live value
   0, fallback 3), exactly as the interim copy did. The spec's factory-class pressure measure is
   implemented by neither copy; that gap is recorded here rather than hidden.

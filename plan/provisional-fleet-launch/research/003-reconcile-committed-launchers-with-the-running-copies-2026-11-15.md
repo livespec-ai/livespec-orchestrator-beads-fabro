@@ -73,3 +73,45 @@ ratified clause's own order (drain every interim launcher first, because its que
 - The seat's pre-launch screen cannot see the dispatch-stage spec-change-tier judgement (finding of
   2026-11-13). Neither can the launcher; the Dispatcher's exit-5 refusal still ends it without a
   re-ticket.
+
+## Fix 3: the committed argv is honoured whole (2026-11-15, second head)
+
+central-credential-service found, and legacy-coordinator-agent re-graded the first head to FIX
+REQUIRED on, a defect in `launch-lib.sh`'s `resolve_tenant_wrapper`: an argv whose first word's
+BASENAME was the default wrapper's was collapsed to the bare family wrapper. Under route C (#5361,
+`["/usr/local/bin/with-livespec-env.sh", "--", "/bin/sh", "-c", "GITHUB_APP_ID=\"$GITHUB_APP_ID_ORG\"
+GITHUB_PRIVATE_KEY=\"$GITHUB_PRIVATE_KEY_ORG\" exec \"$@\"", "sh"]`) that dropped the org-App hop, so a
+launch minted as the personal App 3668528, which livespec-ai repositories refuse.
+
+The fix keys on the argv's presence and on its first word's exact path: a declared argv is ALWAYS run
+whole, and the only decision left is nesting (`committed`, run as declared, when the first word is
+the default wrapper path; `tenant`, nested with the family password removed, otherwise). Evidence:
+
+- Harness case 48 (unit probe through `resolve_tenant_wrapper` and `wrap`, a stub family wrapper that
+  projects a personal id and an org pair, printing only WHICH pair the child holds): the committed
+  head 881fd675a printed `mode=default words=0 personal-app`; the fix prints
+  `mode=committed words=6 org-app`. Control: no declared argv prints `mode=default words=0 personal-app`.
+- Harness case 38 now runs the full launcher under route C's six-word argv and under the bare
+  two-word family argv, each logged `run as written`; the non-family nested case is unchanged.
+- Value-free host check on hetzner-xubuntu through the fixed chain with route C's argv and the real
+  `/usr/local/bin/with-livespec-env.sh`: child `GITHUB_APP_ID == GITHUB_APP_ID_ORG` true; JWT as App
+  `livespec-ai-factory-bot` (5761962, owner livespec-ai); installations `[(182016479, livespec-ai)]`;
+  installation token minted (length 383, `repository_selection all`). Control, bare wrapper: App
+  `thewoolleyman-factory-bot` (3668528), installation 131208965 only, 182016479 absent.
+
+Rule K sweep for the same special case, each placement reported:
+
+- `fleet-launch/launch-lib.sh` `resolve_tenant_wrapper`: FIXED (the only basename test on the
+  family wrapper in the committed tree).
+- `fleet-launch/dispatch-dual.sh`: CLEAN; its one basename test (`is_fabro_run`) matches `fabro`
+  in a `/proc` cmdline and is unrelated to wrappers.
+- `fleet-launch/resume-capped.sh`, `resume-repo.sh`: CLEAN; they call `wrap` only.
+- `fleet-launch/wrappers/with-livespec-env-slotnarrow.sh`: CLEAN of the basename case. NOTE for the
+  coordinator: `WRAPPER=` is mode `override` and replaces the whole chain by design, so a slot-narrowed
+  launch of a route C repository bypasses the committed argv and mints as the personal App. Not
+  changed here: composing the two (narrow the slots AND keep the org hop) needs a ruling, because
+  nesting the family wrapper inside itself in either order undoes one of them.
+- The live `tmp/petri-canary/dispatch-dual-r681b.sh` `tenant_wrap` and
+  `/usr/local/libexec/livespec-tenant-wrap.sh` on vps (read over ssh, 2026-11-15 ~11:3xZ): CLEAN of the
+  drop. Both test the basename but exec `"${cw[@]}" "$@"` whole and fall back to the bare family
+  wrapper only when no argv is declared.
