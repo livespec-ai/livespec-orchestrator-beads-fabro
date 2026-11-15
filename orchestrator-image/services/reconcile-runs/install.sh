@@ -48,19 +48,22 @@ default_tenant_wrap() {
   sed -n 's|^ExecStart=\([^ ]*\) --.*|\1|p' "${SERVICE_TEMPLATE}" | sed -n '1p'
 }
 
-# The family wrapper the tenant wrapper runs everything inside.
+# The family wrapper the tenant wrapper runs everything inside: the default of
+# its single `family="${TW_FAMILY_WRAPPER:-<path>}"` line.
 default_env_wrapper() {
-  sed -n 's|^FAMILY_WRAPPER=\(.*\)$|\1|p' "${TENANT_WRAP_SOURCE}" | sed -n '1p'
+  sed -n 's|^family="${TW_FAMILY_WRAPPER:-\(.*\)}"$|\1|p' "${TENANT_WRAP_SOURCE}" | sed -n '1p'
 }
 
-# Write the tenant wrapper with the family wrapper's path substituted, through a
-# temporary file renamed into place: bash reads a running script as it goes, so
-# rewriting the file a pass is executing in place could corrupt that pass.
+# Write the tenant wrapper with the family wrapper's default path substituted,
+# through a temporary file renamed into place: bash reads a running script as it
+# goes, so rewriting the file a pass is executing in place could corrupt that
+# pass. With the default path the substitution changes nothing, so the installed
+# body is the committed body.
 install_tenant_wrap() {
   local env_wrapper="$1" dest="$2" tmp
   mkdir -p "$(dirname "${dest}")"
   tmp="$(mktemp "${dest}.XXXXXX")"
-  sed -e "s|^FAMILY_WRAPPER=.*\$|FAMILY_WRAPPER=${env_wrapper}|" \
+  sed -e 's|^family="${TW_FAMILY_WRAPPER:-.*}"$|family="${TW_FAMILY_WRAPPER:-'"${env_wrapper}"'}"|' \
     "${TENANT_WRAP_SOURCE}" >"${tmp}"
   chmod 0755 "${tmp}"
   mv -f "${tmp}" "${dest}"
