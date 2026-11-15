@@ -73,15 +73,22 @@ PY
   TENANT_WRAPPER_MODE=tenant
   return 0
 }
+# wrapper_chain: fills WRAP_CHAIN with the argv prefix the resolved mode runs a command under, so a
+# caller that must `exec` (the slot-narrowing wrapper) composes the same chain `wrap` runs.
+WRAP_CHAIN=()
+wrapper_chain() {
+  case $TENANT_WRAPPER_MODE in
+    override) WRAP_CHAIN=("$WRAPPER" --) ;;
+    committed) WRAP_CHAIN=("${TENANT_WRAPPER[@]}") ;;
+    tenant) WRAP_CHAIN=("$FLEET_LAUNCH_DEFAULT_WRAPPER" -- env -u BEADS_DOLT_PASSWORD "${TENANT_WRAPPER[@]}") ;;
+    *) WRAP_CHAIN=("$FLEET_LAUNCH_DEFAULT_WRAPPER" --) ;;
+  esac
+}
 # wrap -- <command...>: run one launch-time command under the resolved wrapper chain.
 wrap() {
   [ "${1:-}" = "--" ] && shift
-  case $TENANT_WRAPPER_MODE in
-    override) "$WRAPPER" -- "$@" ;;
-    committed) "${TENANT_WRAPPER[@]}" "$@" ;;
-    tenant) "$FLEET_LAUNCH_DEFAULT_WRAPPER" -- env -u BEADS_DOLT_PASSWORD "${TENANT_WRAPPER[@]}" "$@" ;;
-    *) "$FLEET_LAUNCH_DEFAULT_WRAPPER" -- "$@" ;;
-  esac
+  wrapper_chain
+  "${WRAP_CHAIN[@]}" "$@"
 }
 # wrapper_description: one phrase for the log line.
 wrapper_description() {
