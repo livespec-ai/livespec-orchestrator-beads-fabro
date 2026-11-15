@@ -1072,8 +1072,27 @@ def test_receiver_oversized_body_is_bad_request(
     assert status == _HTTP_BAD_REQUEST
 
 
-def test_receiver_internal_exporter_error_surfaces_to_connection(tmp_path: Path) -> None:
-    """An exporter that raises is an unexpected implementation error."""
+def test_receiver_internal_exporter_error_surfaces_to_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An exporter that raises is an unexpected implementation error.
+
+    The receiver holds no blanket catch (Supervisor discipline: a bug
+    propagates), so the error surfaces twice: the connection closes with no
+    reply, and the serving thread's uncaught exception reaches
+    `threading.excepthook` with its full traceback. The test owns that hook
+    for its duration and waits for the exception to arrive, so the expected
+    bug is asserted rather than leaked as an unhandled-thread-exception
+    warning on whatever schedule the thread happens to finish (bd-ib-aspezw).
+    """
+    surfaced: list[threading.ExceptHookArgs] = []
+    thread_failed = threading.Event()
+
+    def _record_thread_failure(args: threading.ExceptHookArgs) -> None:
+        surfaced.append(args)
+        thread_failed.set()
+
+    monkeypatch.setattr(threading, "excepthook", _record_thread_failure)
     receiver = OtelReceiver(
         config=ReceiverConfig(host="127.0.0.1", port=0),
         exporter=_RaisingExporter(),
@@ -1085,9 +1104,15 @@ def test_receiver_internal_exporter_error_surfaces_to_connection(tmp_path: Path)
         body = _trace_request(attrs=[_attr_entry(key="work.item.id", string_value="li-x")])
         with pytest.raises(http.client.RemoteDisconnected):
             _post_raw(url=url, body=json.dumps(body).encode("utf-8"))
+        assert thread_failed.wait(timeout=5.0)
         assert receiver.is_running() is True
     finally:
         receiver.stop()
+    assert len(surfaced) == 1
+    assert isinstance(surfaced[0].exc_value, RuntimeError)
+    assert str(surfaced[0].exc_value) == "boom"
+    assert surfaced[0].thread is not None
+    assert "_serve_connection" in surfaced[0].thread.name
 
 
 def test_receiver_does_not_double_reply_after_response_write_failure(tmp_path: Path) -> None:
