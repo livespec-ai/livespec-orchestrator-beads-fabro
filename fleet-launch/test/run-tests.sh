@@ -1253,15 +1253,24 @@ fi
 # free on the board, the held release fills it, so the second launcher sees the
 # fleet at the cap and starts no drive of its own.
 echo "--- 10b. a queued launcher counts a held direct release as in flight"
-load_workers=$(nproc 2>/dev/null || echo 1)
+load_capacity=$(nproc 2>/dev/null || echo 1)
+case $load_capacity in ''|*[!0-9]*|0) load_capacity=1 ;; esac
 if [ -r /sys/fs/cgroup/cpu.max ]; then
     read -r load_quota load_period < /sys/fs/cgroup/cpu.max
     case "$load_quota:$load_period" in
         *[!0-9:]*|:*) ;;
-        *) load_workers=$(( (load_quota + load_period - 1) / load_period )) ;;
+        *) load_capacity=$(( (load_quota + load_period - 1) / load_period )) ;;
     esac
 fi
+case $load_capacity in ''|*[!0-9]*|0) load_capacity=1 ;; esac
+load_workers="${LIVESPEC_TEST_PARALLELISM:-$load_capacity}"
 case $load_workers in ''|*[!0-9]*|0) load_workers=1 ;; esac
+if [ "$load_workers" -gt "$load_capacity" ]; then
+    load_workers=$load_capacity
+fi
+if [ "$load_workers" -gt 4 ]; then
+    load_workers=4
+fi
 load_worker=0
 while [ "$load_worker" -lt "$load_workers" ]; do
     while :; do :; done &
