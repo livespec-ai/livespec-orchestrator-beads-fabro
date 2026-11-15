@@ -122,11 +122,43 @@ def derive_fleet_listed(*, manifest_source: str, owner: str | None, repo: str | 
     # `OSError`). The refresh path then crashed instead of returning 0,
     # leaving the access-gating marker STALE rather than failing closed.
     manifest = parsed.value_or(None) if hasattr(parsed, "value_or") else parsed
-    if manifest is None or owner != manifest.owner:
+    if manifest is None:
         return False
-    listed = set(manifest.member_names())
-    listed.update(adopter.repo for adopter in manifest.adopters)
-    return repo in listed
+    # A `fleet`-array member resolves under `owner` alone; an adopter resolves
+    # under `<adopter.owner or adopter_owner or owner>` (livespec v247,
+    # the fleet membership contract in non-functional-requirements.md).
+    if owner == manifest.owner and repo in manifest.member_names():
+        return True
+    default_owner, adopter_owners = _raw_adopter_owners(manifest_source=manifest_source)
+    fallback_owner = default_owner or manifest.owner
+    return any(
+        adopter.repo == repo and owner == adopter_owners.get(adopter.repo, fallback_owner)
+        for adopter in manifest.adopters
+    )
+
+
+def _raw_adopter_owners(*, manifest_source: str) -> tuple[str | None, dict[str, str]]:
+    """The manifest's `adopter_owner` and per-adopter `owner` keys, read raw.
+
+    The pinned livespec-dev-tooling `Manifest` may predate these keys, so the
+    gate reads them from the manifest text itself (bd-ib-2sdcgk). It runs only
+    after `parse_manifest` accepted the document, so the root is an object and
+    every adopter entry an object with a string `repo`. Text the core parser
+    accepts but plain JSON does not (a block comment) yields no overrides, and
+    every adopter then resolves under `owner` exactly as before the keys
+    existed; a non-string value is ignored the same way.
+    """
+    try:
+        root = cast("dict[str, Any]", json.loads(_strip_jsonc_comments(text=manifest_source)))
+    except json.JSONDecodeError:
+        return None, {}
+    per_adopter: dict[str, str] = {}
+    for entry in cast("list[dict[str, Any]]", root.get("adopters") or []):
+        entry_owner = entry.get("owner")
+        if isinstance(entry_owner, str):
+            per_adopter[cast("str", entry["repo"])] = entry_owner
+    default_owner = root.get("adopter_owner")
+    return (default_owner if isinstance(default_owner, str) else None), per_adopter
 
 
 def repo_name_from_remote_url(*, remote_url: str) -> str | None:
