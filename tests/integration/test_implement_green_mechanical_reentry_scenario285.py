@@ -56,7 +56,9 @@ def _git_path(*, repo: Path, name: str) -> Path:
     return repo / _git(repo=repo, argv=["rev-parse", "--git-path", name])
 
 
-def _refusing_repository(*, tmp_path: Path, failed: tuple[str, ...]) -> Path:
+def _refusing_repository(
+    *, tmp_path: Path, failed: tuple[str, ...], summary: tuple[str, ...] = ()
+) -> Path:
     """A repository holding this run's Red commit, a Green checkpoint and a refusing hook."""
     repo = tmp_path / "repository"
     repo.mkdir(parents=True)
@@ -80,7 +82,10 @@ def _refusing_repository(*, tmp_path: Path, failed: tuple[str, ...]) -> Path:
     rows = "".join(f"  - {name}\\n" for name in failed)
     hook = repo / ".git" / "hooks" / "pre-commit"
     _ = hook.write_text(
-        f"#!/bin/sh\nprintf 'Failed targets ({len(failed)}):\\n{rows}'\nexit 1\n", encoding="utf-8"
+        f"#!/bin/sh\nprintf 'Failed targets ({len(failed)}):\\n{rows}'\n"
+        + "".join(f"echo '{line}'\n" for line in summary)
+        + "exit 1\n",
+        encoding="utf-8",
     )
     hook.chmod(0o755)
     _ = _git_path(repo=repo, name="livespec-implement-handoff.md").write_text(
@@ -312,3 +317,34 @@ def test_an_unreadable_payload_graph_refuses_naming_it(tmp_path: Path) -> None:
 
     assert refusal is not None
     assert str(absent) in refusal
+
+
+@pytest.mark.parametrize(
+    ("summary", "classification"),
+    [
+        (
+            (
+                "\u2714\ufe0f 02-commit-pairs-source-and-test (0.27 seconds)",
+                "\U0001f94a 03-check-pre-commit (9.10 seconds)",
+            ),
+            "mechanical",
+        ),
+        (
+            (
+                "\U0001f94a 02-commit-pairs-source-and-test (0.27 seconds)",
+                "\U0001f94a 03-check-pre-commit (9.10 seconds)",
+            ),
+            "ordinary",
+        ),
+    ],
+)
+def test_a_lint_only_aggregate_refusal_is_mechanical_only_when_no_other_hook_command_failed(
+    tmp_path: Path, summary: tuple[str, ...], classification: str
+) -> None:
+    repo = _refusing_repository(tmp_path=tmp_path, failed=("check-lint",), summary=summary)
+
+    handoff = _commit_green(repo=repo, args=["2", "check-lint"])
+
+    assert f"Refusal: {classification}." in handoff
+    if classification == "ordinary":
+        assert "a hook command beside the check aggregate also failed" in handoff.lower()

@@ -145,6 +145,12 @@ append_failing_section() {
     fi
 }
 
+# Lefthook's closing summary marks each failed hook command with the boxing glove,
+# `🥊 03-check-pre-commit (12.3 seconds)`; its boxed banner never starts a line.
+failed_hook_commands() {
+    grep -cE '^🥊 [^ ]+ \(' "$1" || true
+}
+
 failed_target_names() {
     awk '
         /^Failed targets \([0-9]+\):[[:space:]]*$/ { printing = 1; next }
@@ -188,6 +194,7 @@ append_reentry_class() {
     local names=""
     local target=""
     local mechanical=0
+    local commands=0
     local reason=""
     budget="$(non_negative "${4:-0}")"
     spent_path="$(git rev-parse --git-path "$MECHANICAL_SPENT_NAME")"
@@ -196,7 +203,10 @@ append_reentry_class() {
     printf '%s\n' "$budget" > "$(git rev-parse --git-path "$MECHANICAL_BUDGET_NAME")"
     spent="$(non_negative "$(cat "$spent_path" 2>/dev/null || true)")"
     names="$(failed_target_names "$output")"
-    if [[ -n "$names" ]]; then
+    commands="$(non_negative "$(failed_hook_commands "$output")")"
+    # The aggregate's list names only its own targets, so a refusal is mechanical
+    # only when the aggregate is the one hook command that failed.
+    if [[ -n "$names" ]] && (( commands <= 1 )); then
         mechanical=1
         for target in $names; do
             declared_mechanical "$target" "$allowed" || mechanical=0
@@ -215,6 +225,8 @@ append_reentry_class() {
     fi
     if [[ -z "$names" ]]; then
         reason="the hook output names no failed target"
+    elif (( commands > 1 )); then
+        reason="a hook command beside the check aggregate also failed"
     elif (( mechanical == 1 )); then
         reason="every failed target is a declared mechanical target, but the mechanical re-entries are spent"
     else
