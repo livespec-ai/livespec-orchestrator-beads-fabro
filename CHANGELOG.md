@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.332.1](https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/compare/v0.332.0...v0.332.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* classify authored commits below engine checkpoints ([a92ffd1](https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/commit/a92ffd165d32fde88bff2b6f8db5d3000026139c))
+* run Red commit from shipped plugin program ([a4fe071](https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/commit/a4fe071e2e6fd7ba45b2ebdc65fd6cda3eb11ff1))
+* ship every implement command helper ([405dd70](https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/commit/405dd70d4ad7612f9ec312a2e6d4e55fc8fad201))
+
 ## [0.332.0](https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/compare/v0.331.0...v0.332.0) (2026-11-14)
 
 
