@@ -75,6 +75,13 @@ def test_scenario285_routes_each_implement_commit_through_red_and_green_command_
     assert "commit-runner.py" not in graph.nodes["green"].get("prompt", "")
 
 
+def test_scenario285_implement_completion_no_longer_routes_to_implementation_diff() -> None:
+    """The split removed ``implement_completion`` -> ``implementation_diff``; it stays removed."""
+    graph = _graph()
+    pairs = {(edge.source, edge.destination) for edge in graph.edges}
+    assert ("implement_completion", "implementation_diff") not in pairs
+
+
 def test_scenario285_test_wrong_reset_restores_the_dispatch_base(tmp_path: Path) -> None:
     """A test-wrong lap leaves its handoff but removes all branch changes."""
     repo = _scratch_repo(tmp_path=tmp_path)
