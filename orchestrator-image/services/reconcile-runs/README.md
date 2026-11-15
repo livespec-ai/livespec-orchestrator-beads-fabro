@@ -39,10 +39,12 @@ the way the dispatcher's tenant wrapper does:
 
 - no `.livespec.jsonc`, or no `credential_wrapper` key: the pass runs under the
   family wrapper `/usr/local/bin/with-livespec-env.sh`;
-- a `credential_wrapper` whose command is the family wrapper: the pass runs
-  under it as declared;
+- a `credential_wrapper` whose command resolves (`realpath -e`) to the same file
+  as the family wrapper: the pass runs under it as declared;
 - any other `credential_wrapper`: it runs nested inside the family wrapper with
   `BEADS_DOLT_PASSWORD` unset, so the tenant wrapper injects its own password.
+  A different file that only shares the family wrapper's basename, such as a
+  tenant's own or vendored copy, takes this route.
 - a `.livespec.jsonc` that cannot be read, or a `credential_wrapper` that is not
   a non-empty array of non-empty strings: the pass REFUSES with exit 78 and a
   `credential-wrapper-unreadable` line naming the file, and runs nothing. A
@@ -50,8 +52,7 @@ the way the dispatcher's tenant wrapper does:
   the family wrapper, because that fallback mints the wrong GitHub App.
 
 livespec-dev-tooling's Ansible role `reconcile_runs` installs its own copy of
-this wrapper at the same path, so the two are kept identical apart from comments
-and the `credential-wrapper-unreadable` cause in the refusal text.
+this wrapper at the same path, so the two are kept identical apart from comments.
 
 A bare family wrapper is not enough on its own: it projects the family's default
 GitHub App pair, which livespec-ai repositories refuse (bd-ib-ft426g). This

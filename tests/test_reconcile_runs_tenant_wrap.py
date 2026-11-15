@@ -47,6 +47,9 @@ _TENANT_SCRIPT = (
     'BEADS_DOLT_PASSWORD=tenant exec "$@"'
 )
 
+# A hop after a declared wrapper's "--": logs one line, then runs the rest.
+_HOP_SCRIPT = 'printf \'hop\\n\' >> "$TW_LOG"; exec "$@"'
+
 
 def _executable(*, path: Path, body: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -131,15 +134,48 @@ def test_a_repository_without_a_credential_wrapper_runs_under_the_family_wrapper
 
 
 def test_a_declared_family_wrapper_is_run_as_declared(tmp_path: Path) -> None:
-    declared = _executable(path=tmp_path / "declared" / "with-livespec-env.sh", body=_DECLARED_STUB)
-    argv = json.dumps([str(declared), "--"])
+    # Declared through a symlink, so the match is on the resolved file, and with
+    # a hop after its "--" that only an un-nested, as-committed run executes once.
+    link = tmp_path / "link" / "with-livespec-env.sh"
+    link.parent.mkdir()
+    link.symlink_to(tmp_path / "family" / "with-livespec-env.sh")
+    argv = json.dumps([str(link), "--", "/bin/sh", "-c", _HOP_SCRIPT, "sh"])
 
     lines = _run_pass(
         tmp_path=tmp_path,
         livespec_jsonc=f'{{\n  "credential_wrapper": {argv} // family\n}}\n',
     )
 
-    assert lines == ["declared pw=unset", "pass pw=declared", "arg=reconcile-runs", "arg=--json"]
+    assert lines == [
+        "family pw=unset",
+        "hop",
+        "pass pw=family",
+        "arg=reconcile-runs",
+        "arg=--json",
+    ]
+
+
+def test_a_different_file_with_the_family_basename_nests_as_a_tenant_wrapper(
+    tmp_path: Path,
+) -> None:
+    # A tenant's own or vendored copy shares the basename but is not the family
+    # wrapper, so it runs nested, with the family's BEADS_DOLT_PASSWORD removed
+    # before it.
+    vendored = _executable(path=tmp_path / "vendor" / "with-livespec-env.sh", body=_DECLARED_STUB)
+    argv = json.dumps([str(vendored), "--"])
+
+    lines = _run_pass(
+        tmp_path=tmp_path,
+        livespec_jsonc=f'{{\n  "credential_wrapper": {argv}\n}}\n',
+    )
+
+    assert lines == [
+        "family pw=unset",
+        "declared pw=unset",
+        "pass pw=declared",
+        "arg=reconcile-runs",
+        "arg=--json",
+    ]
 
 
 def test_a_non_family_wrapper_nests_inside_the_family_wrapper_without_its_password(
