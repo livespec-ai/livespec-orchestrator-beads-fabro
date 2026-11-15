@@ -6430,8 +6430,24 @@ Feature: A judged Definition-of-Done defect is found before a dispatch is spent 
       | pre-admission |
       | pre-dispatch  |
 
-  Scenario Outline: The judgement falls back to the unnumbered credential and says so
-    Given <selection state>
+  Scenario Outline: Under the numbered-slots policy the judgement selects a declared slot exactly as a dispatch does
+    Given dispatcher.claude_credential_policy declares mode numbered-slots with slots CLAUDE_CODE_OAUTH_TOKEN__A and CLAUDE_CODE_OAUTH_TOKEN__B
+    And both declared slots are injected non-empty and the pool's admission choice is CLAUDE_CODE_OAUTH_TOKEN__B
+    And the unnumbered Claude credential is <unnumbered state>
+    When the <phase> judgement runs its Claude model on the host
+    Then the judge is started with CLAUDE_CODE_OAUTH_TOKEN__B's credential
+    And the unnumbered Claude credential is not read
+
+    Examples:
+      | phase         | unnumbered state |
+      | pre-admission | present          |
+      | pre-dispatch  | present          |
+      | pre-admission | absent           |
+      | pre-dispatch  | absent           |
+
+  Scenario Outline: Under the legacy-independent policy the judgement falls back to the unnumbered credential and says so
+    Given dispatcher.claude_credential_policy declares mode legacy-independent
+    And <selection state>
     And the unnumbered Claude credential is present in the environment
     When the <phase> judgement runs its Claude model on the host
     Then the judge is started with the unnumbered Claude credential
@@ -6443,6 +6459,22 @@ Feature: A judged Definition-of-Done defect is found before a dispatch is spent 
       | pre-dispatch  | no numbered slot is injected |
       | pre-admission | no pool slot qualifies       |
       | pre-dispatch  | no pool slot qualifies       |
+
+  Scenario Outline: Under the numbered-slots policy the judgement does not run when no declared slot is usable
+    Given dispatcher.claude_credential_policy declares mode numbered-slots
+    And <selection state>
+    And the unnumbered Claude credential is present in the environment
+    When the <phase> judgement would run its Claude model on the host
+    Then no judge is started and the unnumbered Claude credential is not used
+    And one stderr line says the judgement did not run and names the reason
+    And the item records that the <phase> judgement did not run and why
+
+    Examples:
+      | phase         | selection state                        |
+      | pre-admission | no declared slot is injected non-empty |
+      | pre-dispatch  | no declared slot is injected non-empty |
+      | pre-admission | no declared pool slot qualifies        |
+      | pre-dispatch  | no declared pool slot qualifies        |
 
   Scenario: The held-items listing reads the ledger a bounded number of times per snapshot
     Given a snapshot holding many heldable items, some held by a recorded pre-admission verdict and some with no recorded verdict
@@ -12378,6 +12410,14 @@ Feature: The implement stage separates Red from Green and commits outside agent 
     And commit_green amends that commit with the repository's commit hooks running
     And the commit publish_draft pushes carries both trailer sets
 
+  Scenario: A green turn that finds a seed's open Red test wrong returns the run to that commit's parent
+    Given a run seeded from a preserved tree whose Fabro checkpoint commits are followed by a commit carrying Red trailers and no Green trailers
+    And the run has taken that commit as its Red commit
+    When a green turn declares the test wrong
+    Then the run returns to that commit's parent
+    And that commit's changes are in the working tree as carried changes
+    And the next commit_red makes exactly one Red commit, directly on the dispatch base
+
   Scenario: A seed whose carried changes already meet the Definition of Done is published
     Given a run seeded from a preserved tree whose carried changes meet the work item's Definition of Done
     And the dispatch base does not meet it
@@ -12393,6 +12433,12 @@ Feature: The implement stage separates Red from Green and commits outside agent 
     When commit_red runs
     Then commit_red stages tests/test_example.py exactly as it would for the line "Red test file: tests/test_example.py"
     And commit_red does not refuse with "latest red section names no test file"
+
+  Scenario: commit_red refuses a red section whose Red test file and Test file lines name different paths
+    Given the latest red section of the handoff file carries the line "Red test file: tests/a.py" and the line "Test file: tests/b.py"
+    When commit_red runs
+    Then commit_red makes no commit
+    And the handoff file's newest section names both tests/a.py and tests/b.py
 
   Scenario: The red prompt spells out the field line commit_red reads
     Given the red prompt of the implement-work-item workflow
@@ -14474,6 +14520,16 @@ Feature: The release branch advances only at the roll step, after its canary pas
     Then the run fails naming v1.1.0 and the edge `fix_commit_settle -> needs_human`
     And the `release` branch still names the commit of v1.0.0
 
+  Scenario: the roll step refuses a routing test whose cited CI run attempt did not conclude success
+    Given the `release` branch names the commit of release tag v1.0.0
+    And release v1.1.0's commit descends from v1.0.0's commit
+    And release v1.1.0 removes the edge `fix_commit_settle -> needs_human`
+    And release v1.1.0's `canary-coverage.json` asset covers the removed edge only by a routing test citing the required CI workflow's `master` push run on v1.1.0's commit, whose cited attempt concluded `failure`
+    And the cited job's per-test results artifact on that attempt records the cited test id as passing on its first execution
+    When an operator runs `gh workflow run fast-forward-release-branch.yml -f tag=v1.1.0`
+    Then the run fails naming v1.1.0 and the edge `fix_commit_settle -> needs_human`
+    And the `release` branch still names the commit of v1.0.0
+
   Scenario: a corrective roll-forward is held to the canary coverage record
     Given the `release` branch names the commit of release tag v1.0.0, a rolled build that has failed
     And release v1.0.1's commit descends from v1.0.0's commit
@@ -15639,4 +15695,107 @@ Feature: the factory merge verifies the head rollup and honours every hold
     Then the merge wait refuses with the named cause head-rollup-not-green, naming the failed check
     And the pull request is open and unmerged, with no auto-merge request
     And the dispatch outcome is blocked with blocked_reason needs-human, and it never reports green or a successful merge
+```
+
+## Scenario 376 — A numbered-slot dispatcher refuses rather than fall back to the unnumbered Claude credential
+
+```gherkin
+Feature: A fleet dispatcher's Claude credential is always a declared numbered slot
+  As an operator running Claude-routed factory nodes
+  I want a dispatcher with missing or unusable numbered slots to refuse
+  So that no dispatch ever runs on a credential nobody chose for the factory
+
+  Scenario: No declared slot injected refuses even when the unnumbered credential is present
+    Given dispatcher.claude_credential_policy declares mode numbered-slots with slots CLAUDE_CODE_OAUTH_TOKEN__A and CLAUDE_CODE_OAUTH_TOKEN__B
+    And neither declared slot variable is present in the Dispatcher's environment
+    And the unnumbered CLAUDE_CODE_OAUTH_TOKEN is present
+    When the Dispatcher evaluates admission for an item with a covered claude-acp candidate
+    Then the dispatch is refused before any claim with a no-declared-slot-injected refusal naming both declared slots as absent
+    And no claim is taken, no factory run is created and no credential is projected
+
+  Scenario: An empty declared slot is not a pool slot
+    Given dispatcher.claude_credential_policy declares mode numbered-slots with slot CLAUDE_CODE_OAUTH_TOKEN__A
+    And CLAUDE_CODE_OAUTH_TOKEN__A is present but empty
+    And the unnumbered CLAUDE_CODE_OAUTH_TOKEN is present
+    When the Dispatcher evaluates admission for an item with a covered claude-acp candidate
+    Then the dispatch is refused before any claim with a no-declared-slot-injected refusal naming CLAUDE_CODE_OAUTH_TOKEN__A as empty
+
+  Scenario: An undeclared numbered variable cannot satisfy the policy
+    Given dispatcher.claude_credential_policy declares mode numbered-slots with slot CLAUDE_CODE_OAUTH_TOKEN__A
+    And CLAUDE_CODE_OAUTH_TOKEN__A is absent
+    And an undeclared CLAUDE_CODE_OAUTH_TOKEN__C is present and non-empty
+    When the Dispatcher evaluates admission for an item with a covered claude-acp candidate
+    Then the dispatch is refused before any claim with a no-declared-slot-injected refusal
+    And CLAUDE_CODE_OAUTH_TOKEN__C is neither assessed nor projected
+
+  Scenario: No qualifying slot skips covered candidates without touching the unnumbered credential
+    Given dispatcher.session_headroom_floor_percent is 20
+    And dispatcher.claude_credential_policy declares mode numbered-slots with slot CLAUDE_CODE_OAUTH_TOKEN__A
+    And CLAUDE_CODE_OAUTH_TOKEN__A is present and its five-hour remaining headroom is below the floor
+    And the unnumbered CLAUDE_CODE_OAUTH_TOKEN is present
+    When the Dispatcher evaluates admission for an item whose only admission-required candidates are covered
+    Then the covered candidates are skipped by a floor skip and the item remains ready without a claim
+    And the unnumbered credential is neither assessed nor projected
+
+  Scenario: A downstream consumer refuses when the admitted slot is gone
+    Given dispatcher.claude_credential_policy declares mode numbered-slots with slots CLAUDE_CODE_OAUTH_TOKEN__A and CLAUDE_CODE_OAUTH_TOKEN__B
+    And admission chose CLAUDE_CODE_OAUTH_TOKEN__A for a dispatch
+    And CLAUDE_CODE_OAUTH_TOKEN__A is absent when Worker credential projection runs
+    When the Dispatcher projects the dispatch's Claude credential
+    Then the projection refuses and no factory run is launched
+    And neither CLAUDE_CODE_OAUTH_TOKEN__B nor the unnumbered credential is projected
+
+  Scenario: A missing policy refuses instead of inferring legacy-independent
+    Given dispatcher.claude_credential_policy is absent
+    And no numbered slot is injected and the unnumbered CLAUDE_CODE_OAUTH_TOKEN is present
+    When the Dispatcher evaluates admission for an item with a covered claude-acp candidate
+    Then the dispatch is refused before any claim with a configuration refusal naming dispatcher.claude_credential_policy
+
+  Scenario: The explicit legacy-independent policy keeps the unnumbered credential as the sole slot
+    Given dispatcher.claude_credential_policy declares mode legacy-independent
+    And no numbered slot is injected and the unnumbered CLAUDE_CODE_OAUTH_TOKEN is present
+    When the Dispatcher evaluates admission for an item with a covered claude-acp candidate
+    Then the unnumbered credential is the sole pool slot and is assessed under the headroom paragraph
+
+  Scenario: A covered primary with an uncovered fallback continues to the fallback when no declared slot is injected
+    Given dispatcher.claude_credential_policy declares mode numbered-slots with slot CLAUDE_CODE_OAUTH_TOKEN__A
+    And CLAUDE_CODE_OAUTH_TOKEN__A is absent and the unnumbered CLAUDE_CODE_OAUTH_TOKEN is present
+    And an admission-required node offers a claude-acp primary and a codex-acp fallback
+    When the Dispatcher evaluates admission for the item
+    Then the claude-acp candidate is ineligible and selection continues to the codex-acp fallback
+    And no no-declared-slot-injected refusal applies and the unnumbered credential is neither assessed nor projected
+
+  Scenario Outline: An invalid policy refuses and names its defect
+    Given dispatcher.claude_credential_policy is <policy>
+    When the Dispatcher evaluates admission for an item with a covered claude-acp candidate
+    Then the dispatch is refused before any claim with a configuration refusal naming dispatcher.claude_credential_policy and <defect>
+    And a hand-picked dispatch reports exit code 3
+
+    Examples:
+      | policy                                                                  | defect                     |
+      | mode fleet                                                              | the unknown mode           |
+      | mode legacy-independent with slots CLAUDE_CODE_OAUTH_TOKEN__A           | slots under legacy-independent |
+      | mode numbered-slots with slot OTHER_TOKEN                               | the slot name's pattern    |
+      | mode numbered-slots with no slots                                       | the empty slots array      |
+
+  Scenario: A downstream probe refuses when the admitted slot is gone
+    Given dispatcher.claude_credential_policy declares mode numbered-slots with slots CLAUDE_CODE_OAUTH_TOKEN__A and CLAUDE_CODE_OAUTH_TOKEN__B
+    And admission chose CLAUDE_CODE_OAUTH_TOKEN__A for a dispatch
+    And CLAUDE_CODE_OAUTH_TOKEN__A is absent when the credential-usability probe runs
+    When the probe runs for the dispatch
+    Then the probe refuses before any further claim or launch
+    And neither CLAUDE_CODE_OAUTH_TOKEN__B nor the unnumbered credential is probed
+
+  Scenario: A missing policy keeps the host judgement from running
+    Given dispatcher.claude_credential_policy is absent
+    And the unnumbered Claude credential is present in the environment
+    When the pre-admission judgement would run its Claude model on the host
+    Then no judge is started and the unnumbered Claude credential is not used
+    And one stderr line says the judgement did not run and names the missing dispatcher.claude_credential_policy
+
+  Scenario: A candidate that needs no Claude credential is unaffected by the policy
+    Given dispatcher.claude_credential_policy declares mode numbered-slots and no declared slot is injected
+    And every admission-required node of an item offers only codex-acp candidates
+    When the Dispatcher evaluates admission for the item
+    Then no no-declared-slot-injected refusal applies and admission proceeds under its other conditions
 ```

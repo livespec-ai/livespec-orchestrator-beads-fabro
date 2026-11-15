@@ -3277,5 +3277,13 @@
     "test": "TODO",
     "work_item": "bd-ib-x73d36",
     "reason": "A real test at the integration tier or above is owed for this heading: the factory's shared merge path driven against a protection-less target whose pull request head rollup is red (refused with target-requires-no-checks and head-rollup-not-green, left open and unmerged, dispatch blocked needs-human with a non-zero exit), a direct merge of an item whose merge-hold label was set after dispatch (refused with merge-hold-active), a green rollup on a protected target (merged), a path-skipped job beside a green rollup (merged), a pending rollup that is armed only once every entry passes, a pending rollup handed off at the merge wait's budget and armed by reconciliation hold 8, and a pending rollup whose running check fails (refused with head-rollup-not-green and never armed). bd-ib-x73d36 owns it."
+  },
+  {
+    "heading": "## Scenario 376 — A numbered-slot dispatcher refuses rather than fall back to the unnumbered Claude credential",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-tvcbmc",
+    "reason": "A real test at the integration tier or above is owed for this heading: the Dispatcher's admission, credential-usability probe, credential-status probe, Worker credential projection and host judgement driven under dispatcher.claude_credential_policy, asserting the no-declared-slot-injected refusal before any claim for absent, empty and undeclared slots with the unnumbered credential present, the mixed node that continues to an uncovered fallback, the floor skip that never touches the unnumbered credential, a downstream consumer's refusal when the admitted slot is gone, the configuration refusal (exit code 3) for a missing or invalid policy, the explicit legacy-independent fallback, and a codex-acp-only item unaffected by the policy. bd-ib-tvcbmc (the R01 implementation) owns it."
   }
 ]

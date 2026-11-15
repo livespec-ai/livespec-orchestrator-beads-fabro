@@ -1304,6 +1304,13 @@
   {
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
+    "heading": "## Scenario 376 — A numbered-slot dispatcher refuses rather than fall back to the unnumbered Claude credential",
+    "work_item": "bd-ib-tvcbmc",
+    "first_seen": "2026-11-15"
+  },
+  {
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
     "heading": "## Scenario 39 — Ratified lesson injects into dispatch briefs",
     "work_item": "bd-ib-heat",
     "first_seen": "2026-07-04"
