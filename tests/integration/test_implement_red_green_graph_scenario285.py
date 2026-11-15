@@ -79,6 +79,8 @@ def test_scenario285_implement_completion_no_longer_routes_to_implementation_dif
     """The split removed ``implement_completion`` -> ``implementation_diff``; it stays removed."""
     graph = _graph()
     pairs = {(edge.source, edge.destination) for edge in graph.edges}
+    assert "implement_completion" in graph.nodes
+    assert any(source == "implement_completion" for source, _ in pairs)
     assert ("implement_completion", "implementation_diff") not in pairs
 
 
