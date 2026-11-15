@@ -1,2 +1,13 @@
-work_item=bd-ib-qokmf7
-reason=carve check-metadata runs-on onto CI_INCIDENT_RUNNER_LABELS and pass the incident observer URL, connect address and query token to its check-red-green-replay leg only (guarded exactly as livespec-dev-tooling ci.yml), so an expedited PR touching product Python can be admitted through the tailnet-only observer /provenance; logically additive routing and env change (maintainer 2026-11-03), authorized by legacy-coordinator-agent under section 12 on 2026-11-15
+# Workflow-edit exemption — one exemption binds to one reviewed change.
+#
+# The change: .github/workflows/ci.yml adopts the GUARDED merge_group shape
+# (org merge-queue cutover, plan stale-base-merge-options, epic
+# livespec-dev-tooling-xowhol). It adds the merge_group trigger and a first,
+# hosted, read-only merge-group-guard job, and it MODIFIES existing lines:
+# every self-hosted-capable job's runs-on is wrapped in the guard output
+# (trusted == 'true' && <unchanged expression> || 'ubuntu-latest'), its needs
+# gains merge-group-guard, and its if gains !cancelled(). On pull_request and
+# push the guard outputs true with no API call, so every job, its runs-on and
+# its run condition are unchanged on those events. MAINTAINER tier.
+work_item=bd-ib-mujbfl
+reason=Adopt the guarded merge_group trigger so the merge queue the org cutover requires (branch_protection_alignment merge_queue_absent) runs the full suite and reports ci-green without opening an unguarded self-hosted routing path.
