@@ -261,6 +261,8 @@ proven non-viable, 895 §4.3). Full env set in §4. Key points:
 - **Separate ingest-only Honeycomb key**, never the management key,
   same 1Password environment as the OAuth token (epic decision; new
   entry pending user key provisioning).
+
+The preceding 1Password store decision is historical. Parameter Store is the canonical source for these declared Honeycomb names, written first; callers use the unchanged wrapper interface throughout staged migration. This does not claim deployed SSM reader bindings or a converted wrapper.
 - **All content flags stay unset** (§1.5) — names/ids/durations/
   tokens/cost only. This satisfies credential hygiene at the source.
 - **Trace beta**: set `OTEL_TRACES_EXPORTER=otlp` +

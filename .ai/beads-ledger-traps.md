@@ -44,14 +44,7 @@ lives in the INVOKER's persistent keyring (uid 1000 — the wrapper drops
 privileges before stage 2), so inspecting root's keyring reports "empty" with
 perfect confidence about the wrong population.
 
-**`[ERROR] <timestamp> (500) Internal Server Error: Server experienced a fatal
-error.` from a wrapped `bd` call comes from the WRAPPER's 1Password call, not
-from Dolt — `bd` never ran.** The wrapper calls the 1Password CLI to fetch the
-credential before `bd` starts. When the 1Password service answers HTTP 500,
-the wrapper fails. The string is compiled into the 1Password CLI
-(`strings /usr/local/bin/op` contains it), while a Dolt failure reads
-`Error NNNN (SQLSTATE)`. Remedy: check whether the write landed (read it back,
-with stderr kept separate), retry once, and do not diagnose the server.
+**For a wrapper still backed by 1Password, `[ERROR] <timestamp> (500) Internal Server Error: Server experienced a fatal error.` is a credential-fetch failure before `bd` starts.** The 1Password CLI contains that string; a Dolt failure reads `Error NNNN (SQLSTATE)`. For that backend, check whether the write landed with stderr separate, retry once, and do not diagnose Dolt from this signature alone. The following dated observations and cache diagnostics concern those 1Password installations; they do not describe the livespec wrapper after its host converts to Parameter Store.
 Measured 2026-10-16 at 23:02:07Z and 23:10:31Z on two `bd comment` writes to
 the `livespec-dev-tooling` tenant. Neither landed, an immediate retry of each
 succeeded, reads kept working (the wrapper serves most calls from its cache),
