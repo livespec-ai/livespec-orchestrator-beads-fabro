@@ -150,6 +150,20 @@ ENGINE_CHECKPOINT_SUBJECT = re.compile(r"^fabro\([^)]*\): ")
 TDD_RED_TRAILER = "TDD-Red-Test-File-Checksum:"
 TDD_GREEN_TRAILER = "TDD-Green-Verified-At:"
 FOLDED_CHECKPOINTS_SENTINEL = "LIVESPEC_COMMIT_RUNNER_FOLDED_CHECKPOINTS"
+# Every commit-refusal brief's failing-file section (contracts.md "Every
+# commit-refusal re-entry brief names the failing files from the full recorded
+# output"): at most this many files, each read from the failed targets' own
+# reports in the FULL output, never from its final lines.
+FAILING_FILE_CAP = 40
+COVERAGE_TARGETS = frozenset({"check-per-file-coverage", "check-check-coverage-incremental"})
+LLOC_TARGETS = frozenset({"check-file-lloc"})
+# A coverage table row: name, statements, misses, optional branch columns, cover, missing.
+COVERAGE_ROW = re.compile(
+    r"^(?P<name>\S+)\s+\d+\s+\d+(?:\s+\d+\s+\d+)?\s+(?P<cover>\d+(?:\.\d+)?)%"
+    r"(?:\s+(?P<missing>\S.*?))?\s*$"
+)
+BELOW_COVERAGE_EVENT = "file below 100% coverage"
+LLOC_EVENT_PREFIX = "file LLOC exceeds"
 
 
 class RunnerRefusal(Exception):
@@ -632,6 +646,97 @@ def targets_for_refusal(text):
     return [target] if target is not None else []
 
 
+def structured_event(line):
+    """The JSON object a check logged on this line, or None."""
+    stripped = line.strip()
+    start = stripped.find("{")
+    if start < 0 or not stripped.endswith("}"):
+        return None
+    try:
+        value = json.loads(stripped[start:])
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def coverage_row_file(line):
+    """A coverage table row below 100% as (file, detail), or None."""
+    row = COVERAGE_ROW.match(line)
+    if row is None or row.group("name") == "TOTAL" or float(row.group("cover")) >= 100.0:
+        return None
+    missing = row.group("missing")
+    detail = "uncovered lines " + missing if missing else row.group("cover") + "% covered"
+    return row.group("name"), detail
+
+
+def event_file(event, coverage, lloc):
+    """A check's failing-file event as (file, detail), or None."""
+    name = event.get("file")
+    message = str(event.get("event", ""))
+    if not isinstance(name, str):
+        return None
+    if coverage and message == BELOW_COVERAGE_EVENT:
+        return name, (
+            str(event.get("missing_lines")) + " uncovered lines ("
+            + str(event.get("line_percent")) + "% covered)"
+        )
+    if lloc and message.startswith(LLOC_EVENT_PREFIX) and event.get("level") == "error":
+        return name, (
+            "LLOC " + str(event.get("lloc")) + " over the "
+            + str(event.get("hard_ceiling")) + "-line hard ceiling"
+        )
+    return None
+
+
+def failing_files(text, targets):
+    """Each failing file the failed targets' own reports name, first mention first.
+
+    Only a failed target's kind of report is read, so a coverage table printed by a
+    target that passed is never named; a table row's uncovered lines refine the
+    per-file coverage check's count for the same file.
+    """
+    coverage = bool(COVERAGE_TARGETS.intersection(targets))
+    lloc = bool(LLOC_TARGETS.intersection(targets))
+    found = {}
+    for line in text.splitlines():
+        row = coverage_row_file(line) if coverage else None
+        if row is None:
+            event = structured_event(line)
+            row = None if event is None else event_file(event, coverage, lloc)
+        if row is None:
+            continue
+        name = row[0][2:] if row[0].startswith("./") else row[0]
+        if name not in found or row[1].startswith("uncovered lines "):
+            found[name] = row[1]
+    return list(found.items())
+
+
+def failing_section(text):
+    """The ONE failed-target and failing-file section every commit-refusal brief carries."""
+    text = text.replace("\r", "")
+    targets = targets_for_refusal(text)
+    files = failing_files(text, targets)
+    lines = ["failed targets: " + (" ".join(targets) if targets else "none")]
+    if not files:
+        lines.append("failing files: none reported in the recorded output")
+    else:
+        lines.append("failing files (" + str(len(files)) + "):")
+        lines.extend("- " + name + ": " + detail for name, detail in files[:FAILING_FILE_CAP])
+        if len(files) > FAILING_FILE_CAP:
+            lines.append(str(len(files) - FAILING_FILE_CAP) + " further files omitted")
+    return "\n".join(lines) + "\n"
+
+
+def refusal_section(output_file):
+    """Print a recorded output's failing section, for the Red and Green command programs."""
+    try:
+        text = Path(output_file).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        text = ""
+    sys.stdout.write(failing_section(text))
+    return 0
+
+
 def last_passing_aggregate(text):
     matches = list(HOOK_PASSED.finditer(text))
     return matches[-1] if matches else None
@@ -702,7 +807,6 @@ def brief_text(run_id, path, record, state, timeout_seconds):
             + " seconds expired, so it has no verdict yet and no commit is known to exist.\n"
         )
     output = full_output(path)
-    targets = targets_for_refusal(output)
     tail = "\n".join(output.splitlines()[-BRIEF_TAIL_LINES:])
     if record.get("no_authored_subject"):
         return (
@@ -733,7 +837,7 @@ def brief_text(run_id, path, record, state, timeout_seconds):
             + "\n"
         )
     return (
-        "failed targets: " + (" ".join(targets) if targets else "none") + "\n\n"
+        failing_section(output) + "\n"
         + named + "ended FAILED with exit status " + str(record.get("exit_code"))
         + "; the repository commit hook "
         + ("ran" if record.get("hook_ran") is True else "did not run")
@@ -1299,6 +1403,8 @@ def main(argv, program):
     settle_parser.add_argument("--stage", choices=tuple(STAGE_SETTLES))
     cut_parser = operations.add_parser("cut-settle")
     cut_parser.add_argument("--timeout-seconds", required=True, type=float)
+    section_parser = operations.add_parser("refusal-section")
+    section_parser.add_argument("output_file")
     worker_parser = operations.add_parser("worker")
     worker_parser.add_argument("run_id")
     args = parser.parse_args(argv)
@@ -1317,6 +1423,8 @@ def main(argv, program):
             )
         if args.operation == "cut-settle":
             return cut_settle(args.timeout_seconds)
+        if args.operation == "refusal-section":
+            return refusal_section(args.output_file)
         return worker(args.run_id)
     except RunnerRefusal as refusal:
         print("livespec commit runner: " + str(refusal), file=sys.stderr)

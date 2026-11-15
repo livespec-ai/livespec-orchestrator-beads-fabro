@@ -87,9 +87,25 @@ append_failure_details() {
         printing && /^[[:space:]]+-[[:space:]]+/ { print; next }
         printing { exit }
     ' "$output"
+    append_failing_section "$output"
     printf 'Hook output (last 80 lines):\n```text\n'
     tail -n 80 "$output"
     printf '\n```\n'
+}
+
+# Contracts.md "Every commit-refusal re-entry brief names the failing files from
+# the full recorded output": the commit runner materialized beside this program
+# owns the one builder every refusal brief shares, so this section reads the
+# FULL output the same way the fix and review_fix briefs do.
+append_failing_section() {
+    local output="$1"
+    local runner=""
+    runner="$(dirname "${BASH_SOURCE[0]}")/livespec-commit-runner.py"
+    if [[ -f "$runner" ]]; then
+        python3 "$runner" refusal-section "$output"
+    else
+        printf 'failing files: unavailable, because the commit runner is not materialized beside this program\n'
+    fi
 }
 
 append_verdict() {
