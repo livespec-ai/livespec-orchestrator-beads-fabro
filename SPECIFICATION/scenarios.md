@@ -12347,6 +12347,56 @@ Feature: The implement stage separates Red from Green and commits outside agent 
     When an implement turn ends incomplete with no refused commit
     Then the implement stage ends failed
     And no mechanical re-entry is spent on that incomplete turn
+
+  Scenario: A seeded run's carried product changes do not refuse the Red commit
+    Given a run seeded from a preserved tree whose head carries an earlier run's Fabro checkpoint commits that changed a product file
+    And the current run's red turn wrote a failing test and changed no product file
+    When commit_red runs
+    Then commit_red makes the Red commit directly on the dispatch base
+    And the Red commit holds the Red test file and no product file
+    And the product change the checkpoint commits carried is still in the working tree
+
+  Scenario: A seeded run's red turn that changes a product file is refused naming only its own change
+    Given a run seeded from a preserved tree whose carried changes include a product file
+    And the current run's red turn changed a different product file
+    When commit_red runs
+    Then commit_red makes no commit
+    And the handoff file's newest section names the product file the red turn changed and not the carried one
+    And the re-entered red turn starts from the seed head
+
+  Scenario: A seeded run publishes every carried change under replay evidence
+    Given a run seeded from a preserved tree whose head carries an earlier run's Fabro checkpoint commits
+    When the run passes commit_green and publish_draft pushes its branch
+    Then the published branch holds every change the seed's checkpoint commits held
+    And every commit on the published branch that touches a product-implementation path carries both the Red and the Green trailer sets
+
+  Scenario: A seed that ends in an open Red commit is completed, not repeated
+    Given a run seeded from a preserved tree whose Fabro checkpoint commits are followed by a commit carrying Red trailers and no Green trailers
+    When the run passes the implement stage
+    Then no second Red commit is made
+    And commit_green amends that commit with the repository's commit hooks running
+    And the commit publish_draft pushes carries both trailer sets
+
+  Scenario: A seed whose carried changes already meet the Definition of Done is published
+    Given a run seeded from a preserved tree whose carried changes meet the work item's Definition of Done
+    And the dispatch base does not meet it
+    When the red turn ends
+    Then the red turn has written a Red test and has not declared the already-satisfied outcome
+    And that test fails at commit_red against the dispatch base's product files
+    And while that hook runs every carried change is restorable from the seed head commit and this run's engine checkpoint commits
+    And the run passes green and commit_green and publishes the carried changes
+    And the run does not end at the already-satisfied ending or at an unprovable variant of it
+
+  Scenario: commit_red accepts a Test file line as the Red test file
+    Given the latest red section of the handoff file names its test file on the line "Test file: tests/test_example.py" and carries no "Red test file:" line
+    When commit_red runs
+    Then commit_red stages tests/test_example.py exactly as it would for the line "Red test file: tests/test_example.py"
+    And commit_red does not refuse with "latest red section names no test file"
+
+  Scenario: The red prompt spells out the field line commit_red reads
+    Given the red prompt of the implement-work-item workflow
+    When its handoff instruction is read
+    Then it spells out the literal field line "Red test file: <path>"
 ```
 
 ## Scenario 289 — A Green amend whose staged test fails is refused before the rest of its gate's tests run
@@ -14373,6 +14423,55 @@ Feature: The release branch advances only at the roll step, after its canary pas
     And it names, for the removed edge, a routing test present in v1.1.0's tree that passed in a recorded `factory_captured` proof on v1.1.0's commit
     When an operator runs `gh workflow run fast-forward-release-branch.yml -f tag=v1.1.0`
     Then the `release` branch names the commit of v1.1.0 when the run ends
+
+  Scenario: the roll step advances when a removed edge's routing test passed in the release commit's CI run
+    Given the `release` branch names the commit of release tag v1.0.0
+    And release v1.1.0's commit descends from v1.0.0's commit
+    And release v1.1.0 changes the script of workflow node `fix_commit_settle` and removes the edge `fix_commit_settle -> needs_human`
+    And release v1.1.0's `canary-coverage.json` asset embeds a journal row of a v1.1.0 sample completing node `fix_commit_settle` with a successful outcome through its success edge
+    And it names, for the removed edge, a routing test present in v1.1.0's tree, citing the run id, run attempt number, job id and `head_sha` of the required CI workflow's `master` push run on v1.1.0's commit
+    And that run concluded `success` on the cited attempt, and the per-test results artifact the cited job uploaded on that attempt records that test id as executed and passing on its first execution
+    When an operator runs `gh workflow run fast-forward-release-branch.yml -f tag=v1.1.0`
+    Then the `release` branch names the commit of v1.1.0 when the run ends
+
+  Scenario: the roll step refuses a routing test cited to a CI run on another commit
+    Given the `release` branch names the commit of release tag v1.0.0
+    And release v1.1.0's commit descends from v1.0.0's commit
+    And release v1.1.0 removes the edge `fix_commit_settle -> needs_human`
+    And release v1.1.0's `canary-coverage.json` asset covers the removed edge only by a routing test citing a CI run whose `head_sha` is v1.0.0's commit
+    When an operator runs `gh workflow run fast-forward-release-branch.yml -f tag=v1.1.0`
+    Then the run fails naming v1.1.0 and the edge `fix_commit_settle -> needs_human`
+    And the `release` branch still names the commit of v1.0.0
+
+  Scenario: the roll step refuses a routing test whose cited CI job did not run it
+    Given the `release` branch names the commit of release tag v1.0.0
+    And release v1.1.0's commit descends from v1.0.0's commit
+    And release v1.1.0 removes the edge `fix_commit_settle -> needs_human`
+    And release v1.1.0's `canary-coverage.json` asset covers the removed edge only by a routing test citing the required CI workflow's `master` push run on v1.1.0's commit, which concluded `success`
+    And the cited job's per-test results artifact on the cited attempt does not include the cited test id
+    When an operator runs `gh workflow run fast-forward-release-branch.yml -f tag=v1.1.0`
+    Then the run fails naming v1.1.0 and the edge `fix_commit_settle -> needs_human`
+    And the `release` branch still names the commit of v1.0.0
+
+  Scenario: the roll step refuses a routing test whose cited CI job has no readable test results
+    Given the `release` branch names the commit of release tag v1.0.0
+    And release v1.1.0's commit descends from v1.0.0's commit
+    And release v1.1.0 removes the edge `fix_commit_settle -> needs_human`
+    And release v1.1.0's `canary-coverage.json` asset covers the removed edge only by a routing test citing the required CI workflow's `master` push run on v1.1.0's commit, which concluded `success` on the cited attempt
+    And the cited job uploaded no per-test results artifact on that attempt, or the artifact cannot be read
+    When an operator runs `gh workflow run fast-forward-release-branch.yml -f tag=v1.1.0`
+    Then the run fails naming v1.1.0 and the edge `fix_commit_settle -> needs_human`
+    And the `release` branch still names the commit of v1.0.0
+
+  Scenario: the roll step refuses a routing test that passed only after an in-place retry
+    Given the `release` branch names the commit of release tag v1.0.0
+    And release v1.1.0's commit descends from v1.0.0's commit
+    And release v1.1.0 removes the edge `fix_commit_settle -> needs_human`
+    And release v1.1.0's `canary-coverage.json` asset covers the removed edge only by a routing test citing the required CI workflow's `master` push run on v1.1.0's commit, which concluded `success` on the cited attempt
+    And the cited job's per-test results artifact on that attempt records the cited test id as failing on its first execution and passing on a re-run
+    When an operator runs `gh workflow run fast-forward-release-branch.yml -f tag=v1.1.0`
+    Then the run fails naming v1.1.0 and the edge `fix_commit_settle -> needs_human`
+    And the `release` branch still names the commit of v1.0.0
 
   Scenario: a corrective roll-forward is held to the canary coverage record
     Given the `release` branch names the commit of release tag v1.0.0, a rolled build that has failed
