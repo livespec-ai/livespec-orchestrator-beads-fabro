@@ -471,12 +471,18 @@ def test_the_four_input_families_are_disjoint_and_cover_what_the_payload_declare
         == rules.POLICY_INPUT_NAMES
     )
     assert frozenset({"workflow_kind"}) == rules.VARIANT_KIND_INPUT_NAMES
-    assert rules.classified_input_names() == (
+    assert (
+        frozenset({"implement_mechanical_targets", "implement_mechanical_reentries"})
+        == rules.MECHANICAL_REENTRY_INPUT_NAMES
+    )
+    others = (
         rules.SCHEMA_PROJECTABLE_INPUTS
         | rules.ADAPTER_INPUT_NAMES
         | rules.POLICY_INPUT_NAMES
         | rules.VARIANT_KIND_INPUT_NAMES
     )
+    assert frozenset() == rules.MECHANICAL_REENTRY_INPUT_NAMES & others
+    assert rules.classified_input_names() == others | rules.MECHANICAL_REENTRY_INPUT_NAMES
     assert rules.scoping_findings(declared={}) == []
 
 

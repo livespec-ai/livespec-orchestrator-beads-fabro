@@ -30,6 +30,7 @@ def test_remaining_implement_commands_use_programs_materialized_in_the_plugin_ro
 
     assert graph.nodes["commit_green"]["script"] == (
         f'bash "{_PLUGINS_ROOT}/livespec-commit-green.sh"'
+        " {{ inputs.implement_mechanical_reentries }} {{ inputs.implement_mechanical_targets }}"
     )
     assert (
         f'bash "{_PLUGINS_ROOT}/livespec-reset-test-wrong-to-dispatch-base.sh"'

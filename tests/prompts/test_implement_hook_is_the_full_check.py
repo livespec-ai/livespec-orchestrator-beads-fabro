@@ -43,6 +43,7 @@ def test_implement_commits_are_owned_by_command_nodes() -> None:
     )
     assert graph.nodes["commit_green"]["script"] == (
         'bash "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-green.sh"'
+        " {{ inputs.implement_mechanical_reentries }} {{ inputs.implement_mechanical_targets }}"
     )
 
 

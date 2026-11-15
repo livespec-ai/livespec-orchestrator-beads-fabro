@@ -25,6 +25,15 @@ A change to a stage prompt file or `_dispatcher_overlay.py` must update the test
 Read the handoff file in full, including the Red section and any declared
 already-satisfied outcome.
 
+When the handoff's latest `## commit_green` section records a refused amend,
+this turn is a re-entry: repair every failed target that section names. A
+section that says `Refusal: mechanical.` named only targets this repository
+declares mechanical, such as lint, formatting, file size or per-file coverage;
+it spent one of the run's mechanical re-entries, not this node's ordinary
+re-entry, and it states the mechanical re-entries remaining. A section that
+says `Refusal: ordinary.` spent the ordinary re-entry. Either way, fix the
+named targets and run the gate preview below before ending.
+
 1. Make the Red test pass by changing implementation files only. Never change the Red test file. When the handoff declares `seeded-open-red`, preserve the seed's changes and take that route through this Green turn even when no new Red test was written: `commit_green` folds the seed checkpoints into the existing replay-evidenced commit.
 2. Run only the tests your change touches. Do not make a commit.
 3. Before ending, run
