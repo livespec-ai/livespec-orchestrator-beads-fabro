@@ -47,7 +47,7 @@ Run on the host as `ubuntu` (Docker access) **under the 1Password env wrapper**
 so the injected secrets are present:
 
 ```bash
-"$HOME/workspace/1password-env-wrapper/with-livespec-env.sh" -- \
+/usr/local/bin/with-livespec-env.sh -- \
   ./orchestrator-image/build-and-verify.sh
 ```
 
@@ -74,14 +74,14 @@ dispatcher journal tail, and leaves automatic item closure disabled with
 Preflight:
 
 ```bash
-"$HOME/workspace/1password-env-wrapper/with-livespec-env.sh" -- \
+/usr/local/bin/with-livespec-env.sh -- \
   bash orchestrator-image/tier2-dispatch-proof.sh --preflight
 ```
 
 Run against a deliberately tiny ready item:
 
 ```bash
-"$HOME/workspace/1password-env-wrapper/with-livespec-env.sh" -- \
+/usr/local/bin/with-livespec-env.sh -- \
   bash orchestrator-image/tier2-dispatch-proof.sh --run --item <tiny-ready-item>
 ```
 
@@ -106,7 +106,7 @@ count only and never prints a secret.
 Preview (deletes nothing):
 
 ```bash
-"$HOME/workspace/1password-env-wrapper/with-livespec-env.sh" -- \
+/usr/local/bin/with-livespec-env.sh -- \
   bash orchestrator-image/reap-e2e-repos.sh --dry-run
 ```
 
@@ -114,7 +114,7 @@ Real reap (default 120-minute age gate; `--force-all` deletes regardless of
 age):
 
 ```bash
-"$HOME/workspace/1password-env-wrapper/with-livespec-env.sh" -- \
+/usr/local/bin/with-livespec-env.sh -- \
   bash orchestrator-image/reap-e2e-repos.sh
 ```
 
@@ -1538,7 +1538,7 @@ the `.fabro/workflows/implement-work-item/` graph) and the dispatch target,
 so the regenerated value is identical), and dispatches one ready item:
 
 ```bash
-"$HOME/workspace/1password-env-wrapper/with-livespec-env.sh" -- \
+/usr/local/bin/with-livespec-env.sh -- \
   just w7-real-work-dispatch -- --target-repo <repo-name> --item <id> --run
 ```
 
@@ -1547,7 +1547,7 @@ bind-mount**, only the substrate volume + the injected secrets, then clones
 fresh and points the Dispatcher at the clones:
 
 ```bash
-"$HOME/workspace/1password-env-wrapper/with-livespec-env.sh" -- docker run -d \
+/usr/local/bin/with-livespec-env.sh -- docker run -d \
   --name livespec-orchestrator \
   --privileged \
   --cgroupns=host \                                  # nested resource-limited Fabro sandboxes on cgroup v2
