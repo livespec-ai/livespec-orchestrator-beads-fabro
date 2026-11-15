@@ -136,3 +136,26 @@ judge slot's unnumbered token and only the non-excluded slot names; the control 
 narrows under the bare family wrapper and holds the personal pair; an unreadable argv refuses with
 rc 78. `/usr/local/libexec/livespec-tenant-wrap.sh` (003e543956c8) is the reconcile-runs variant
 without the strip; its backfill bd-ib-ft426g is central-credential-service's.
+
+## CI-only Scenario 330 failures: orphan reaping (2026-11-15, third head)
+
+At QUIET OFF the PR's `ci-green` was red at heads ea60040d3 and 12cc62af8 on `check-fleet-launch`:
+Scenario 330 cases 20a ("a hold set before admission did not stop the drive and keep its ticket")
+and 20e admitted ("did not make the stopped-after-admission exit (rc=75)", with "the launcher never
+re-read the status after every stub drive was gone"), both of which exist on master and pass there in
+CI, and both of which passed on this host in two detached push gates (249/0) and under CPU load.
+
+Reproduced locally by running the slice under a NON-REAPING subreaper (`prctl(PR_SET_CHILD_SUBREAPER)`
+in a Python parent that waits only on its one child): the branch fails exactly those two cases, 7/2,
+and master passes 9/0 under the same shim. Mechanism: master's drive subshell `( cd && "$WRAP" -- … )`
+ends in a plain command, which bash execs, so the drive chain IS the subshell process, the
+launcher's direct child, reaped by `wait "$drive_pid"`. The reconciled launcher's subshell ended in
+the `wrap` FUNCTION, so the chain was a grandchild; when `stop_drive` killed both, the chain was
+re-parented to PID 1 and stayed a zombie wherever PID 1 does not reap orphans (the CI job's
+container), and `kill -0` kept reading the stopped drive as alive: `drive_gone` false in 20a, and
+the stub's post-stop status read never saw "every stub drive gone" in 20e.
+
+Fix: the drive subshell runs `wrapper_chain && exec "${WRAP_CHAIN[@]}" …`, restoring the direct-child
+shape; `dev-tooling/just-check-fleet-launch.sh` now runs the harness under that non-reaping
+subreaper so the leak fails on every host, not only in CI. The resume path is unaffected: resume-repo.sh
+is itself the backgrounded direct child and runs its wrapped command in the foreground.
