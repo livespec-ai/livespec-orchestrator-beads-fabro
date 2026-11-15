@@ -61,3 +61,15 @@ if [[ "$case_10b" == *held_deadline* ]] \
     printf 'case 10b decides on a fixed deadline instead of the shared hang guard\n' >&2
     exit 1
 fi
+
+# The synthetic CPU contention must be enough to exercise the held-release
+# race without expanding to every CPU visible to an unbounded runner. An
+# explicit test parallelism setting is honoured, subject to the same capacity
+# and four-worker ceilings.
+if [[ "$case_10b" != *'load_capacity=$(nproc 2>/dev/null || echo 1)'* ]] \
+    || [[ "$case_10b" != *'load_workers="${LIVESPEC_TEST_PARALLELISM:-$load_capacity}"'* ]] \
+    || [[ "$case_10b" != *'if [ "$load_workers" -gt "$load_capacity" ]; then'* ]] \
+    || [[ "$case_10b" != *'if [ "$load_workers" -gt 4 ]; then'* ]]; then
+    printf 'case 10b does not bound its load workers or honour test parallelism\n' >&2
+    exit 1
+fi
