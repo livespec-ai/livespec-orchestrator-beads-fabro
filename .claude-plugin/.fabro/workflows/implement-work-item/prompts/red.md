@@ -18,11 +18,25 @@ Never run `git push` and never publish a branch or pull request.
   refuses a Red whose change touches a product file, names those paths in
   the handoff file, and the run re-enters `red`.
 
+Before Step 1, inspect
+   the nearest non-checkpoint commit below the current run's `fabro(...)`
+   checkpoints. If it carries `TDD-Red-Test-File-Checksum:` but no
+   `TDD-Green-Verified-At:`, a preserved seed has an open Red. Do not write or
+   run a second Red test. Append a `## seeded-open-red` section naming that
+   commit and its Red test file, then end the turn with exactly:
+
+       {"preferred_next_label": "seeded-open-red"}
+
+   The graph sends this directly to Green, whose command commit completes that
+   existing Red pair.
 1. Decide whether the Definition of Done already holds on the dispatch base.
    If it does, do not write or run a test. Append a `## already-satisfied`
    section to the handoff file with a declared `already-satisfied` outcome and
    the evidence for it, then end the turn with that declared
    `already-satisfied` outcome.
+   When a preserved seed carries changes that meet the Definition of Done but
+   the dispatch base does not, this is not already satisfied: continue with
+   the failing-test path so the carried changes reach Green and publication.
 2. Otherwise, continue with the failing-test path. Write one failing test for one Definition of Done assertion.
    The test must fail on a genuine assertion rather than during collection or
    import.
@@ -39,7 +53,12 @@ Never run `git push` and never publish a branch or pull request.
 
        git rev-parse --git-path livespec-implement-handoff.md
 
-   Append, never rewrite an earlier section, using a `## red` section that names the Test file, the Definition of Done assertion it proves, the command that ran the test with its failure output, what the test verifies and does not verify, the code locations for the change, and the exit status and failed target names of the last gate preview run. If no preview ran, state that and why.
+   Append, never rewrite an earlier section, using a `## red` section that
+   names its test on a line written exactly as `Red test file: <path>`, the
+   Definition of Done assertion it proves, the command that ran the test with
+   its failure output, what the test verifies and does not verify, the code locations for the change, and the exit status and failed target names of
+   the last gate preview run. If no preview ran, state that and why. The legacy
+   `Test file: <path>` field is accepted too, but write the exact Red field.
 
 The handoff is append-only: append your new section to the resolved file and
 never rewrite an earlier section.
