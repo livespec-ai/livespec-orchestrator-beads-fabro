@@ -876,3 +876,66 @@ def test_the_default_runner_shells_out_to_gh(
 
     assert _held()
     assert calls[0][0] == _view_argv()
+
+
+_MERGE_QUEUE_REFUSAL = "X Cannot use `-d` or `--delete-branch` when merge queue enabled"
+
+
+def test_release_rearms_without_delete_branch_when_a_merge_queue_refuses_it(
+    tmp_path: Path,
+) -> None:
+    """bd-ib-hnj3td: a merge-queue repository refuses the flag, so the arm is retried without it."""
+    repo = _repo(tmp_path)
+    _hold(repo)
+    _journal(repo, records=[_contract_record(work_item_id=_ITEM_ID, merge_mode="rebase")])
+    runner = _Runner(
+        results=[
+            _Run(returncode=0, stdout=_pr_json()),
+            *_guard_answers(),
+            _Run(returncode=1, stderr=_MERGE_QUEUE_REFUSAL),
+            _Run(returncode=0),
+        ]
+    )
+
+    result = run_human_valve_action(
+        repo=repo, action_id=f"set-merge-hold:{_ITEM_ID}:off", runner=runner
+    )
+
+    assert result["status"] == "green", result
+    assert not _held()
+    assert runner.calls[-2:] == [
+        ("gh", "pr", "merge", "7", "--rebase", "--auto", "--delete-branch"),
+        ("gh", "pr", "merge", "7", "--rebase", "--auto"),
+    ]
+
+
+def test_release_merges_directly_without_delete_branch_in_a_merge_queue_repository(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    _hold(repo)
+    _journal(repo, records=[_contract_record(work_item_id=_ITEM_ID, merge_mode="rebase")])
+    runner = _Runner(
+        results=[
+            _Run(returncode=0, stdout=_pr_json()),
+            *_guard_answers(),
+            _Run(returncode=1, stderr=_MERGE_QUEUE_REFUSAL),
+            _Run(
+                returncode=1,
+                stderr="GraphQL: Pull request is in clean status (enablePullRequestAutoMerge)",
+            ),
+            _Run(returncode=1, stderr=_MERGE_QUEUE_REFUSAL),
+            _Run(returncode=0),
+        ]
+    )
+
+    result = run_human_valve_action(
+        repo=repo, action_id=f"set-merge-hold:{_ITEM_ID}:off", runner=runner
+    )
+
+    assert result["status"] == "green", result
+    assert "merged directly" in str(result["summary"])
+    assert runner.calls[-2:] == [
+        ("gh", "pr", "merge", "7", "--rebase", "--delete-branch"),
+        ("gh", "pr", "merge", "7", "--rebase"),
+    ]

@@ -190,7 +190,20 @@ if verb == "ready":
     finish()
 
 if verb == "merge":
-    state["autoMergeRequest"] = {"enabledAt": "now"}
+    # A merge-queue repository refuses the branch-deletion flag outright, as
+    # GitHub answered on livespec-ai/livespec-dev-tooling#4185; the method flag
+    # is only a warning there. An already-clean pull request refuses auto-merge.
+    if state.get("mergeQueue") and ("--delete-branch" in argv or "-d" in argv):
+        sys.stderr.write("X Cannot use `-d` or `--delete-branch` when merge queue enabled\n")
+        finish(1)
+    if state.get("clean") and "--auto" in argv:
+        sys.stderr.write("GraphQL: Pull request is in clean status (enablePullRequestAutoMerge)\n")
+        finish(1)
+    if "--auto" in argv:
+        state["autoMergeRequest"] = {"enabledAt": "now"}
+    else:
+        state["state"] = "MERGED"
+    state["deleteBranchOnMerge"] = "--delete-branch" in argv
     finish()
 
 sys.stderr.write("unstubbed gh invocation: %%s\n" %% " ".join(argv))
@@ -322,7 +335,7 @@ class _Arc:
         return _Done(returncode=done.returncode, stdout=done.stdout, stderr=done.stderr)
 
 
-def _arc(*, root: Path, merge_hold: bool) -> _Arc:
+def _arc(*, root: Path, merge_hold: bool, merge_queue: bool = False, clean: bool = False) -> _Arc:
     """Dispatch one item under `squash`, leaving a draft pull request awaiting its `pr` stage."""
     host = root / "host"
     host.mkdir()
@@ -380,6 +393,8 @@ def _arc(*, root: Path, merge_hold: bool) -> _Arc:
                 "head": _HEAD,
                 "isDraft": True,
                 "autoMergeRequest": None,
+                "mergeQueue": merge_queue,
+                "clean": clean,
                 "comments": [
                     _proof_record(verdict=VERDICT_CAPTURED),
                     _proof_record(verdict=VERDICT_VERIFIED),
@@ -485,3 +500,89 @@ def test_an_unheld_pr_stage_arms_auto_merge_with_the_declared_merge_mode(tmp_pat
         ]
     ]
     assert arc.forge()["autoMergeRequest"] is not None
+
+
+def _release(*, arc: _Arc) -> dict[str, object]:
+    return run_human_valve_action(
+        repo=arc.host,
+        action_id=f"set-merge-hold:{_ITEM_ID}:off",
+        runner=arc.valve_runner,
+    )
+
+
+def test_releasing_a_hold_in_a_merge_queue_repository_arms_auto_merge(tmp_path: Path) -> None:
+    """A merge-queue repository: the release removes the hold AND arms auto-merge.
+
+    GitHub refuses `--delete-branch` there (measured on
+    livespec-ai/livespec-dev-tooling#4185, bd-ib-hnj3td), so the release must
+    arm without it rather than report `arm-failed` with the hold already gone.
+    """
+    arc = _arc(root=tmp_path, merge_hold=True, merge_queue=True)
+    held = arc.run_pr_stage()
+    assert held.returncode == 0, held.stderr
+
+    released = _release(arc=arc)
+
+    assert released["status"] == "green", released
+    assert read_merge_held_work_item_ids(path=_STORE) == frozenset()
+    assert arc.forge()["autoMergeRequest"] is not None
+    assert "--delete-branch" not in arc.merge_calls()[-1]
+    assert f"--{_DISPATCH_MODE}" in arc.merge_calls()[-1]
+
+
+def test_releasing_a_hold_without_a_merge_queue_still_deletes_the_merged_branch(
+    tmp_path: Path,
+) -> None:
+    """The control: with no merge queue, the release still asks GitHub to delete the branch."""
+    arc = _arc(root=tmp_path, merge_hold=True)
+    assert arc.run_pr_stage().returncode == 0
+
+    released = _release(arc=arc)
+
+    assert released["status"] == "green", released
+    assert arc.forge()["deleteBranchOnMerge"] is True
+    assert len(arc.merge_calls()) == 1
+
+
+def test_the_pr_stage_without_a_merge_queue_still_deletes_the_merged_branch(
+    tmp_path: Path,
+) -> None:
+    """The control: with no merge queue, the pr-stage arm still asks GitHub to delete the branch."""
+    arc = _arc(root=tmp_path, merge_hold=False)
+
+    armed = arc.run_pr_stage()
+
+    assert armed.returncode == 0, armed.stderr
+    assert arc.forge()["deleteBranchOnMerge"] is True
+    assert len(arc.merge_calls()) == 1
+
+
+def test_the_pr_stage_arms_auto_merge_in_a_merge_queue_repository(tmp_path: Path) -> None:
+    """A dispatch's pr-stage arm on a merge-queue repository arms and does not fail the stage."""
+    arc = _arc(root=tmp_path, merge_hold=False, merge_queue=True)
+
+    result = arc.run_pr_stage()
+
+    assert result.returncode == 0, result.stderr
+    assert "LIVESPEC_PR_READY_AND_ARMED" in result.stderr
+    assert f"PR_NUMBER={_PR_NUMBER}" in result.stdout
+    assert arc.forge()["autoMergeRequest"] is not None
+    landed = arc.merge_calls()[-1]
+    assert "--delete-branch" not in landed
+    assert landed[landed.index("--match-head-commit") + 1] == _HEAD
+
+
+def test_a_direct_merge_in_a_merge_queue_repository_is_not_refused_for_branch_deletion(
+    tmp_path: Path,
+) -> None:
+    """An already-clean pull request in a merge-queue repository merges directly on release."""
+    arc = _arc(root=tmp_path, merge_hold=True, merge_queue=True, clean=True)
+    assert arc.run_pr_stage().returncode == 0
+
+    released = _release(arc=arc)
+
+    assert released["status"] == "green", released
+    assert arc.forge()["state"] == "MERGED"
+    direct = arc.merge_calls()[-1]
+    assert "--auto" not in direct
+    assert "--delete-branch" not in direct

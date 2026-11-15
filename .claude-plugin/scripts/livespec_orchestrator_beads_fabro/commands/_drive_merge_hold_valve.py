@@ -38,6 +38,9 @@ from subprocess import run
 from typing import Any, cast
 
 from livespec_orchestrator_beads_fabro._store_merge_hold import update_work_item_merge_hold
+from livespec_orchestrator_beads_fabro.commands._dispatcher_fabro_argv import (
+    merge_queue_retry_argv,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_integration_projection import (
     MERGE_METHOD_FLAGS,
 )
@@ -194,7 +197,7 @@ def _release(*, call: _MergeHoldCall, view: PrView | None) -> dict[str, Any]:
     # recoverable by re-running the identical action; a pull request armed while
     # the ledger still reads held is a merge nobody can see coming.
     update_work_item_merge_hold(path=call.config, item_id=call.item.id, value=False)
-    armed = _run(call=call, argv=_arm_argv(number=view.number, method=method))
+    armed = _run_merge(call=call, argv=_arm_argv(number=view.number, method=method))
     if armed.returncode != 0:
         return _arm_failure(
             call=call,
@@ -231,7 +234,7 @@ def _arm_failure(
                 "the arm."
             ),
         )
-    merged = _run(call=call, argv=_direct_merge_argv(number=view.number, method=method))
+    merged = _run_merge(call=call, argv=_direct_merge_argv(number=view.number, method=method))
     if merged.returncode != 0:
         return valve_refusal(
             aid=call.aid,
@@ -327,6 +330,15 @@ def _is_clean_status_arm_refusal(*, stderr: str) -> bool:
 
 def _disarm_argv(*, number: int) -> tuple[str, ...]:
     return ("gh", "pr", "merge", str(number), "--disable-auto")
+
+
+def _run_merge(*, call: _MergeHoldCall, argv: tuple[str, ...]) -> MergeHoldCommandRun:
+    """Run one `gh pr merge`, once more without `--delete-branch` if a merge queue refused it."""
+    first = _run(call=call, argv=argv)
+    if first.returncode == 0:
+        return first
+    retry = merge_queue_retry_argv(argv=argv, stderr=first.stderr)
+    return first if retry is None else _run(call=call, argv=tuple(retry))
 
 
 def _run(*, call: _MergeHoldCall, argv: tuple[str, ...]) -> MergeHoldCommandRun:

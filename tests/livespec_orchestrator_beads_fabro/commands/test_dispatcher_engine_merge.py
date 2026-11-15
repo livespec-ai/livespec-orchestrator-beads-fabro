@@ -117,6 +117,46 @@ def test_confirm_pr_arms_auto_merge_when_needed(tmp_path: Path) -> None:
     ]
 
 
+def test_confirm_pr_rearms_without_delete_branch_when_a_merge_queue_refuses_it(
+    tmp_path: Path,
+) -> None:
+    """bd-ib-hnj3td: the host pr-arm fallback arms a merge-queue repository's pull request."""
+    refusal = "X Cannot use `-d` or `--delete-branch` when merge queue enabled"
+    runner = Runner(
+        queue=[
+            _ok(stdout=_pr_json(armed=False)),
+            _err(stderr=refusal),
+            _ok(),
+            _ok(stdout=_pr_json()),
+        ]
+    )
+    journal = Journal()
+
+    view = confirm_pr(plan=_plan(repo=tmp_path), runner=runner, journal=journal, hold="unheld")
+
+    assert view is not None
+    assert view.auto_merge_armed is True
+    assert "--delete-branch" in runner.calls[1][0]
+    assert runner.calls[2][0] == [
+        token for token in runner.calls[1][0] if token != "--delete-branch"
+    ]
+    assert [record["stage"] for record in journal.records] == [
+        "pr-view",
+        "pr-arm-fallback",
+        "pr-arm-fallback",
+        "pr-view",
+    ]
+
+
+def test_confirm_pr_does_not_retry_an_arm_refused_for_another_cause(tmp_path: Path) -> None:
+    runner = Runner(queue=[_ok(stdout=_pr_json(armed=False)), _err(), _ok(stdout=_pr_json())])
+
+    _ = confirm_pr(plan=_plan(repo=tmp_path), runner=runner, journal=Journal(), hold="unheld")
+
+    assert len(runner.calls) == 3
+    assert runner.calls[2][0][:3] == ["gh", "pr", "view"]
+
+
 def test_await_merge_updates_behind_branch_then_returns_merged(tmp_path: Path) -> None:
     runner = Runner(
         queue=[

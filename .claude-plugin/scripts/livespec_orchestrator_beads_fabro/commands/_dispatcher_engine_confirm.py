@@ -17,6 +17,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_journal impor
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import (
     DispatchPlan,
     PrView,
+    merge_queue_retry_argv,
     pr_arm_argv,
     pr_disarm_argv,
 )
@@ -147,6 +148,10 @@ def _arm_fallback(
         timeout_seconds=GH_TIMEOUT_SECONDS,
     )
     journal_stage(journal=journal, plan=plan, stage="pr-arm-fallback", result=arm)
+    retry = None if arm.exit_code == 0 else merge_queue_retry_argv(argv=argv, stderr=arm.stderr)
+    if retry is not None:
+        arm = runner.run(argv=retry, cwd=plan.repo, timeout_seconds=GH_TIMEOUT_SECONDS)
+        journal_stage(journal=journal, plan=plan, stage="pr-arm-fallback", result=arm)
     return view_pr(
         plan=plan,
         runner=runner,
