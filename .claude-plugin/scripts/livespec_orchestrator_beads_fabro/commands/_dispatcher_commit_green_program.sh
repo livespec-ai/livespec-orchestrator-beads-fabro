@@ -83,6 +83,35 @@ current_engine_run_id() {
     fi
 }
 
+red_search_evidence() {
+    # The refusal's evidence: the run ids the search matched against and the
+    # newest commits it walked, each with the provenance lines it read (bd-ib-eyhjwr).
+    local depth="$1"
+    local limit=$((depth + 3))
+    local factory_run=""
+    local index=0
+    local ref=""
+    local sha=""
+    local subject=""
+    local message=""
+    local fabro_run=""
+    local factory_trailer=""
+    local inspected=""
+    factory_run="$(git config --local --get livespec.factoryRunId 2>/dev/null || true)"
+    while (( index < limit && index < 12 )); do
+        ref="HEAD~${index}"
+        sha="$(git rev-parse --short "$ref" 2>/dev/null)" || break
+        subject="$(git log -1 --format=%s "$ref" 2>/dev/null || true)"
+        message="$(git log -1 --format=%B "$ref" 2>/dev/null || true)"
+        fabro_run="$(awk '!found && sub(/^Fabro-Run: /, "") { print; found = 1 }' <<<"$message")"
+        factory_trailer="$(awk '!found && sub(/^Factory-Run-Id: /, "") { print; found = 1 }' <<<"$message")"
+        inspected+="${inspected:+ | }${sha} ${subject} [Fabro-Run: ${fabro_run:-none}; Factory-Run-Id: ${factory_trailer:-none}]"
+        ((index += 1))
+    done
+    printf 'factory run id %s; engine run id %s; inspected: %s' \
+        "${factory_run:-unset}" "$(current_engine_run_id)" "${inspected:-none}"
+}
+
 fold_checkpoints() {
     local depth=0
     local ref="HEAD"
@@ -107,7 +136,7 @@ fold_checkpoints() {
         ref="HEAD~${depth}"
     done
     if ! seeded_open_red_declared || ! open_seed_red "$ref"; then
-        printf '%s\n' "current run's own Red commit was not found beneath checkpoint commits"
+        printf '%s\n' "current run's own Red commit was not found beneath checkpoint commits ($(red_search_evidence "$depth"))"
         return 2
     fi
     if (( depth > 0 )); then
