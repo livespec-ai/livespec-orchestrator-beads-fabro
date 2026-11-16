@@ -71,6 +71,7 @@ from livespec_orchestrator_beads_fabro.commands._acp_codex_headroom import Codex
 from livespec_orchestrator_beads_fabro.commands._acp_hold_ledger import AcpHoldLedger
 from livespec_orchestrator_beads_fabro.commands._acp_hold_records import AcpAvailabilityHold
 from livespec_orchestrator_beads_fabro.commands._acp_node_chains import AcpNodeChain
+from livespec_orchestrator_beads_fabro.commands._acp_preflight_skips import CLAUDE_CREDENTIAL_SKIP
 from livespec_orchestrator_beads_fabro.commands._acp_session_headroom import SessionHeadroomReading
 from livespec_orchestrator_beads_fabro.commands._acp_success_critical import (
     derive_admission_required,
@@ -79,11 +80,16 @@ from livespec_orchestrator_beads_fabro.commands._acp_success_critical import (
 from livespec_orchestrator_beads_fabro.commands._acp_workflow_graph import parse_workflow_graph
 
 __all__: list[str] = [
+    "CLAUDE_CREDENTIAL_REFUSAL_STAGE",
     "AcpPreflightVerdict",
     "build_acp_preflight_verdict",
     "chain_source_refusal_verdict",
     "no_fallback_verdict",
 ]
+
+# The stage a Claude credential policy refusal is journaled and reported under,
+# which a hand-picked dispatch maps to the precondition exit code 3.
+CLAUDE_CREDENTIAL_REFUSAL_STAGE = "claude-credential-refusal"
 
 _MISSING_GRAPH_REFUSAL = (
     "workflow graph is unsupported for fallback: the dispatch's workflow graph could not "
@@ -117,6 +123,11 @@ class AcpPreflightVerdict:
     # is zero". A horizon of 0 is a ratified setting that disables projection
     # skips while retaining the computation and its record.
     session_headroom_horizon_minutes: int | None = None
+    # True when `refusal` is the Claude credential policy's: an absent or invalid
+    # `dispatcher.claude_credential_policy`, or `no-declared-slot-injected`
+    # emptying an admission-required node. A hand-picked dispatch reports it as
+    # a precondition error, and the no-fallback path never fails open on it.
+    credential_refused: bool = False
 
     @property
     def viable(self) -> bool:
@@ -133,6 +144,10 @@ class AcpPreflightVerdict:
             f"{'node' if len(self.exhausted) == 1 else 'nodes'} "
             f"{', '.join(self.exhausted)}"
         )
+
+    def refusal_stage(self, *, default: str) -> str:
+        """The stage this refusal is journaled under: the credential policy's, else `default`."""
+        return CLAUDE_CREDENTIAL_REFUSAL_STAGE if self.credential_refused else default
 
     def node_preflight(self, *, node: str) -> NodePreflight | None:
         """This node's filtered chain, or `None` when the graph carries no such node."""
@@ -267,7 +282,9 @@ def _no_fallback_graded(
         ledger=AcpHoldLedger(holds=(), unobservable=(), observation_ids=frozenset()),
         inputs=PreflightInputs(builtin_pairs=inputs.builtin_pairs, headroom=inputs.headroom),
     )
-    return no_fallback_verdict() if graded.refusal is not None else graded
+    if graded.refusal is not None and not graded.credential_refused:
+        return no_fallback_verdict()
+    return graded
 
 
 def _graded(
@@ -314,12 +331,18 @@ def _graded(
         )
         for node in sorted(chains)
     )
+    exhausted = _exhausted(preflights=preflights, required=required)
+    credential_refusal = _credential_refusal(
+        preflights=preflights, exhausted=exhausted, inputs=inputs
+    )
     return AcpPreflightVerdict(
         fallback_enabled=fallback_enabled,
         nodes=preflights,
         success_critical=critical.nodes,
         admission_required=required,
-        exhausted=_exhausted(preflights=preflights, required=required),
+        exhausted=exhausted,
+        refusal=credential_refusal,
+        credential_refused=credential_refusal is not None,
         holds=ledger.holds,
         unobservable=ledger.unobservable,
         assessed_credentials=dict(assessed),
@@ -332,6 +355,32 @@ def _graded(
             None if inputs.headroom is None else inputs.headroom.horizon_minutes
         ),
     )
+
+
+def _credential_refusal(
+    *,
+    preflights: tuple[NodePreflight, ...],
+    exhausted: tuple[str, ...],
+    inputs: PreflightInputs,
+) -> str | None:
+    """The Claude credential policy's refusal, when it governs this evaluation.
+
+    A configuration refusal governs whenever any covered candidate needed the
+    credential. `no-declared-slot-injected` governs only when it left an
+    admission-required node with no eligible candidate: a covered primary with
+    an uncovered fallback continues to the fallback.
+    """
+    refusal = None if inputs.headroom is None else inputs.headroom.credential_refusal
+    if refusal is None:
+        return None
+    skipped = {
+        preflight.node
+        for preflight in preflights
+        if any(skip.reason == CLAUDE_CREDENTIAL_SKIP for skip in preflight.skipped)
+    }
+    if skipped and (refusal.configuration or skipped & set(exhausted)):
+        return refusal.detail
+    return None
 
 
 def _headroom_assessments(

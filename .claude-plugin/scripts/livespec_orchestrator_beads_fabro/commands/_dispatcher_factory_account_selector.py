@@ -65,6 +65,7 @@ __all__: list[str] = [
     "policy_pool_slots",
     "read_selected_profile",
     "register_admission_slot_chooser",
+    "repo_credential_refusal",
     "resolve_factory_credential_env_name",
     "select_factory_credential",
     "selected_account_record_path",
@@ -129,6 +130,15 @@ def policy_pool_slots(*, repo: Path, environ: Mapping[str, str]) -> tuple[str, .
     if isinstance(resolved, ClaudeCredentialRefusal):
         return ()
     return injected_credential_slots(environ=environ, policy=resolved)
+
+
+def repo_credential_refusal(
+    *, repo: Path, environ: Mapping[str, str]
+) -> ClaudeCredentialRefusal | None:
+    """`admission_credential_refusal` under `repo`'s committed policy."""
+    return admission_credential_refusal(
+        resolved=claude_credential_policy_for(repo=repo), environ=environ
+    )
 
 
 def admission_credential_refusal(

@@ -83,6 +83,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_codex_headroom_io im
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_selector import (
     policy_pool_slots,
     register_admission_slot_chooser,
+    repo_credential_refusal,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_policy_settings import (
     PolicySettingUnreadable,
@@ -216,6 +217,9 @@ def session_headroom_policy(
             DEFAULT_SESSION_HEADROOM_HORIZON_MINUTES
         )
     )
+    # An absent or invalid policy, or no declared slot injected, is the refusal
+    # every covered candidate is skipped by, without a reading.
+    refusal = repo_credential_refusal(repo=repo, environ=os.environ)
     taken: list[PoolSelection] = []
 
     def pool_once() -> PoolSelection:
@@ -241,6 +245,7 @@ def session_headroom_policy(
         horizon_minutes=horizon,
         read=lambda: pool_once().representative,
         pool_read=lambda: pool_once().readings,
+        credential_refusal=refusal,
         codex_read=codex_headroom_source(
             now_iso=now_iso,
             journal_path=journal_path,

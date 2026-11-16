@@ -41,6 +41,7 @@ from livespec_orchestrator_beads_fabro.commands._acp_session_headroom import (
 )
 
 __all__: list[str] = [
+    "CLAUDE_CREDENTIAL_SKIP",
     "HEADROOM_SKIP",
     "LEGACY_HOLD_SKIP",
     "OUTSTANDING_CONFIRMATION_SKIP",
@@ -67,6 +68,10 @@ OUTSTANDING_CONFIRMATION_SKIP = "outstanding-availability-confirmation"
 LEGACY_HOLD_SKIP = "legacy-provider-hold"
 PROBE_SKIP = "credential-probe-refusal"
 HEADROOM_SKIP = "session-headroom-shortfall"
+# A covered candidate no declared Claude credential may serve: the policy is
+# absent or invalid, or no declared numbered slot is injected. Its `condition`
+# carries the refusal's stable cause.
+CLAUDE_CREDENTIAL_SKIP = "claude-credential-policy-refusal"
 
 # The ONE token that is also a governing condition the contract spells, which
 # is why it is defined here rather than beside the wait that reports it: "it

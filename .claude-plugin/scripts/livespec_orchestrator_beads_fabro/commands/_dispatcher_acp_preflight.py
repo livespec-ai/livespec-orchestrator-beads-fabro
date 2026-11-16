@@ -417,17 +417,18 @@ def acp_preflight_refusal(
     """
     if verdict.viable:
         return None
+    stage = verdict.refusal_stage(default=ACP_PREFLIGHT_REFUSAL_STAGE)
     outcome = DispatchOutcome(
         work_item_id=work_item_id,
         status="failed",
-        stage=ACP_PREFLIGHT_REFUSAL_STAGE,
+        stage=stage,
         pr_number=None,
         merge_sha=None,
         detail=f"acp preflight refusal: {verdict.detail}",
     )
     journal.append(
         record={
-            "stage": ACP_PREFLIGHT_REFUSAL_STAGE,
+            "stage": stage,
             "work_item_id": work_item_id,
             "detail": verdict.detail,
             "success_critical": list(verdict.success_critical),
