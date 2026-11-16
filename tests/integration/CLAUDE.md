@@ -982,9 +982,11 @@ a unit-tier test); its dotted node-id prefix `tests.integration` is in the
   forbids this route. The exhaustion case asserts the brief is ABSENT as well as
   the reason file present, since the classifier routes on the brief and a third
   round that wrote one would re-enter `fix` while reporting exhaustion. And the
-  `review_fix`/`disposition` budgets are asserted UNCHANGED beside the widened
-  `fix` budget, because "the repair took nothing from review-fix" is otherwise
-  equally consistent with a graph that widened nothing at all.
+  `disposition` budget is asserted unchanged beside the widened `fix` budget;
+  `review_fix` is separately asserted at its own nine-visit allowance, because
+  its initial turn and two possible open-Red re-entries are admitted in each of
+  three review rounds. This keeps refresh-repair accounting separate from the
+  review-fix route's open-Red accounting.
   The same module carries v146's narrowing of the divergent-prior-run guard
   (work-item bd-ib-c435hh) and Scenario 144's mirrored "with no refresh-repair
   round before it" sub-scenario: a repaired visit republishes a non-ancestor tip
