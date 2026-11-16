@@ -86,3 +86,14 @@ def test_fix_and_review_fix_prompts_keep_the_commit_runner_duty() -> None:
         text = prompts[node].read_text(encoding="utf-8")
         for instruction in _COMMIT_RUNNER_INSTRUCTIONS:
             assert instruction in text, f"{node} prompt omits {instruction!r}"
+
+
+def test_fix_and_review_fix_prompts_name_authored_rebase_resolution_forms() -> None:
+    """Scenario 377: a stopped rebase is resumed with an authored subject, never --no-edit."""
+    prompts = _agent_stage_prompts()
+
+    for node in _COMMIT_RUNNER_NODES:
+        text = prompts[node].read_text(encoding="utf-8")
+        assert "git commit -C REBASE_HEAD" in text, node
+        assert "git commit -m <subject>" in text, node
+        assert "git commit --no-edit" not in text, node

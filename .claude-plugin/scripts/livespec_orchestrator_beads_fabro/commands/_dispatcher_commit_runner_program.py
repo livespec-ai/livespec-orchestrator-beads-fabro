@@ -476,7 +476,9 @@ def unauthored_commit(record):
     """The commit a passed run made with no authored subject line, undone, else None.
 
     The commit is undone with a soft reset to the head the run began from, so HEAD is where
-    the run started and the index still holds what the commit recorded.
+    the run started and the index still holds what the commit recorded.  In a stopped
+    rebase, the soft reset deliberately leaves the rebase metadata and staged resolution
+    intact: the next commit must supply an authored message, not restart the rebase.
     """
     start_head = record.get("start_head")
     head = git_output("rev-parse", "HEAD")
@@ -519,11 +521,19 @@ def worker(run_id):
     if subjectless is not None:
         # Git ran the commit-msg hook BEFORE its empty-message check, so a hook that appends a
         # trailer turned an empty message into a commit. It is not one: undo it.
+        rebase_guidance = ""
+        if record.get("operation") == "rebase":
+            rebase_guidance = (
+                "; the rebase is in progress and its staged resolution remains intact. "
+                "Resume this commit through the runner with git commit -C REBASE_HEAD "
+                "to reuse the picked commit's authored subject, or git commit -m <subject> "
+                "to supply one explicitly"
+            )
         text += (
             "LIVESPEC_COMMIT_NO_AUTHORED_SUBJECT: commit " + subjectless
             + " has no authored subject line (its first message line is a trailer or empty);"
             + " HEAD was restored to " + str(record.get("start_head"))
-            + ", so no commit was made\n"
+            + ", so no commit was made" + rebase_guidance + "\n"
         )
         path.with_suffix(".output").write_text(text, encoding="utf-8")
         exit_code = 1
@@ -809,6 +819,14 @@ def brief_text(run_id, path, record, state, timeout_seconds):
     output = full_output(path)
     tail = "\n".join(output.splitlines()[-BRIEF_TAIL_LINES:])
     if record.get("no_authored_subject"):
+        rebase_guidance = ""
+        if record.get("operation") == "rebase":
+            rebase_guidance = (
+                " The rebase is in progress and the staged resolution remains intact. "
+                "Resume it through the runner with git commit -C REBASE_HEAD to reuse the "
+                "picked commit's authored subject, or git commit -m <subject> to supply one "
+                "explicitly."
+            )
         return (
             "failed targets: none\n\n"
             + named
@@ -816,7 +834,8 @@ def brief_text(run_id, path, record, state, timeout_seconds):
             + ", has no authored subject line (its first message line is a trailer or empty), so"
             " it was undone; HEAD is back at " + str(record.get("start_head"))
             + " and no commit was made. Redo that commit through the runner with a non-empty"
-            " authored message (a commit-msg hook appends trailers to an empty one). Its own"
+            " authored message (a commit-msg hook appends trailers to an empty one)."
+            + rebase_guidance + " Its own"
             " error lines (the tail of its recorded output at "
             + str(path.with_suffix(".output")) + "):\n\n" + tail + "\n"
         )

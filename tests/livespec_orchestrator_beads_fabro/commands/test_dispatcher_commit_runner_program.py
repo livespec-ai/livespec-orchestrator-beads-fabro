@@ -193,6 +193,30 @@ def test_a_running_commit_is_reported_running_when_the_bound_expires(
     assert _last_report(capsys) == {REPORT_RUN_ID_KEY: _RUN_ID, REPORT_STATE_KEY: "running"}
 
 
+def test_a_subjectless_rebase_brief_names_the_resumable_authored_forms(tmp_path: Path) -> None:
+    """Scenario 377: a refused resolution preserves the rebase and names both recovery forms."""
+    program = _program(tmp_path)
+    path = _record(
+        tmp_path,
+        _RUN_ID,
+        {
+            "state": "failed",
+            "no_authored_subject": "deadbeef",
+            "start_head": "0123abc",
+            "operation": "rebase",
+        },
+        None,
+    )
+    _ = path.with_suffix(".output").write_text("commit output\n", encoding="utf-8")
+
+    brief = program["brief_text"](_RUN_ID, path, json.loads(path.read_text()), "failed", 60)
+
+    assert "rebase is in progress" in brief.lower()
+    assert "staged resolution remains intact" in brief
+    assert "git commit -C REBASE_HEAD" in brief
+    assert "git commit -m <subject>" in brief
+
+
 @pytest.mark.parametrize(
     ("stage", "settle"),
     [("fix", "fix_commit_settle"), ("review_fix", "review_fix_commit_settle")],

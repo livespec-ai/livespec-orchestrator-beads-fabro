@@ -81,6 +81,41 @@ def _repo(tmp_path: Path) -> Path:
     return repo
 
 
+def _stopped_rebase_repo(tmp_path: Path) -> Path:
+    """A resolved first pick of a rebase, ready for the resolution's commit."""
+    repo = tmp_path / "rebase-clone"
+    repo.mkdir()
+    _ = _git(repo, "init", "--quiet", "-b", "base")
+    _ = _git(repo, "config", "user.name", "Fixture")
+    _ = _git(repo, "config", "user.email", "fixture@example.invalid")
+    _ = (repo / "a.txt").write_text("base\n", encoding="utf-8")
+    _ = _git(repo, "add", "-A")
+    _ = _git(repo, "commit", "--quiet", "-m", "base")
+    _ = _git(repo, "checkout", "--quiet", "-b", "side")
+    _ = (repo / "a.txt").write_text("side\n", encoding="utf-8")
+    _ = _git(repo, "add", "-A")
+    _ = _git(repo, "commit", "--quiet", "-m", "side")
+    _ = _git(repo, "checkout", "--quiet", "-b", "work", "base")
+    _ = (repo / "a.txt").write_text("work\n", encoding="utf-8")
+    _ = _git(repo, "add", "-A")
+    _ = _git(repo, "commit", "--quiet", "-m", "fix: picked subject")
+    rebase = subprocess.run(
+        ["git", "rebase", "side"],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_environment(),
+    )
+    assert rebase.returncode != 0, rebase.stdout
+    _ = (repo / "a.txt").write_text("resolved\n", encoding="utf-8")
+    _ = _git(repo, "add", "a.txt")
+    hook = repo / ".git" / "hooks" / "commit-msg"
+    _ = hook.write_text(_TRAILER_HOOK, encoding="utf-8")
+    hook.chmod(0o755)
+    return repo
+
+
 def _plugins(tmp_path: Path) -> Path:
     plugins = tmp_path / "plugins"
     plugins.mkdir()
@@ -153,3 +188,24 @@ def test_a_non_empty_authored_message_keeps_its_subject_ahead_of_the_trailer(
     message = _git(repo, "log", "-1", "--format=%B").splitlines()
     assert message[0] == "feat: authored subject"
     assert message[-1] == "Factory-Run-Id: 0123456789abcdef"
+
+
+def test_a_subjectless_rebase_resolution_names_resumable_authored_forms(
+    tmp_path: Path,
+) -> None:
+    repo = _stopped_rebase_repo(tmp_path)
+    plugins = _plugins(tmp_path)
+    started_from = _git(repo, "rev-parse", "HEAD")
+
+    report = _commit_run(repo, plugins, "-m", "")
+
+    assert report["state"] == "failed"
+    assert _git(repo, "rev-parse", "HEAD") == started_from
+    assert (repo / ".git" / "rebase-merge").is_dir()
+    assert "+resolved" in _git(repo, "diff", "--cached", "--", "a.txt")
+    brief = str(report["output_tail"])
+    assert "no authored subject line" in brief
+    assert "rebase is in progress" in brief
+    assert "git commit -C REBASE_HEAD" in brief
+    assert "git commit -m <subject>" in brief
+    assert "git commit --no-edit" not in brief

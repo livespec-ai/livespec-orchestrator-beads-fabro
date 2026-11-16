@@ -717,6 +717,12 @@ destructive_cli_allowlist = [
 #   Fabro engine reads from that shell process on the settle's success exit. It
 #   scrubs the child env exactly as an allowlisted spawn must, dropping every
 #   GIT_, COV_CORE_ and COVERAGE variable.
+# - test_commit_runner_rebase_authored_subject_vpvdn4.py runs the MATERIALIZED
+#   commit runner and the committed settle script through a stopped real rebase.
+#   The runner is stdlib-only source written into a sandbox and the asserted
+#   behavior is the real repository's rebase state and commit-hook-mutated
+#   message, so no in-process call can stand in. It scrubs every GIT_,
+#   COVERAGE and COV_CORE variable from each child environment.
 #
 # This key MUST stay above the `[[...mirror_pairings]]` array-of-tables
 # below (same TOML attachment reason as `destructive_cli_allowlist`).
@@ -753,6 +759,7 @@ subprocess_spawn_allowlist = [
     "tests/integration/test_commit_settle_restores_flattened_merge_2deww4.py",
     "tests/integration/test_commit_settle_stopped_rebase_hmed6n.py",
     "tests/integration/test_commit_runner_refuses_subjectless_commit_7cixf3.py",
+    "tests/integration/test_commit_runner_rebase_authored_subject_vpvdn4.py",
     "tests/integration/test_publish_draft_refuses_subjectless_commit_7cixf3.py",
     "tests/integration/test_commit_runner_folds_checkpoints_above_open_red_gisyvv.py",
     "tests/integration/test_routing_schema_nodes_emit_a_directive.py",
