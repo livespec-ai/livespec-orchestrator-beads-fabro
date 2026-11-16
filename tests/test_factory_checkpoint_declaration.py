@@ -354,6 +354,18 @@ every v0.329.0 implement dispatch was refused at `fabro run`. Removing them
 takes their one billed visit each out of the derivation: the shipped allowance
 re-measures at 1634040 seconds, down from 1641930, still under the same bound.
 
+THE REVIEW-FIX OPEN-RED COUNTER BECAME CONSECUTIVE (work-item bd-ib-nkyeve).
+Each of the three review-fix nodes now admits all three review rounds, including
+the initial turn and two open-Red re-entries in each: nine visits rather than
+three. The route itself resets its three-visit cause counter after a settled
+round, so this is an engine and execution-budget widening, not a larger
+open-Red loop. Re-measured against this tree: the execution allowance is
+1789050 seconds, and the retired fifteen-minute checkpoint control is 2671050.
+The bound moves from 1700000 to 1800000, leaving 10950 seconds of shipped
+headroom while preserving the control relation. The credential-use window still
+governs: both trees require 111600 seconds of remaining credential lifetime,
+from the 108000-second window plus margin, rather than their larger allowances.
+
 The v175 lesson is kept: crossing the credential line fails loudly and cannot
 pass behind a bound the repository can move, because the fresh-credential
 lifetime is a constant of the host and not a bound.
@@ -382,7 +394,7 @@ _SHIPPED_WORKFLOW = _PAYLOAD / "workflow.toml"
 # nothing. The bound is the only figure here this repository chooses, and no
 # derived figure is pinned beside it: a node-timeout edit that keeps the
 # allowance under the bound needs no edit to this module.
-_ALLOWANCE_BOUND_SECONDS = 1_700_000
+_ALLOWANCE_BOUND_SECONDS = 1_800_000
 
 # The lifetime of a FRESH Codex credential. Not this repository's to choose: it
 # is what the host mints at renewal, so a requirement past it is a fact about

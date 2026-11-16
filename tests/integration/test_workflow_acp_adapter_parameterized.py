@@ -257,11 +257,9 @@ def test_scenario20_the_review_fix_loop_is_bounded_on_its_own_nodes() -> None:
     toml = _WORKFLOW_TOML.read_text(encoding="utf-8")
     assert "review_fix_visit_cap = 4" in toml
     assert "inputs.review_fix_visit_cap" not in _code_text(text=dot)
-    # THREE, which is what the retired `review_fix_visit_cap` guard admitted at
-    # the default cap of three fix rounds. The number is load-bearing: the
-    # execution-budget derivation reads it as the loop's bound now that the guard
-    # is gone, and the credential gate sizes a required credential lifetime from
-    # the result, so the retired backstop value of 10 would have raised the
-    # derived allowance past anything a real credential carries.
+    # `disposition` admits the three review rounds. `review_fix` must admit the
+    # initial turn and two open-Red re-entries in every round, so it has nine
+    # visits. Both values are load-bearing in the execution-budget derivation;
+    # its allowance remains below the documented credential-lifetime bound.
     assert re.search(r"disposition \[.*?max_visits=3\n", dot, re.DOTALL) is not None
-    assert re.search(r"review_fix \[.*?max_visits=3\n", dot, re.DOTALL) is not None
+    assert re.search(r"review_fix \[.*?max_visits=9\n", dot, re.DOTALL) is not None

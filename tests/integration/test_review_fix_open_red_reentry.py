@@ -30,6 +30,9 @@ _CAUSE_GIT_PATH = "livespec-stage-cause"
 _RED_TRAILER = "TDD-Red-Test-File-Checksum: abc123"
 _GREEN_TRAILER = "TDD-Green-Verified-At: 2026-11-09T00:00:00Z"
 _CHECKPOINT = "fabro(01TESTRUN): review_fix_commit_settle (success)"
+_OPEN_RED_VISIT_LIMIT = 3
+_REVIEW_FIX_ROUND_LIMIT = 3
+_REVIEW_FIX_VISIT_LIMIT = _REVIEW_FIX_ROUND_LIMIT * _OPEN_RED_VISIT_LIMIT
 
 
 def _node(*, name: str) -> dict[str, str]:
@@ -165,13 +168,55 @@ def test_the_review_fix_visit_limit_reached_on_an_open_red_ends_at_needs_human_n
     repo = _repo(tmp_path=tmp_path)
     red = _commit_test_file(repo=repo, message=f"fix: red\n\n{_RED_TRAILER}")
 
-    limit = int(_node(name=_STAGE)["max_visits"])
-    labels = [_label(_run(repo=repo)) for _ in range(limit)]
+    labels = [_label(_run(repo=repo)) for _ in range(_OPEN_RED_VISIT_LIMIT)]
 
-    assert labels == [_STAGE] * (limit - 1) + ["needs_human"]
+    assert labels == [_STAGE] * (_OPEN_RED_VISIT_LIMIT - 1) + ["needs_human"]
     cause = _git_file(repo=repo, name=_CAUSE_GIT_PATH).read_text(encoding="utf-8")
     assert f"stage: {_STAGE}" in cause
     assert f"open Red commit {red}" in cause
+
+
+def test_a_later_review_round_open_red_can_reenter_after_earlier_rounds_settled(
+    tmp_path: Path,
+) -> None:
+    """Settled rounds do not consume the consecutive open-Red re-entry budget."""
+    repo = _repo(tmp_path=tmp_path)
+    for round_number in range(1, _REVIEW_FIX_ROUND_LIMIT):
+        _ = _commit_test_file(
+            repo=repo,
+            message=(
+                f"fix: settled review round {round_number}\n\n" f"{_RED_TRAILER}\n{_GREEN_TRAILER}"
+            ),
+        )
+        assert _label(_run(repo=repo)) == "continue"
+
+    _ = _commit_test_file(repo=repo, message=f"fix: later round red\n\n{_RED_TRAILER}")
+
+    assert _label(_run(repo=repo)) == _STAGE
+
+
+def test_an_open_red_replaced_by_a_new_red_still_spends_the_consecutive_bound(
+    tmp_path: Path,
+) -> None:
+    """Authoring another Red does not reset the open-Red re-entry budget."""
+    repo = _repo(tmp_path=tmp_path)
+    _ = _commit_test_file(repo=repo, message=f"fix: first red\n\n{_RED_TRAILER}")
+
+    assert _label(_run(repo=repo)) == _STAGE
+
+    newer_red = _commit_test_file(repo=repo, message=f"fix: newer red\n\n{_RED_TRAILER}")
+    assert _label(_run(repo=repo)) == _STAGE
+    assert _label(_run(repo=repo)) == "needs_human"
+
+    cause = _git_file(repo=repo, name=_CAUSE_GIT_PATH).read_text(encoding="utf-8")
+    assert f"open Red commit {newer_red}" in cause
+
+
+def test_review_fix_nodes_admit_three_rounds_and_two_open_red_reentries_each() -> None:
+    """The engine cannot abort a review-fix lap before the route names its cause."""
+    assert _REVIEW_FIX_VISIT_LIMIT == 9
+    for node in (_STAGE, "review_fix_commit_settle", _ROUTE):
+        assert int(_node(name=node)["max_visits"]) == _REVIEW_FIX_VISIT_LIMIT
 
 
 def test_the_graph_routes_the_settled_review_fix_turn_through_the_open_red_route() -> None:
