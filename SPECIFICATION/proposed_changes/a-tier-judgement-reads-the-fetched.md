@@ -13,7 +13,7 @@ created_at: 2026-11-16T18:30:00Z
 
 ### Summary
 
-The spec-change tier judge, the pre-dispatch tier gate and the pre-dispatch tier wall read the governed `SPECIFICATION/` from the dispatching host's working tree with no freshness check, and nothing refuses a tier record written at a spec version below one the item already carries. This proposal states three rules: the judgement reads the specification of the FETCHED origin default branch of the target repository and records that branch's spec version; a judgement that can read the spec only from a working tree behind that fetched ref is refused, naming the ref and the commits-behind count, with no record written; and a new tier record at a spec version below the item's existing record is refused as a stale read. Scenario 344 gains scenarios exercising each. Fleet scope is every judge or valve that reads spec text from a local clone, on every dispatching host.
+The spec-change tier judge, the pre-dispatch tier gate and the pre-dispatch tier wall read the governed `SPECIFICATION/` from the dispatching host's working tree with no freshness check, and nothing refuses a tier record written at a spec version below one the item already carries. This proposal states three rules: the judgement reads the specification of the FETCHED origin default branch of the target repository and records that branch's spec version; when the fetch fails or the fetched ref cannot be read and the working tree is behind the last fetched ref, the judgement is refused, naming the ref and the commits-behind count, with no record written; and a new tier record at a spec version below the item's existing record is refused as a stale read. Scenario 344 gains scenarios exercising each. Fleet scope is every judge or valve that reads spec text from a local clone, on every dispatching host.
 
 ### Motivation
 
@@ -23,8 +23,8 @@ Measured 2026-11-16 (date -u): overseer-zlaim4 was released by release-spec-tier
 
 In SPECIFICATION/contracts.md §"Dispatcher classify-tier invocation surface", immediately after the bullet ending "It MUST exit non-zero, writing nothing, when the judgement cannot be obtained.", insert:
 
-> - **The judgement reads the fetched origin default branch.** `classify-tier`, the pre-dispatch tier gate and the pre-dispatch tier wall MUST judge against the `SPECIFICATION/` text of the target repository's FETCHED origin default branch, never against the dispatching host's working tree, and the tier record MUST name that branch's spec version. Any fetch this performs MUST take the shared fetch lock of the concurrent-git-fetches rule.
-> - **A stale clone is refused, not read.** When the governed specification can be read only from a working tree that is behind the fetched origin default branch, the judgement MUST be refused with a message naming the ref and the number of commits the clone is behind, and MUST write no tier record.
+> - **The judgement reads the fetched origin default branch.** `classify-tier`, the pre-dispatch tier gate and the pre-dispatch tier wall MUST judge against the `SPECIFICATION/` text of the target repository's FETCHED origin default branch, never against the dispatching host's working tree, and the tier record MUST name that branch's spec version.
+> - **A stale clone is refused, not read.** When the fetch of the origin default branch fails, or the fetched ref cannot be read, and the working tree is behind the last fetched ref, the judgement MUST be refused with a message naming the ref and the number of commits the clone is behind, and MUST write no tier record. The working tree is never a substitute source for the specification.
 > - **An older-spec record never supersedes a newer one.** When a work-item already carries a `livespec-spec-change-tier` record at spec version N, a new record at a spec version lower than N MUST be refused as a stale read, writing nothing, and the item's newer record stands.
 > - **Fleet scope.** The same rule governs every judge or valve that reads specification text from a local clone, including the admission screen and the approve-time tier read, on every dispatching host.
 
@@ -36,8 +36,9 @@ In SPECIFICATION/scenarios.md, inside the gherkin block of "## Scenario 344 — 
     When classify-tier or the pre-dispatch wall judges an item
     Then it judges against the specification text of the fetched origin default branch
     And the tier record it writes names that branch's spec version
-  Scenario: A judgement that can read only a stale working tree is refused
-    Given the governed specification is readable only from a working tree behind its fetched origin default branch
+  Scenario: A judgement whose fetch fails while the working tree is stale is refused
+    Given the fetch of the origin default branch fails or the fetched ref cannot be read
+    And the working tree is behind the last fetched ref
     When a tier judgement is attempted
     Then it is refused with a message naming the ref and the number of commits the clone is behind
     And no tier record is written
