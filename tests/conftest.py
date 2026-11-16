@@ -1483,3 +1483,51 @@ def _factory_dirs_removed(
             # Removal waits for session cleanup: a background thread a test started can
             # still be writing into its directory when the test itself has ended.
             request.config.add_cleanup(sweep)
+
+
+# ---------------------------------------------------------------------------
+# TEMPORARY qawphe diagnostics (livespec-dev-tooling-qawphe): where does git run?
+# ---------------------------------------------------------------------------
+_QAWPHE_LOG = Path("/tmp/qawphe-diag.log")
+
+
+def _qawphe_snapshot(*, label: str) -> str:
+    root = Path.cwd()
+    parts = [f"[{label}] pid={os.getpid()} uid={os.getuid()} cwd={root}"]
+    parts.append(
+        f"TMPDIR={os.environ.get('TMPDIR')!r} GIT_ENV={ {k: v for k, v in os.environ.items() if k.startswith('GIT_')} }"
+    )
+    for argv in (
+        ["git", "rev-parse", "--show-toplevel"],
+        ["git", "rev-parse", "HEAD"],
+        ["git", "remote", "-v"],
+    ):
+        done = subprocess.run(argv, cwd=str(root), capture_output=True, text=True, check=False)
+        parts.append(
+            f"  {' '.join(argv)} -> rc={done.returncode} {(done.stdout or done.stderr).strip()!r}"
+        )
+    return "\n".join(parts)
+
+
+def pytest_report_header() -> list[str]:
+    return [_qawphe_snapshot(label="header/controller")]
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems() -> None:
+    with _QAWPHE_LOG.open("a", encoding="utf-8") as sink:
+        sink.write(_qawphe_snapshot(label="modifyitems") + "\n")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _qawphe_basetemp(tmp_path_factory: pytest.TempPathFactory) -> None:
+    with _QAWPHE_LOG.open("a", encoding="utf-8") as sink:
+        sink.write(f"[basetemp] pid={os.getpid()} basetemp={tmp_path_factory.getbasetemp()}\n")
+
+
+def pytest_terminal_summary(terminalreporter: Any) -> None:
+    terminalreporter.write_sep("=", "QAWPHE-DIAG")
+    terminalreporter.write_line(_qawphe_snapshot(label="summary/controller"))
+    if _QAWPHE_LOG.exists():
+        for line in _QAWPHE_LOG.read_text(encoding="utf-8").splitlines():
+            terminalreporter.write_line(line)
