@@ -1413,11 +1413,7 @@ def _tmp_path_stays_removable(tmp_path: Path) -> Iterator[None]:
     """
     yield
     for directory, _subdirectories, _files in os.walk(tmp_path):
-        try:
-            # os.* on purpose: some tests monkeypatch Path.stat while this teardown runs.
-            os.chmod(directory, os.stat(directory).st_mode | 0o700)  # noqa: PTH101, PTH116
-        except OSError:
-            continue
+        Path(directory).chmod(Path(directory).stat().st_mode | 0o700)
 
 
 _CALL_REPORT = pytest.StashKey[pytest.TestReport]()
@@ -1437,11 +1433,7 @@ def pytest_runtest_makereport(
 def _make_removable(*, root: Path) -> None:
     """Restore the owner write bit on every directory under `root` so it can be removed."""
     for directory, _subdirectories, _files in os.walk(root):
-        try:
-            # os.* on purpose: some tests monkeypatch Path.stat while this teardown runs.
-            os.chmod(directory, os.stat(directory).st_mode | 0o700)  # noqa: PTH101, PTH116
-        except OSError:
-            continue
+        Path(directory).chmod(Path(directory).stat().st_mode | 0o700)
 
 
 @pytest.fixture(autouse=True)
@@ -1463,7 +1455,6 @@ def _factory_dirs_removed(
     """
     made: list[Path] = []
     original = tmp_path_factory.mktemp
-    remove_tree = shutil.rmtree  # bound before the test can monkeypatch shutil
 
     def recording(basename: str, *, numbered: bool = True) -> Path:
         path = original(basename, numbered=numbered)
@@ -1475,11 +1466,5 @@ def _factory_dirs_removed(
     report = request.node.stash.get(_CALL_REPORT, None)
     if report is not None and report.passed:
         for path in made:
-
-            def sweep(target: Path = path) -> None:
-                _make_removable(root=target)
-                remove_tree(target, ignore_errors=True)
-
-            # Removal waits for session cleanup: a background thread a test started can
-            # still be writing into its directory when the test itself has ended.
-            request.config.add_cleanup(sweep)
+            _make_removable(root=path)
+            shutil.rmtree(path, ignore_errors=True)
