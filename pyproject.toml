@@ -368,6 +368,12 @@ exclude_also = [
 # ---------------------------------------------------------------------------
 
 [tool.livespec_dev_tooling]
+# The merge queue's trusted authors (org merge-queue cutover, carrier bd-ib-bcxyfa).
+# ci.yml's merge-group-guard reads this list at the merge group's BASE commit and
+# routes the group to hosted capacity unless every queued PR is same-repository and
+# authored by a name on it. The personal-account factory bot stays until every
+# dispatch host mints as the org App.
+merge_queue_author_allowlist = ["thewoolleyman", "thewoolleyman-factory-bot", "livespec-ai-factory-bot", "livespec-ai-factory-bot[bot]"]
 # OPT IN to the DELEGATED PRE-PUSH GATE (bd-ib-idp5g7, a child of the
 # livespec-dev-tooling plan `delegated-gate-fleet-rollout`). The contract is
 # livespec-dev-tooling's SPECIFICATION/contracts.md §"Delegated pre-push gate"
