@@ -124,6 +124,28 @@ def test_set_admission_edits_policy_without_approving_pending_item(tmp_path: Pat
     assert stored.status == "pending-approval"
 
 
+def test_set_admission_reports_the_committed_policy_that_decides_admission(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path=tmp_path)
+    _ = (repo / ".livespec.jsonc").write_text(
+        '{"livespec-orchestrator-beads-fabro": {"connection": {"prefix": "bd-ib"}, '
+        '"dispatcher": {"auto_approve_ready": true}}}',
+        encoding="utf-8",
+    )
+    append_work_item(path=_config(), item=_item())
+
+    result = run_action(repo=repo, action_id="set-admission:bd-ib-123:manual")
+
+    assert result["status"] == "green"
+    assert result["target_status"] == "pending-approval"
+    assert "dispatcher.auto_approve_ready=true" in result["summary"]
+    assert "decides the item's admission" in result["summary"]
+    stored = _stored()["bd-ib-123"]
+    assert stored.admission_policy == "manual"
+    assert stored.status == "pending-approval"
+
+
 def test_set_acceptance_edits_policy_without_touching_status(tmp_path: Path) -> None:
     repo = _repo(tmp_path=tmp_path)
     append_work_item(
