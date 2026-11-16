@@ -284,9 +284,11 @@ omit = [
     "*/livespec_runtime/*",
     "*/__pycache__/*",
     "/usr/local/bin/*",
-    "tests/e2e/*",
-    "tests/e2e-cli/*",
-    "tests/prompts/*",
+    # Test scaffolding is not first-party source (livespec non-functional
+    # requirements: coverage omits it through an omit-only blocklist). Measuring
+    # tests/ made 72% of measured statements test code and made an untouched
+    # test module a 100% per-file coverage subject (bd-ib-hjo7lb).
+    "tests/*",
     "/tmp/*",
     "mutants/*",
 ]
