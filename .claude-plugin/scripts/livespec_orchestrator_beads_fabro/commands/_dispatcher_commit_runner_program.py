@@ -1125,6 +1125,14 @@ def stopped_rebase_brief(path, stopped):
     )
 
 
+def refused_rebase_commit(path):
+    """True when the settled run was a rebase commit refused for having no authored subject."""
+    record = read_record(path) if path is not None else None
+    if record is None or record.get("operation") != "rebase":
+        return False
+    return bool(record.get("no_authored_subject"))
+
+
 def end_operation(state, stage, path=None):
     """Leave no merge or rebase in progress once the turn's commit run has settled.
 
@@ -1136,9 +1144,14 @@ def end_operation(state, stage, path=None):
     stops on a later conflicting pick leaves the rebase in progress at that pick, where the
     settled commit stays reachable, and returns a brief naming the pick and its conflicted
     paths; a command that does not complete journals git's own output. Returns the journal
-    lines and that brief (None when there is none).
+    lines and that brief (None when there is none). A rebase commit run refused for having no
+    authored subject is the exception to the abort: its rebase stays in progress, resumable.
     """
     if state not in ("failed", "passed"):
+        return [], None
+    if state == "failed" and refused_rebase_commit(path):
+        # The refusal already left HEAD on the run's start with the resolution staged; an
+        # abort would discard both, so the next fix turn resumes the rebase with the brief.
         return [], None
     named = "stage " + (stage or "implement")
     lines = []
