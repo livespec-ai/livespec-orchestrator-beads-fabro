@@ -25,11 +25,17 @@ A LINE THAT IS NOT A JSON OBJECT IS SKIPPED rather than raised, for the reason
 one torn line must not make the whole file unreadable. An unreadable file yields
 no records, the same posture every previous reader took.
 
-THE JOURNAL IS ASSUMED APPEND-ONLY. A file REWRITTEN IN PLACE to a longer length
-inside one modification-time tick, with the same inode, is indistinguishable from
-an append by the three keys above and would be read from the stale offset; the
-only writer, `JournalFile.append`, never does that, and rotation replaces the
-inode.
+THE STAT KEYS ARE NOT ENOUGH ON THEIR OWN, SO A CONTENT FINGERPRINT BACKS THEM. A
+file replaced at the same path can keep its inode (a freed inode is reused at
+once), its size and its modification time (timestamps tick coarsely), and a
+cache trusting only those serves the previous file's records. Pytest's
+`tmp_path` is named after the test, so a removed test directory is recreated at
+the same path by the next test of that name (bd-ib-gdt3qz). The cache therefore
+also keeps the first and the last `_FINGERPRINT_BYTES` of the span it consumed
+and re-reads exactly those bytes on every call, with a positioned read that
+parses and consumes nothing and never advances the offset: a mismatch discards
+the cache like any other non-append. A rewrite that leaves both windows byte-identical is
+still undetected; the only writer, `JournalFile.append`, never does that.
 
 THE RETURNED RECORDS ARE SHARED across callers of one process and MUST be treated
 as read-only.
@@ -69,12 +75,17 @@ class JournalTailRead:
     bytes_read: int
 
 
+_FINGERPRINT_BYTES = 256
+
+
 @dataclass(kw_only=True)
 class _Tail:
     inode: int
     size: int
     mtime_ns: int
     offset: int
+    head: bytes = b""
+    anchor: bytes = b""
     committed: list[dict[str, object]] = field(default_factory=list)
     view: tuple[dict[str, object], ...] = ()
 
@@ -105,6 +116,8 @@ def read_journal_tail(*, journal_path: Path) -> JournalTailRead:
             _ = _TAILS.pop(key, None)
             return JournalTailRead(records=(), bytes_read=0)
         tail = _TAILS.get(key)
+        if tail is not None and not _same_content(tail=tail, path=journal_path):
+            tail = None
         if tail is not None and _unchanged(tail=tail, observed=observed):
             return JournalTailRead(records=tail.view, bytes_read=0)
         if tail is None or not _is_append(tail=tail, observed=observed):
@@ -129,9 +142,35 @@ def read_journal_tail(*, journal_path: Path) -> JournalTailRead:
         tail.size = observed.st_size
         tail.mtime_ns = observed.st_mtime_ns
         tail.inode = observed.st_ino
+        tail.head, tail.anchor = _fingerprint(path=journal_path, size=tail.size, offset=tail.offset)
         tail.view = (*tail.committed, *_records_of(data=fragment))
         _TAILS[key] = tail
         return JournalTailRead(records=tail.view, bytes_read=len(chunk))
+
+
+def _pread_span(*, path: Path, start: int, end: int) -> bytes:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        return os.pread(descriptor, max(end - start, 0), start)
+    finally:
+        os.close(descriptor)
+
+
+def _span(*, path: Path, start: int, end: int) -> bytes:
+    outcome = attempt(
+        action=lambda: _pread_span(path=path, start=start, end=end), exceptions=(OSError,)
+    )
+    return b"" if isinstance(outcome, AttemptFailure) else outcome
+
+
+def _fingerprint(*, path: Path, size: int, offset: int) -> tuple[bytes, bytes]:
+    head = _span(path=path, start=0, end=min(size, _FINGERPRINT_BYTES))
+    anchor = _span(path=path, start=max(offset - _FINGERPRINT_BYTES, 0), end=offset)
+    return head, anchor
+
+
+def _same_content(*, tail: _Tail, path: Path) -> bool:
+    return (tail.head, tail.anchor) == _fingerprint(path=path, size=tail.size, offset=tail.offset)
 
 
 def _unchanged(*, tail: _Tail, observed: os.stat_result) -> bool:
