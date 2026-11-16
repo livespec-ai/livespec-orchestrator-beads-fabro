@@ -37,6 +37,12 @@ work is a commit you started through the sandbox commit runner and that runner
 still reports it as `running`, end the turn as succeeded, name that commit run's id in your final message, and leave it for `review_fix_commit_settle` to wait out. This exception takes precedence over the generic turn-ending rule below;
 every other commit run you start must be terminal before your final message.
 
+When a rebase stops on a conflict, resolve and stage it, then use the runner
+with `git commit -C REBASE_HEAD` to reuse the picked commit's authored subject,
+or with `git commit -m <subject>` to provide one explicitly. Do not use
+an editor-suppressed commit for that resolution: a trailer-appending hook can
+leave the continued commit without an authored subject.
+
 ## Red and Green commit discipline
 
 Every Red commit must stage exactly one test file and no product file. Run that

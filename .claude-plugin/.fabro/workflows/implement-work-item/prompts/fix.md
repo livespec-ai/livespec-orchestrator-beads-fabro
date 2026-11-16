@@ -41,8 +41,12 @@ conflict or the gate failure:
    **Every commit the integration creates goes through the sandbox commit
    runner**, including the commit that records a conflict resolution. When the
    merge or rebase stops on a conflict, resolve the paths, `git add` each one,
-   then run
-   `python3 "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-runner.py" start -- git commit --no-edit`
+   then run the commit through the runner with an authored subject: use
+   `python3 "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-runner.py" start -- git commit -C REBASE_HEAD`
+   to reuse the picked commit's subject, or
+   `python3 "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-runner.py" start -- git commit -m <subject>`
+   to provide one explicitly. Do not use an editor-suppressed commit for a stopped rebase:
+   a trailer-appending hook can otherwise create a commit with no authored subject.
    and wait once with
    `python3 "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-runner.py" wait <run-id> --timeout-seconds 300`
    in a later tool call. Wait at most once on each commit run you start. If that wait reports `running`, do not call `wait` again and do not stop it. End the turn and leave it for `fix_commit_settle` to wait out. A terminal report lets you continue. Never run a foreground `git commit`, or a
