@@ -8475,6 +8475,12 @@ Feature: A fix turn does not spend its time limit on a duplicate check suite
     When the third consecutive pass runs
     Then the run ends at needs_human with a LIVESPEC_REVIEW_FIX_OPEN_RED_VISIT_BOUND_EXHAUSTED cause naming that new open Red
 
+  Scenario: The engine visit limits of the review_fix loop admit every review round
+    Given a review-fix loop that admits some number of review rounds, each with its review_fix turn and two open-Red re-entries
+    When the engine visit limits of review_fix, review_fix_commit_settle and review_fix_open_red_route are read from the implement workflow graph
+    Then each of those limits is at least three times the number of review rounds the loop admits
+    And a run that keeps an open Red ends at needs_human through the open-Red visit limit, not through an engine visit cap
+
   Scenario: An open Red beneath engine checkpoint commits admits the turn's implementation edit
     Given a review_fix turn re-entered to complete an open Red's Green amend
     And two engine checkpoint commits with `fabro(<run>): <stage>` subjects sit above that open Red
@@ -15894,4 +15900,10 @@ Feature: A resolved rebase conflict can always be committed
     When the fix_commit_settle node settles that commit run
     Then no rebase remains in progress
     And the fix re-entry brief does not state that the rebase is still in progress
+
+  Scenario: The fix and review_fix stage prompts name both forms for a commit inside a stopped rebase
+    Given the fix and review_fix stage prompts the Dispatcher gives an agent turn
+    When each prompt's guidance for committing inside a stopped rebase is read
+    Then it names git commit -C REBASE_HEAD and git commit -m <subject>
+    And it does not name git commit --no-edit
 ```
