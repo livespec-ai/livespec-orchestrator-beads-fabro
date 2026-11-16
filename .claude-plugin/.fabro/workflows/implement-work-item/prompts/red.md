@@ -36,8 +36,14 @@ Before Step 1, inspect
 
        {"preferred_next_label": "already-satisfied"}
 
-   The graph routes that label to `already_satisfied`, which checks the tree
-   still equals the dispatch base.
+   The graph routes that label to `already_satisfied_route`, which checks the
+   tree still equals the dispatch base. An unchanged tree ends the run as
+   already satisfied. A tree that carries changes against the dispatch base is
+   refused: the route appends a `## already-satisfied-refused` section to the
+   handoff file naming the carried paths and re-enters this stage. When the
+   handoff file already holds that section, a lap of this stage is a re-entry
+   after such a refusal, so take the failing-test path below and never declare
+   `already-satisfied` again.
    When a preserved seed carries changes that meet the Definition of Done but
    the dispatch base does not, this is not already satisfied: continue with
    the failing-test path so the carried changes reach Green and publication.

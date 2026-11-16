@@ -174,8 +174,12 @@ _RED_GREEN_SPLIT_ADDED = {
 # The label routes (work-item bd-ib-crvt34): a needs-human label rests the run,
 # and every label the node does not route is refused back through the stage's
 # admission bound, which is a cycle the admission's own `max_visits` already
-# bounds, so the routes close no new budget of their own.
+# bounds, so the routes close no new budget of their own. The seeded
+# already-satisfied route (work-item bd-ib-zji6m3) is the same shape: a tree that
+# differs from the dispatch base re-enters Red through `red_admission`, and an
+# unchanged tree falls through to the terminal.
 _LABEL_ROUTES_ADDED = {
+    "already_satisfied_route",
     "red_needs_human_route",
     "red_unknown_label_route",
     "green_needs_human_route",

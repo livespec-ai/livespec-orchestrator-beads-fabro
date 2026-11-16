@@ -97,6 +97,15 @@ def _routing_nodes() -> set[tuple[str, str]]:
     return found
 
 
+def _tree_equals_the_dispatch_base(*, checkout: Path, scratch: Path) -> _Lap:
+    """A checkout whose tree is its dispatch base: `origin/master` resolves to HEAD."""
+    del scratch
+    identity = ("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid")
+    _ = _git(repo=checkout, argv=(*identity, "commit", "--quiet", "--allow-empty", "-m", "base"))
+    _ = _git(repo=checkout, argv=("update-ref", "refs/remotes/origin/master", "HEAD"))
+    return _Lap()
+
+
 def _no_setup(*, checkout: Path, scratch: Path) -> _Lap:
     """A lap that needs only an initialized repository."""
     del checkout, scratch
@@ -157,6 +166,7 @@ def _absent_runner(*, checkout: Path, scratch: Path) -> _Lap:
 # The ordinary lap of each routing-schema node and the successor it must select.
 _ORDINARY_LAPS: dict[tuple[str, str], tuple[Callable[..., _Lap], str]] = {
     # The split graph commits a complete Green turn before the diff breaker.
+    (_IMPLEMENT, "already_satisfied_route"): (_tree_equals_the_dispatch_base, "already_satisfied"),
     (_IMPLEMENT, "implement_completion"): (_complete_turn, "commit_green"),
     (_IMPLEMENT, "fix_commit_settle"): (_passed_fix_commit, "fix_open_red_route"),
     (_IMPLEMENT, "fix_open_red_route"): (_no_setup, "janitor_admission"),
