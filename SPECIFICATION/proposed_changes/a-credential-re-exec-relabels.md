@@ -21,9 +21,9 @@ Measured 2026-11-16 (work-item bd-ib-32jkpv): dispatcher reconcile-merged, re-ex
 
 ### Proposed Changes
 
-In contracts.md, in or adjacent to the section "Worker credential projection", add a paragraph headed **Credential re-exec passthrough.** stating: when a plugin entry point finds its required secrets absent and re-execs through the configured credential_wrapper, the re-executed command's exit code is the entry point's exit code, and everything the re-executed command writes to stderr and stdout reaches the caller unchanged. The diagnostic 'credential_wrapper could not run in this environment' MUST be emitted only when the wrapper itself failed to start, or when a required secret is demonstrably still absent after the hop; a non-zero exit from the re-executed command with the secrets present MUST NOT be reported as a credential failure and MUST NOT suppress the command's own stderr.
+In contracts.md, under the section "## Worker credential projection", insert, after its final paragraph (the one ending "The behavior is exercised by Scenario 18, Scenario 19 and Scenario 228 in `scenarios.md`.") and before the heading "## Proof credential projection", a new paragraph headed **Credential re-exec passthrough.** stating: when a plugin entry point finds its required secrets absent and re-execs through the configured credential_wrapper, the re-executed command's exit code is the entry point's exit code, and everything the re-executed command writes to stderr and stdout reaches the caller unchanged. The diagnostic 'credential_wrapper could not run in this environment' MUST be emitted only when the wrapper itself failed to start, or when a required secret is demonstrably still absent after the hop, and it MUST name the wrapper and the still-missing secret names and never a secret value; a non-zero exit from the re-executed command with the secrets present MUST NOT be reported as a credential failure and MUST NOT suppress the command's own stderr.
 
-In scenarios.md, add after Scenario 378:
+In scenarios.md, add after Scenario 378 (the number 379 is a placeholder: the revise takes the next free scenario number at cut time, because numbering is order-based like versions):
 
 ## Scenario 379 — A credential re-exec passes the child's exit code and stderr through
 
@@ -41,7 +41,7 @@ Feature: A credential_wrapper re-exec does not relabel or swallow the child's fa
     And a credential_wrapper that fails to start or delivers none of the required secrets
     When the entry point re-execs through the wrapper
     Then the output says the credential_wrapper could not run in this environment
-    And it names the wrapper and the still-missing secret names
+    And it names the wrapper and the still-missing secret names and never a secret value
 ```
 
-The new scenario needs a heading-coverage row in tests/heading-coverage.json owned by the implementing work-item bd-ib-32jkpv.
+The revise COMMIT MUST add the new scenario's tests/heading-coverage.json TODO row, with a reason naming 'integration tier or above' and "work_item": "bd-ib-32jkpv", and MUST stage the regenerated heading-coverage debt register (this repository carries both: tests/heading-coverage.json and the check-heading-coverage-debt-register gate).
