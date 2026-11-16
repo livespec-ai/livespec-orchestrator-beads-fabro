@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.334.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.334.0...v0.334.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **pytest:** a passing test's tmp_path_factory.mktemp directories are removed so they cannot exhaust a host's /tmp inodes (livespec-dev-tooling-jxhi63) ([eaae685](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/eaae6850b09b944612cb82330e045d9d30f13315))
+
 ## [0.334.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.333.2...v0.334.0) (2026-11-16)
 
 
