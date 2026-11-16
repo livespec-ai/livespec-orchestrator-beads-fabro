@@ -1356,3 +1356,19 @@ def resolve_test_acp_nodes() -> ResolveAcpNodes:
         return resolution
 
     return _resolve
+
+
+@pytest.fixture(autouse=True)
+def _tmp_path_stays_removable(tmp_path: Path) -> Iterator[None]:
+    """Give a passing test's `tmp_path` tree back its write permission before pytest removes it.
+
+    pytest removes a passing test's `tmp_path` directory under the `failed` retention
+    policy with `ignore_errors=True`, so a tree a fixture left non-writable (a git
+    repository's 0444 objects under 0555 directories) is silently NOT removed and its
+    files stay in /tmp until the host runs out of inodes (livespec-dev-tooling-jxhi63,
+    2026-11-16). This fixture requests `tmp_path`, so it tears down first and restores
+    the owner write bit on every directory in the tree.
+    """
+    yield
+    for directory, _subdirectories, _files in os.walk(tmp_path):
+        Path(directory).chmod(Path(directory).stat().st_mode | 0o700)
