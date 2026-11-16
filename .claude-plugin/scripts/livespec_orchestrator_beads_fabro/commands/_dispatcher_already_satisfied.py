@@ -13,14 +13,14 @@ THE PATTERN REQUIRES A FULL DISPATCH-BASE SHA after `base=`. The node's script s
 carries the same sentinel followed by a shell substitution, so any listing of the
 workflow text can never be read as the ending.
 
-THE ENGINE FOLDS THIS ENDING AS A FAILED RUN. Production Fabro (v0.393, bbe693847)
-links petri c6bfd5e38, whose attractor frontend sets `Completion::TerminalNode(exit)`,
-and the engine folds a run to Success only when `exit` holds a success-like record.
-`already_satisfied` has no edge to `exit` (only `verify_pr` may lead there, which is
-the publish guard), so a proved ending reaches the Dispatcher with a failed terminal.
-For such a run the ending is read off ONE record: the run's FINAL step-ending record,
-which must be `already_satisfied` itself with a success verdict, and only that
-node's own output. A sentinel quoted anywhere else never qualifies.
+THE ENGINE REACHES A SUCCESSFUL `exit` AFTER THIS ENDING. Production Fabro (v0.393,
+bbe693847) links petri c6bfd5e38, whose attractor frontend sets
+`Completion::TerminalNode(exit)` and folds a run to Success only when `exit` holds a
+success-like record. The workflow therefore routes a proved `already_satisfied` node
+to `exit`. A successful run is read from its output. The final-step record remains the
+fail-closed recovery path for an older failed fold: it must name `already_satisfied`
+with a success verdict and contain that node's own output. A sentinel quoted anywhere
+else never qualifies.
 """
 
 from __future__ import annotations

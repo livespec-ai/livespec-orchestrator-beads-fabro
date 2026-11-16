@@ -268,6 +268,17 @@ def _checkpoint_completed_route(
     route_completed = executed.issubset(completed) and (preceding & frozenset(states)).issubset(
         successful
     )
+    # A no-op terminal can legitimately bypass the ordinary publication path, so
+    # its arrival at `exit` no longer makes every publication stage a graph
+    # dominator.  It must not, however, erase a failure the checkpoint actually
+    # records for a stage it says it completed: accepting that record would turn a
+    # failed janitor or publication guard into a successful pull-request outcome.
+    completed_graph_stages = (completed & frozenset(graph.names)) - {route.start}
+    no_completed_stage_failed = all(
+        _node_succeeded(states=states, node=node)
+        for node in completed_graph_stages
+        if node in states
+    )
     terminal_completed = (
         current_raw == route.green_terminal
         and route.green_terminal in completed
@@ -278,7 +289,11 @@ def _checkpoint_completed_route(
         and current_raw in graph.predecessors(node=route.green_terminal)
         and current_raw in successful
     )
-    return route_completed and (terminal_completed or final_stage_selected_terminal)
+    return (
+        route_completed
+        and no_completed_stage_failed
+        and (terminal_completed or final_stage_selected_terminal)
+    )
 
 
 def _node_succeeded(*, states: dict[str, dict[str, Any]], node: str) -> bool:

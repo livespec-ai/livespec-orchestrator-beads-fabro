@@ -357,6 +357,13 @@ re-measures at 1634040 seconds, down from 1641930, still under the same bound.
 The v175 lesson is kept: crossing the credential line fails loudly and cannot
 pass behind a bound the repository can move, because the fresh-credential
 lifetime is a constant of the host and not a bound.
+
+THE ALREADY-SATISFIED SUCCESS EXIT (work-item bd-ib-utdijk) adds the terminal
+edge that lets a proved no-op run finish successfully instead of being folded
+as a failed dead end. The revised graph re-measures the shipped allowance at
+1700625 seconds, so the bound moves from 1700000 to 1710000. The retired
+fifteen-minute control remains above that bound; the fresh-credential rule is
+still governed by the credential-use window rather than this allowance.
 """
 
 from __future__ import annotations
@@ -382,7 +389,7 @@ _SHIPPED_WORKFLOW = _PAYLOAD / "workflow.toml"
 # nothing. The bound is the only figure here this repository chooses, and no
 # derived figure is pinned beside it: a node-timeout edit that keeps the
 # allowance under the bound needs no edit to this module.
-_ALLOWANCE_BOUND_SECONDS = 1_700_000
+_ALLOWANCE_BOUND_SECONDS = 1_710_000
 
 # The lifetime of a FRESH Codex credential. Not this repository's to choose: it
 # is what the host mints at renewal, so a requirement past it is a fact about

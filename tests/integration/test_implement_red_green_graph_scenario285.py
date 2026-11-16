@@ -184,6 +184,16 @@ def test_scenario285_already_satisfied_prints_the_ending_the_dispatcher_reads(
     assert already_satisfied_base_from_text(text=result.stderr) == base
 
 
+def test_scenario266_an_unchanged_already_satisfied_run_reaches_the_success_exit() -> None:
+    """A proved no-op terminal must complete the Fabro run successfully."""
+    graph = _graph()
+    edges = {
+        (edge.source, edge.destination, edge.attributes.get("condition")) for edge in graph.edges
+    }
+
+    assert ("already_satisfied", "exit", None) in edges
+
+
 def test_scenario285_an_unprovable_already_satisfied_claim_fails(tmp_path: Path) -> None:
     """With work above the base, the node fails and prints nothing the Dispatcher reads as the ending."""
     repo = _scratch_repo(tmp_path=tmp_path)

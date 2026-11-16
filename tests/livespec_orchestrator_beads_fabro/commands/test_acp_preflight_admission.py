@@ -211,11 +211,12 @@ def test_the_committed_graph_resolves_exactly_the_nodes_dominating_every_green_p
     three are still admission-required under the wider reachable set that
     `test_acp_admission_required_nodes.py` asserts.
 
-    `dod_gate` joins the set for the opposite reason, and it is the sharpest
-    case in the graph: it sits on the ONLY edge out of `start`, so no green path
-    can avoid it. A gate that could not start its own adapter would therefore
-    strand every run at its first node, which is exactly the condition
-    the preflight exists to refuse before claim.
+    `dod_gate` and `red` remain in the set because no successful route can
+    avoid either.  `green` is deliberately absent: a Red turn that proves the
+    tree already satisfies the Definition of Done reaches the successful exit
+    through `already_satisfied` instead. A gate that could not start its own
+    adapter would therefore strand every run before this decision, which is
+    exactly the condition the preflight exists to refuse before claim.
 
     A merged publication may reach final verification without a fresh proof
     cycle, so `proof_capture`, `proof_verify`, and `review` no longer dominate
@@ -228,11 +229,7 @@ def test_the_committed_graph_resolves_exactly_the_nodes_dominating_every_green_p
     )
     critical = modules["_acp_success_critical"].derive_success_critical(graph=graph)
 
-    assert set(critical.nodes) == {
-        "dod_gate",
-        "green",
-        "red",
-    }
+    assert set(critical.nodes) == {"dod_gate", "red"}
     assert critical.start == "start"
     assert critical.green_terminal == "exit"
     assert set(graph.acp_names) == {
@@ -1344,11 +1341,7 @@ def test_a_repository_with_no_committed_workflow_is_graded_against_the_bundled_o
     )
 
     assert verdict.fallback_enabled is True
-    assert set(verdict.success_critical) == {
-        "dod_gate",
-        "green",
-        "red",
-    }
+    assert set(verdict.success_critical) == {"dod_gate", "red"}
     assert verdict.viable is True
 
 

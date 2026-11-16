@@ -206,17 +206,19 @@ def test_the_pr_stage_falls_through_to_verify_pr_before_exit() -> None:
     assert "exit" not in {target for target, _ in from_pr | from_route}
 
 
-def test_verify_pr_owns_the_only_edge_into_exit() -> None:
-    """Nothing else reaches exit, so the breaker cannot be routed around.
+def test_only_verified_publication_or_already_satisfied_reaches_exit() -> None:
+    """Only the verified publication path or proved no-op reaches exit.
 
     The control that matters: `verify_pr` existing beside a surviving
     `pr -> exit` would satisfy every other assertion in this module and change
-    nothing about the failure this guard exists to catch.
+    nothing about the failure this guard exists to catch.  The separate
+    `already_satisfied` route is safe because its own command proves the
+    unchanged dispatch-base outcome before it can reach `exit`.
     """
     edges = _edges(text=_dot_text())
     into_exit = {edge.source for edge in edges if edge.target == "exit"}
 
-    assert into_exit == {"verify_pr"}
+    assert into_exit == {"already_satisfied", "verify_pr"}
     assert any(
         edge.source == "verify_pr" and edge.target == "exit" and edge.conditional for edge in edges
     )

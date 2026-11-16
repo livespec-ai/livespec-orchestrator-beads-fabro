@@ -2647,6 +2647,7 @@ script="cut_root=$(printenv LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT || true); if te
     red -> commit_red
     already_satisfied_route -> red_admission [label="carried changes", condition="preferred_label=carried"]
     already_satisfied_route -> already_satisfied
+    already_satisfied -> exit [label="already satisfied"]
     red_unknown_label_route -> red_admission [label="label refused", condition="outcome=failed"]
     red_unknown_label_route -> red_admission
     red_needs_human_route -> needs_human [label="red asked for a human", condition="outcome=failed"]
