@@ -221,7 +221,9 @@ def test_admission_projects_the_qualifying_slot_not_the_caam_selected_one(
     admission, records, writes = _run_admission(
         tmp_path=tmp_path, monkeypatch=monkeypatch, verdict=verdict, policy=policy
     )
-    choice = select_factory_credential(environ=dict(os.environ), home=tmp_path, warn=print)
+    choice = select_factory_credential(
+        repo=tmp_path, environ=dict(os.environ), home=tmp_path, warn=print
+    )
 
     assert verdict.viable
     assert [item.id for item in admission.admitted] == ["bd-ib-ready"]
@@ -270,7 +272,12 @@ def test_two_qualifying_slots_through_admission_choose_the_sooner_reset(
     assert loser is not None
     assert loser.not_chosen_reason == pool_module.RANKED_LOWER_LATER_RESET
     environ = {_SLOT_3: "tok-3", _SLOT_4: "tok-4"}
-    assert select_factory_credential(environ=environ, home=tmp_path, warn=print).env_name == _SLOT_4
+    assert (
+        select_factory_credential(
+            repo=tmp_path, environ=environ, home=tmp_path, warn=print
+        ).env_name
+        == _SLOT_4
+    )
 
 
 def test_no_qualifying_slot_refuses_with_the_headroom_outcome_naming_every_slot(
@@ -308,7 +315,12 @@ def test_no_qualifying_slot_refuses_with_the_headroom_outcome_naming_every_slot(
     assert "transport-failed" in unobservable
     assert refusal["session_headroom_skipped"]["implement"]
     environ = {_SLOT_2: "tok-2", _SLOT_3: "tok-3", _SLOT_4: "tok-4"}
-    assert select_factory_credential(environ=environ, home=tmp_path, warn=print).env_name != _SLOT_3
+    assert (
+        select_factory_credential(
+            repo=tmp_path, environ=environ, home=tmp_path, warn=print
+        ).env_name
+        != _SLOT_3
+    )
 
 
 def test_a_pool_with_no_injected_slot_reads_one_absent_credential(
@@ -332,14 +344,23 @@ def test_a_pool_with_no_injected_slot_reads_one_absent_credential(
 
 
 def test_the_unnumbered_token_is_the_pool_only_when_no_numbered_slot_is_injected() -> None:
-    legacy = "CLAUDE_CODE_OAUTH_TOKEN"
+    """The `legacy-independent` pool rule, which these fixture repositories read."""
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential_policy import (
+        LEGACY_INDEPENDENT,
+        ClaudeCredentialPolicy,
+    )
 
-    assert injected_credential_slots(environ={legacy: "t", _SLOT_3: "x", _SLOT_2: "y"}) == (
+    legacy = "CLAUDE_CODE_OAUTH_TOKEN"
+    policy = ClaudeCredentialPolicy(mode=LEGACY_INDEPENDENT, slots=())
+
+    assert injected_credential_slots(
+        environ={legacy: "t", _SLOT_3: "x", _SLOT_2: "y"}, policy=policy
+    ) == (
         _SLOT_2,
         _SLOT_3,
     )
-    assert injected_credential_slots(environ={legacy: "t", _SLOT_3: ""}) == (legacy,)
-    assert injected_credential_slots(environ={legacy: "", _SLOT_3: ""}) == ()
+    assert injected_credential_slots(environ={legacy: "t", _SLOT_3: ""}, policy=policy) == (legacy,)
+    assert injected_credential_slots(environ={legacy: "", _SLOT_3: ""}, policy=policy) == ()
 
 
 def test_a_chooser_naming_a_slot_that_is_no_longer_injected_falls_back_to_the_caam_record(
@@ -352,9 +373,9 @@ def test_a_chooser_naming_a_slot_that_is_no_longer_injected_falls_back_to_the_ca
     _publish_caam_selection(home=tmp_path, profile="anthropic-2")
     environ = {_SLOT_2: "tok-2", _SLOT_3: "tok-3"}
     register_admission_slot_chooser(chooser=lambda: f"{_PREFIX}ANTHROPIC_9")
-    stale = select_factory_credential(environ=environ, home=tmp_path, warn=print)
+    stale = select_factory_credential(repo=tmp_path, environ=environ, home=tmp_path, warn=print)
     register_admission_slot_chooser(chooser=lambda: None)
-    unchosen = select_factory_credential(environ=environ, home=tmp_path, warn=print)
+    unchosen = select_factory_credential(repo=tmp_path, environ=environ, home=tmp_path, warn=print)
 
     assert stale.env_name == _SLOT_2
     assert unchosen.env_name == _SLOT_2

@@ -628,11 +628,19 @@ def test_the_cadence_read_reports_the_default_and_the_committed_value(tmp_path: 
 
 
 def test_an_unreadable_cadence_falls_back_to_the_default(tmp_path: Path) -> None:
-    """An unparseable config is a FAILURE, and the wait still has a cadence."""
+    """An unreadable cadence is a FAILURE, and the wait still has a cadence.
+
+    The cadence alone is malformed: a file that does not parse at all would also
+    leave `dispatcher.claude_credential_policy` unreadable, and the wait then has
+    no declared credential to wait on.
+    """
     reprobe = _reprobe()
     repo = tmp_path / "broken"
     repo.mkdir()
-    _ = (repo / ".livespec.jsonc").write_text("{ not json", encoding="utf-8")
+    _ = (repo / ".livespec.jsonc").write_text(
+        json.dumps({"livespec-orchestrator-beads-fabro": {"dispatcher": {_CADENCE_KEY: "soon"}}}),
+        encoding="utf-8",
+    )
     resolve = _dispatcher_policy_settings.resolve_credential_reprobe_interval_seconds
     slept: list[float] = []
     probe = _Probe(

@@ -113,6 +113,7 @@ def test_select_warns_only_on_fallback(tmp_path: Path) -> None:
     # No record → fallback → warn fires once with a non-secret message.
     warnings: list[str] = []
     fallback = select_factory_credential(
+        repo=tmp_path,
         environ={CLAUDE_OAUTH_TOKEN_ENV: "value"},
         home=tmp_path,
         warn=warnings.append,
@@ -125,6 +126,7 @@ def test_select_warns_only_on_fallback(tmp_path: Path) -> None:
     _write_record(home=tmp_path, payload={"profile": "anthropic-3", "account_uuid": "u"})
     picked: list[str] = []
     chosen = select_factory_credential(
+        repo=tmp_path,
         environ={_SLOT: "value", CLAUDE_OAUTH_TOKEN_ENV: "other"},
         home=tmp_path,
         warn=picked.append,
@@ -133,20 +135,20 @@ def test_select_warns_only_on_fallback(tmp_path: Path) -> None:
     assert picked == []
 
 
-def test_an_unreadable_policy_names_an_undeclared_absent_slot(tmp_path: Path) -> None:
-    """A written-but-unreadable policy leaves no declared slot, and still never the legacy token."""
-    from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential_policy import (
-        NUMBERED_SLOTS,
-        ClaudeCredentialPolicy,
+def test_a_declared_policy_is_read_as_committed(tmp_path: Path) -> None:
+    """The suite's undeclared-means-legacy seam leaves a declared policy alone."""
+    config = {
+        "livespec-orchestrator-beads-fabro": {
+            "dispatcher": {"claude_credential_policy": {"mode": "numbered-slots", "slots": [_SLOT]}}
+        }
+    }
+    (tmp_path / ".livespec.jsonc").write_text(json.dumps(config), encoding="utf-8")
+
+    chosen = select_factory_credential(
+        repo=tmp_path,
+        environ={_SLOT: "value", CLAUDE_OAUTH_TOKEN_ENV: "other"},
+        home=tmp_path,
+        warn=print,
     )
-    from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_selector import (
-        register_claude_credential_policy,
-    )
 
-    register_claude_credential_policy(policy=ClaudeCredentialPolicy(mode=NUMBERED_SLOTS, slots=()))
-    environ = {"CLAUDE_CODE_OAUTH_TOKEN": "t", "CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_4": "x"}
-
-    choice = select_factory_credential(environ=environ, home=tmp_path, warn=print)
-
-    assert choice.env_name == "CLAUDE_CODE_OAUTH_TOKEN__UNDECLARED"
-    assert choice.env_name not in environ
+    assert chosen == FactoryCredentialChoice(env_name=_SLOT, fallback_reason=None)

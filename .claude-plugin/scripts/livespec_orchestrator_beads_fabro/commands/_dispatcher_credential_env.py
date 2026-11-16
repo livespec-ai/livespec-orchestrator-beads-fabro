@@ -30,6 +30,7 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential import (
@@ -38,6 +39,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential im
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential_io import (
     probe_claude_credential,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential_policy import (
+    ClaudeCredentialRefusal,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_wrapper import (
     WRAPPER_INJECTED_CREDENTIAL_ENV_NAMES,
@@ -48,11 +52,13 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_sele
 )
 
 __all__: list[str] = [
+    "CheckedCredentialEnv",
     "assess_credential_status",
     "assess_resolved_credential",
     "check_credential_env",
+    "checked_credential_env",
     "dispatch_required_credentials_text",
-    "projected_credential_env_name",
+    "projected_credential",
 ]
 
 
@@ -68,19 +74,21 @@ def dispatch_required_credentials_text() -> str:
     return ", ".join(WRAPPER_INJECTED_CREDENTIAL_ENV_NAMES)
 
 
-def projected_credential_env_name() -> str:
-    """The env-var NAME the dispatch would project, as the caam selector resolves it.
+def projected_credential(*, repo: Path) -> str | ClaudeCredentialRefusal:
+    """The env-var NAME the dispatch would project, or the policy's refusal.
 
     Public so the re-probe wait can ask the credential wrapper for the SAME name
     the dispatch would project. Resolving it in the wait rather than re-deriving
     one there is what keeps a pool-slot selection from being observed by the
     assessment and ignored by the re-resolution.
     """
-    return select_factory_credential(
+    choice = select_factory_credential(
+        repo=repo,
         environ=os.environ,
         home=Path.home(),
         warn=lambda message: sys.stderr.write(f"livespec-dispatch: {message}\n"),
-    ).env_name
+    )
+    return choice if isinstance(choice, ClaudeCredentialRefusal) else choice.env_name
 
 
 def assess_resolved_credential(
@@ -113,12 +121,21 @@ def assess_credential_status(
     repo: Path,
     probe: Callable[..., ClaudeCredentialStatus] | None = None,
 ) -> ClaudeCredentialStatus:
-    """Assess the credential THIS PROCESS was launched with, through the one seam above."""
-    return assess_resolved_credential(
-        repo=repo,
-        token=os.environ.get(projected_credential_env_name(), ""),
-        probe=probe,
-    )
+    """Assess the credential THIS PROCESS was launched with, through the one seam above.
+
+    A policy refusal assesses as an absent credential; `check_credential_env`
+    reports the refusal itself before reaching here.
+    """
+    env_name = projected_credential(repo=repo)
+    token = "" if isinstance(env_name, ClaudeCredentialRefusal) else os.environ.get(env_name, "")
+    return assess_resolved_credential(repo=repo, token=token, probe=probe)
+
+
+@dataclass(frozen=True, kw_only=True)
+class CheckedCredentialEnv:
+    """The env-var NAME whose credential passed the pre-launch check."""
+
+    env_name: str
 
 
 def check_credential_env(
@@ -133,9 +150,28 @@ def check_credential_env(
     before launch when it is revoked, exhausted/rate-limited, denied, or
     cannot be assessed. Values and response bodies are never logged.
     """
-    status = assess_credential_status(repo=repo, probe=probe)
+    checked = checked_credential_env(repo=repo, probe=probe)
+    return checked if isinstance(checked, str) else None
+
+
+def checked_credential_env(
+    *,
+    repo: Path,
+    probe: Callable[..., ClaudeCredentialStatus] | None = None,
+) -> CheckedCredentialEnv | str:
+    """The credential the projection then reads, or the pre-launch refusal.
+
+    ONE selection serves the check and the projection, so the probe assesses the
+    very slot the overlay carries. A refusal under the declared Claude credential
+    policy (absent or invalid, no declared slot injected, or the admitted slot
+    gone) refuses here, before anything is minted.
+    """
+    env_name = projected_credential(repo=repo)
+    if isinstance(env_name, ClaudeCredentialRefusal):
+        return f"C-mode dispatch refused before sandbox launch: {env_name.detail}"
+    status = assess_resolved_credential(repo=repo, token=os.environ.get(env_name, ""), probe=probe)
     if status.usable:
-        return None
+        return CheckedCredentialEnv(env_name=env_name)
     return (
         f"C-mode dispatch refused before sandbox launch: {status.message} "
         f"Observed condition: {status.condition}. Remedy: {status.remedy} "

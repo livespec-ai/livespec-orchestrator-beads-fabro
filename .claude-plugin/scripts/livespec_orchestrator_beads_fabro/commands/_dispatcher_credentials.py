@@ -32,10 +32,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_codex_routing import
     codex_routing_for_dispatch,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_env import (
-    check_credential_env,
-)
-from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_selector import (
-    select_factory_credential,
+    checked_credential_env,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_git_author import GitAuthor
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import (
@@ -242,9 +239,12 @@ def materialize_overlay(  # noqa: PLR0911, PLR0913 — kw-only overlay materiali
     channel = resolve_secret_channel(block=dispatcher_block(cwd=repo), factory=factory_name)
     if isinstance(channel, SecretChannelRefusal):
         return channel.message
-    env_error = check_credential_env(repo=repo)
-    if env_error is not None:
-        return env_error
+    # ONE selection under the declared Claude credential policy serves the check
+    # and the projection below; a policy refusal or a gone admitted slot refuses
+    # here, before anything is minted, rather than projecting another credential.
+    checked = checked_credential_env(repo=repo)
+    if isinstance(checked, str):
+        return checked
     github_token = attempt(action=token, exceptions=(GithubAppAuthError,))
     if isinstance(github_token, AttemptFailure):
         exc = cast("GithubAppAuthError", github_token.error)
@@ -308,11 +308,6 @@ def materialize_overlay(  # noqa: PLR0911, PLR0913 — kw-only overlay materiali
         dispatch_id=dispatch_id,
         endpoint=sandbox_otel_endpoint,
     )
-    credential_choice = select_factory_credential(
-        environ=os.environ,
-        home=Path.home(),
-        warn=lambda message: sys.stderr.write(f"livespec-dispatch: {message}\n"),
-    )
     # Minted LAST among the steps that can still refuse, so a refusal above this
     # line never leaves a live provider credential behind. The scope is the
     # dispatch id, which is also what the run-teardown revoke is handed.
@@ -329,7 +324,7 @@ def materialize_overlay(  # noqa: PLR0911, PLR0913 — kw-only overlay materiali
     rendered = render_run_config_overlay(
         committed_text=committed.read_text(encoding="utf-8"),
         workflow_dir=committed.parent.resolve(),
-        token=os.environ[credential_choice.env_name],
+        token=os.environ[checked.env_name],
         github_token=github_token,
         siblings=siblings,
         otel_env=otel_env,
