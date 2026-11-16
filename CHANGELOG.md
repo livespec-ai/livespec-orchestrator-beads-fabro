@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.333.2](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.333.1...v0.333.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **coverage:** the suite coverage omits the test modules and measures first-party source (bd-ib-hjo7lb) ([f248d0c](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/f248d0c56858034e139a927aa9dd8a938260a02e))
+
 ## [0.333.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.333.0...v0.333.1) (2026-11-15)
 
 
