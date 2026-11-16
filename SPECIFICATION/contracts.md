@@ -1305,7 +1305,7 @@ the payload (`scripts/`, `prose/`, and the Claude bindings under
 runtime's bindings sit beside it rather than duplicating it. No prose
 file, wrapper, schema, or template is duplicated for pi. A consumer
 installs this repository as a pi git package — `pi install
-git:github.com/thewoolleyman/livespec-orchestrator-beads-fabro@release
+git:github.com/livespec-ai/livespec-orchestrator-beads-fabro@release
 -l`, the same moving `release` channel the Claude and Codex
 marketplaces track — and the resulting clone carries the payload the
 bindings resolve.
@@ -1369,7 +1369,7 @@ body. Concretely:
 - Plugin-root resolution is realized ONCE, by a single shared resolver
   script in the pi bindings tree that every binding invokes; the ordered
   algorithm MUST NOT be restated inline in a SKILL.md. The sibling repo
-  `thewoolleyman/livespec-driver-claude` carried its core-root
+  `livespec-ai/livespec-driver-claude` carried its core-root
   resolution rule as one inline copy per operation binding, across all
   eight of the operations that Driver exposes; copies kept in agreement
   only by copying, so a single positional defect came to live in all
@@ -1377,7 +1377,7 @@ body. Concretely:
   `LIVESPEC_ORCH_PLUGIN_ROOT` explicit override; the governed project's
   own `.claude-plugin/` when that checkout IS this plugin (dogfooding);
   the project-scope pi clone under
-  `.pi/git/github.com/thewoolleyman/livespec-orchestrator-beads-fabro/`;
+  `.pi/git/github.com/livespec-ai/livespec-orchestrator-beads-fabro/`;
   then the user-scope clone under the pi user-scope git root. A
   candidate counts as resolved ONLY when it actually carries the payload
   (`scripts/bin/`), so a half-fetched clone fails loudly instead of
@@ -2032,7 +2032,7 @@ deterministic lifecycle state machine:
 ### Consensus-gated automated groom cut
 
 This subsection carries the values call livespec's spec-side-autonomy plan
-resolved on 2026-08-03 (design record: repository `thewoolleyman/livespec`,
+resolved on 2026-08-03 (design record: repository `livespec-ai/livespec`,
 `plan/archive/spec-side-autonomy/research/brainstorm.md`, "Values calls",
 item 2): the groom cut MAY leave the maintainer's hands, but automated
 LAST and consensus-gated, for the cut only. What may be delegated to a
@@ -2285,9 +2285,9 @@ whose `plan_slug` equals the directory name; from the epic, when a live
 `plan/<slug>/` or archived `plan/archive/<slug>/` directory exists whose
 name equals the epic's `plan_slug`, that directory's anchor MUST name
 that epic. Design record: repo
-`thewoolleyman/livespec-console-beads-fabro`,
+`livespec-ai/livespec-console-beads-fabro`,
 `plan/retire-overseer-and-redesign-control-plane-around-console/research/redesign-brainstorm-and-decisions.md`
-(decision D6); repo `thewoolleyman/livespec-orchestrator-beads-fabro`,
+(decision D6); repo `livespec-ai/livespec-orchestrator-beads-fabro`,
 `plan/console-control-plane-primitives/research/charter-and-driving-model.md`.
 
 ### The `plan/<slug>/` plan store
@@ -2552,9 +2552,9 @@ carries its own `--actor` while the comment body still names the role),
 and the two are permitted to diverge. Every free-text `author` a worker
 session supplies through the general handoff primitive is unaffected by
 this reservation; only the archive and supervisor literals are reserved.
-Design record: repo `thewoolleyman/livespec-orchestrator-beads-fabro`,
+Design record: repo `livespec-ai/livespec-orchestrator-beads-fabro`,
 work-item `bd-ib-8stn`, filed 2026-08-15; independently corroborated the
-same date by repo `thewoolleyman/livespec-overseer`, work-item
+same date by repo `livespec-ai/livespec-overseer`, work-item
 `overseer-4bbnit`.
 
 ### Typed `next_action` and `last_session`
@@ -2633,7 +2633,7 @@ two disagree, the metadata wins, and the conformance checks in
 the single-line marker parse as the resume authority; a next action
 written as wrapped prose can no longer be silently truncated into a
 fragment that an unattended resume executes. Design record: repo
-`thewoolleyman/livespec-console-beads-fabro`,
+`livespec-ai/livespec-console-beads-fabro`,
 `plan/retire-overseer-and-redesign-control-plane-around-console/research/redesign-brainstorm-and-decisions.md`
 (decision D6, item 5).
 
@@ -2935,7 +2935,7 @@ plugin already uses, MUST commit each repository's anchor files through
 that repository's ordinary worktree → pull-request → merge discipline,
 and MUST report per tenant what it wrote, what it skipped, and what it
 refused. Running it twice MUST change nothing the second time. Design
-record: repo `thewoolleyman/livespec-console-beads-fabro`,
+record: repo `livespec-ai/livespec-console-beads-fabro`,
 `plan/retire-overseer-and-redesign-control-plane-around-console/research/redesign-brainstorm-and-decisions.md`
 (decision D6, items 4 and 6).
 
@@ -4746,7 +4746,7 @@ What each of the seven lifecycle states MEANS, in plain English. These
 definitions are ratified semantics: every transition contract in this
 specification (§"Dispatcher admission, WIP cap, and post-merge
 acceptance", §"The four maintainer touchpoints", the scenarios) is
-subordinate to them. Design record: repo `thewoolleyman/livespec`,
+subordinate to them. Design record: repo `livespec-ai/livespec`,
 `plan/archive/work-item-state-machine/research/03-decision-log.md`
 (decisions 26 and 32), with the maintainer's verbatim reasoning in
 `plan/archive/work-item-state-machine/conversation/transcript.md`.
@@ -4821,7 +4821,7 @@ is otherwise unchanged. This keeps `approve` the single journaled door from
 `scenarios.md` exercises the refusal.
 
 The maintainer's rationale, verbatim (source: repo
-`thewoolleyman/livespec`,
+`livespec-ai/livespec`,
 `plan/archive/work-item-state-machine/conversation/transcript.md`):
 "If we don't respect the groomed attribute and add autonomous
 execution, then the factory can just go wild and go completely off
@@ -4841,7 +4841,7 @@ suppression to it explicitly ("depends on the per-state valid-verb
 vocabulary, which is owned by `livespec-orchestrator-beads-fabro`"), so
 until it existed no consumer could suppress a verb without inventing a
 vocabulary it does not own. Design record: repo
-`thewoolleyman/livespec-console-beads-fabro`,
+`livespec-ai/livespec-console-beads-fabro`,
 `plan/console-happy-path-mvp/research/verb-vocabulary-brainstorm.md`
 (seven maintainer-decided points, 2026-07-21..26, each recorded with its
 source verification), with the filing draft at
@@ -5789,7 +5789,7 @@ valve (`ready → active`), the WIP cap, and the acceptance valve; the
 console only commands (a human triggers `approve` for a manual item
 resting at `pending-approval`, through the `drive` human-valve
 actions) and observes — it never enforces. This realizes the
-repo-agnostic two-valve pattern for the Beads/Fabro Dispatcher; the state machine + the valve semantics are the cross-repo design of record (repo `thewoolleyman/livespec`, `plan/archive/work-item-state-machine/research/03-decision-log.md`, decisions 26/32).
+repo-agnostic two-valve pattern for the Beads/Fabro Dispatcher; the state machine + the valve semantics are the cross-repo design of record (repo `livespec-ai/livespec`, `plan/archive/work-item-state-machine/research/03-decision-log.md`, decisions 26/32).
 
 ### Admission valve (`ready → active`)
 
@@ -6291,7 +6291,7 @@ joins the ratified committed-configuration-only class.
 has not concluded has not failed, and this repository's default branch
 re-runs CI on every merge, so treating a pending run as a refusal reported
 healthy work as a failure and pushed a retry loop onto every caller
-(design record: repository `thewoolleyman/livespec-orchestrator-beads-fabro`,
+(design record: repository `livespec-ai/livespec-orchestrator-beads-fabro`,
 ledger epic `bd-ib-jnpvh4`, the maintainer-ruling scope event of
 2026-10-13, and proposal `master-ci-pending-is-not-failure` as archived
 under `SPECIFICATION/history/v129/proposed_changes/`). A committed
@@ -6332,7 +6332,7 @@ poll that observes a pending run SHOULD emit one progress line naming
 the run and its status, so an operator watching a dispatch can tell a
 wait from a hang.
 
-**A concluded green ancestor passes while newer runs are pending.** Rationale: CI on this repository's default branch takes longer than the interval between merges on a busy day, and the runs overlap rather than cancel one another, so the latest run is replaced before it concludes and a wait on the latest run alone defers every dispatch at the bound while the default branch is demonstrably green (design record: repository `thewoolleyman/livespec-orchestrator-beads-fabro`, plan epic `bd-ib-opbzv3` (`factory-idle-with-ready-work`), the scope event of 2026-11-02; measured that morning: four livespec-dev-tooling dispatches and one in this repository deferred at the 1800-second bound while a run on an earlier default-branch commit had concluded green and three newer runs were still in progress, leaving 7 of 10 fleet slots idle with ready work queued). Each time the preflight observes the latest run, or its aggregate job, still pending — on the first read and on every poll of the wait — it MUST also read the NEWEST CONCLUDED run of the resolved pipeline on the resolved default branch: the most recently created run whose aggregate job concluded green or red. Runs whose aggregate conclusion is neither green nor red (cancelled, skipped) are passed over by this read; they neither qualify nor disqualify. The preflight MUST then pass at once, without further waiting, when ALL of the following hold:
+**A concluded green ancestor passes while newer runs are pending.** Rationale: CI on this repository's default branch takes longer than the interval between merges on a busy day, and the runs overlap rather than cancel one another, so the latest run is replaced before it concludes and a wait on the latest run alone defers every dispatch at the bound while the default branch is demonstrably green (design record: repository `livespec-ai/livespec-orchestrator-beads-fabro`, plan epic `bd-ib-opbzv3` (`factory-idle-with-ready-work`), the scope event of 2026-11-02; measured that morning: four livespec-dev-tooling dispatches and one in this repository deferred at the 1800-second bound while a run on an earlier default-branch commit had concluded green and three newer runs were still in progress, leaving 7 of 10 fleet slots idle with ready work queued). Each time the preflight observes the latest run, or its aggregate job, still pending — on the first read and on every poll of the wait — it MUST also read the NEWEST CONCLUDED run of the resolved pipeline on the resolved default branch: the most recently created run whose aggregate job concluded green or red. Runs whose aggregate conclusion is neither green nor red (cancelled, skipped) are passed over by this read; they neither qualify nor disqualify. The preflight MUST then pass at once, without further waiting, when ALL of the following hold:
 
 1. the newest concluded run's aggregate job concluded green;
 2. its head commit is the resolved default branch's current head commit or an ancestor of it, as the forge reports the branch at the time of the read; and
@@ -8131,7 +8131,7 @@ discipline".
 The rationale is granular, orthogonal operator control: the operator can
 delegate routine admission while keeping human acceptance (or the reverse),
 each setting carrying its own risk, and every safety floor below holds under
-every setting independently. Design record: repo `thewoolleyman/livespec`,
+every setting independently. Design record: repo `livespec-ai/livespec`,
 `plan/archive/autonomous-mode/handoff.md`, the "SESSION UPDATE — 2026-07-14 (cont. 12)" section
 (THE RE-LOCKED DESIGN), together with its "CORRECTION / ADDENDUM" section, which
 records the maintainer's ruling that every setting is per-item overridable
@@ -8333,7 +8333,7 @@ an API-settable setting, surfaced under the console Settings surface. It is
 the ONE setting among this section's policy settings with **no per-item
 override**: it is a per-repo concurrency
 ceiling, so a per-item value is structurally meaningless. Its value semantics
-are unchanged. Design record: repo `thewoolleyman/livespec`,
+are unchanged. Design record: repo `livespec-ai/livespec`,
 `plan/archive/autonomous-mode/handoff.md`, the "SESSION UPDATE — 2026-07-14 (cont. 12)"
 section, together with its "CORRECTION / ADDENDUM" section (`wip_cap` is NOT
 per-item overridable).
