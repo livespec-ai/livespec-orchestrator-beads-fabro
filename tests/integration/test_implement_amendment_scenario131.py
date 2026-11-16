@@ -366,7 +366,7 @@ def test_an_implement_amendment_rests_the_item_at_blocked_needs_human_and_publis
     # edge cannot silently reclaim the amendment or bypass the retry path.
     assert _edge_conditions(source="red") == {
         "implement_amendment_route": "outcome=failed",
-        "already_satisfied": "preferred_label=already-satisfied",
+        "already_satisfied_route": "preferred_label=already-satisfied",
         "green_admission": "preferred_label=seeded-open-red",
         "red_needs_human_route": "preferred_label=needs-human",
         "red_unknown_label_route": (

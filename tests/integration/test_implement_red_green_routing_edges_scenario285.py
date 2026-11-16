@@ -33,8 +33,14 @@ class _NodeOutcome:
 # Every branch edge changed by the v0.332.0 Red/Green split, keyed by its
 # committed graph spelling.  Adding a later changed edge is one new named case.
 _BRANCH_OUTCOMES = {
-    "red->already_satisfied": _NodeOutcome(
+    "red->already_satisfied_route": _NodeOutcome(
         outcome="succeeded", preferred_label="already-satisfied"
+    ),
+    "already_satisfied_route->red_admission": _NodeOutcome(
+        outcome="succeeded", preferred_label="carried"
+    ),
+    "already_satisfied_route->already_satisfied": _NodeOutcome(
+        outcome="succeeded", preferred_label="unchanged"
     ),
     "red->implement_amendment_route": _NodeOutcome(outcome="failed"),
     "implement_amendment_route->needs_human": _NodeOutcome(outcome="failed"),

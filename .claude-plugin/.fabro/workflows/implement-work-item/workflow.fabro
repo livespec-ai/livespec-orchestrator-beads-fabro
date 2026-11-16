@@ -615,6 +615,29 @@ chmod 755 \"$runner\""
         script="handoff=$(git rev-parse --git-path livespec-implement-handoff.md) || exit $?; response=$(cat); label=$(printf %s \"$response\" | grep -o '\"preferred_next_label\" *: *\"[^\"]*\"' | tail -n 1 | sed 's/.*: *\"//; s/\"$//'); if printf %s \"$response\" | tr -d ' \\t\\r\\n' | grep -qF '\"definition_of_done_complete\":'; then echo \"LIVESPEC_GREEN_UNKNOWN_LABEL_GRADED: the green turn ended with preferred_next_label '$label', which no edge of this graph routes, and stated its completion field, so the completion gate grades it as an ordinary Green ending\" >&2; exit 0; fi; message=\"LIVESPEC_GREEN_UNKNOWN_LABEL: the green turn ended with preferred_next_label '$label', which no edge of this graph routes, and stated no completion field; the Green stage routes only test-wrong and needs-human, and an ordinary Green ends with its definition_of_done_complete field; re-entering green\"; printf '\\n## green-label-refused\\n\\n%s\\n' \"$message\" >> \"$handoff\"; printf '%s\\n' \"$message\" >&2; exit 1"
     ]
 
+    // THE SEEDED ALREADY-SATISFIED REFUSAL (bd-ib-zji6m3). contracts.md
+    // "Carried work that already meets the Definition of Done is published"
+    // forbids a seeded run from ending at the already-satisfied ending or any
+    // variant that reports the outcome unprovable. Measured on the v0.333.1
+    // re-canary (livespec-dev-tooling-eqtyyr, run 01M7GVZD6AEJ): the red turn
+    // declared already-satisfied on a seed carrying a complete Red-Green pair,
+    // the `red -> already_satisfied` edge fired, and the terminal ended the run
+    // LIVESPEC_ALREADY_SATISFIED_UNPROVABLE. This node sits between the two. An
+    // unchanged tree prints `unchanged` and falls through to the terminal, whose
+    // sentinel the Dispatcher reads is unchanged. A tree that differs prints
+    // `carried`, appends a refusal section to the handoff file, and re-enters
+    // red through `red_admission`, whose own counter bounds the laps. A base it
+    // cannot compare against exits 1 with no directive and no `outcome=failed`
+    // edge, so the run fails closed. EVERY EXIT 0 PRINTS A ROUTING DIRECTIVE
+    // because `output_schema="routing"` refuses an exit 0 with empty stdout.
+    already_satisfied_route [
+        label="Already-satisfied declaration: end on an unchanged tree, re-enter Red on a seeded one"
+        shape=parallelogram
+        timeout="1800s"
+        output_schema="routing"
+        script="handoff=$(git rev-parse --git-path livespec-implement-handoff.md) || exit $?; base_ref=\"origin/{{ inputs.default_branch }}\"; if ! base=$(git rev-parse --verify --quiet \"$base_ref\"); then echo \"LIVESPEC_ALREADY_SATISFIED_BASE_UNREADABLE: $base_ref does not resolve, so the dispatch base cannot be compared against the tree\" >&2; exit 1; fi; git diff --quiet \"$base_ref...HEAD\"; status=$?; if test \"$status\" -eq 0; then echo \"LIVESPEC_ALREADY_SATISFIED_UNCHANGED: base=$base the tree equals the dispatch base, so the already-satisfied ending stands\" >&2; printf '%s\\n' '{\"preferred_next_label\":\"unchanged\"}'; exit 0; fi; if test \"$status\" -ne 1; then echo \"LIVESPEC_ALREADY_SATISFIED_BASE_UNREADABLE: git diff against $base_ref exited $status, so the dispatch base cannot be compared against the tree\" >&2; exit 1; fi; paths=$(git diff --name-only \"$base_ref...HEAD\" | head -n 20 | tr '\\n' ' '); message=\"the red turn declared already-satisfied, but this tree carries changes against the dispatch base $base ($paths), so this is a seeded run with carried work and the declaration is refused: such a run proves the Definition of Done through its own Red-Green pair and never ends as already satisfied. Therefore write the Red test the Definition of Done needs; it fails at commit_red because the commit hook runs against the dispatch base's product files with the carried changes folded out, and the run then takes the carried changes through green and commit_green to publication. Do not declare already-satisfied again; re-entering red\"; printf '\\n## already-satisfied-refused\\n\\n%s\\n' \"$message\" >> \"$handoff\"; echo \"LIVESPEC_ALREADY_SATISFIED_CARRIED_CHANGES: $message\" >&2; printf '%s\\n' '{\"preferred_next_label\":\"carried\"}'; exit 0"
+    ]
+
     already_satisfied [
         label="Already satisfied: Red left the dispatch base unchanged"
         shape=parallelogram
@@ -2617,11 +2640,13 @@ script="cut_root=$(printenv LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT || true); if te
     red_admission -> needs_human [label="red bound exhausted", condition="outcome=failed"]
     red_admission -> red
     red -> implement_amendment_route [label="Definition-of-Done amendment", condition="outcome=failed"]
-    red -> already_satisfied [label="already satisfied", condition="preferred_label=already-satisfied"]
+    red -> already_satisfied_route [label="already satisfied", condition="preferred_label=already-satisfied"]
     red -> green_admission [label="seeded open Red", condition="preferred_label=seeded-open-red"]
     red -> red_needs_human_route [label="needs-human label", condition="preferred_label=needs-human"]
     red -> red_unknown_label_route [label="unrouted label", condition="preferred_label && preferred_label != seeded-open-red && preferred_label != already-satisfied && preferred_label != needs-human"]
     red -> commit_red
+    already_satisfied_route -> red_admission [label="carried changes", condition="preferred_label=carried"]
+    already_satisfied_route -> already_satisfied
     red_unknown_label_route -> red_admission [label="label refused", condition="outcome=failed"]
     red_unknown_label_route -> red_admission
     red_needs_human_route -> needs_human [label="red asked for a human", condition="outcome=failed"]
