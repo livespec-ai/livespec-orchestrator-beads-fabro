@@ -15915,3 +15915,64 @@ Feature: A resolved rebase conflict can always be committed
     Then it names git commit -C REBASE_HEAD and git commit -m <subject>
     And it does not name git commit --no-edit
 ```
+
+## Scenario 378 — A central-factory-selection dispatcher projects only the centrally selected slot
+
+```gherkin
+Feature: Factory credential from the central factory selection
+  As an operator whose accounts are protected by the central account rotation's floors
+  I want every factory dispatch to use the account the central rotation selected for factories
+  So that no local ranking can spend an account past the floor the central rotation keeps
+
+  Background:
+    Given dispatcher.claude_credential_policy declares mode numbered-slots with slots CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_4 and CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_5 and selection central-factory-selection
+    And both declared slots are injected non-empty
+    And an item whose implement node's candidate is covered by the admission session-headroom clause
+
+  Scenario: The named slot qualifies and is the only slot assessed
+    Given the central factory selection record names profile anthropic-5, written 5 minutes ago
+    And slot ANTHROPIC_5 qualifies under the headroom paragraph
+    And slot ANTHROPIC_4 reads more headroom than slot ANTHROPIC_5
+    When the Dispatcher evaluates admission
+    Then slot ANTHROPIC_5 is projected
+    And slot ANTHROPIC_4 is neither assessed nor projected
+
+  Scenario: A record naming no account leaves covered candidates without a credential
+    Given the central factory selection record names no account with reason "no account qualifies"
+    When the Dispatcher evaluates admission
+    Then covered candidates are skipped with a no-central-factory-selection skip carrying that reason
+    And the item remains ready without a claim
+    And no declared slot is assessed or projected
+
+  Scenario: A stale record is not followed
+    Given dispatcher.claude_credential_policy central_selection_max_age_minutes is 60
+    And the central factory selection record names profile anthropic-5, written 90 minutes ago
+    When the Dispatcher evaluates admission
+    Then covered candidates are skipped with a no-central-factory-selection skip naming the stale record
+
+  Scenario: A named slot that fails its own headroom does not move the dispatch to another slot
+    Given the central factory selection record names profile anthropic-5, written 5 minutes ago
+    And slot ANTHROPIC_5's five-hour remaining headroom is below the floor
+    And slot ANTHROPIC_4 qualifies
+    When the Dispatcher evaluates admission
+    Then covered candidates are skipped by a floor skip
+    And slot ANTHROPIC_4 is neither assessed nor projected
+
+  Scenario: A covered primary with an uncovered fallback continues when no central selection is usable
+    Given the central factory selection record is absent
+    And an admission-required node offers a claude-acp primary and a codex-acp fallback
+    When the Dispatcher evaluates admission
+    Then selection continues to the codex-acp fallback
+
+  Scenario: The interactive selection is never read
+    Given the account-selection process's interactive published selection names anthropic-4
+    And the central factory selection record names profile anthropic-5, written 5 minutes ago
+    When the Dispatcher evaluates admission
+    Then slot ANTHROPIC_5 is projected
+    And the Dispatcher did not read the interactive published selection
+
+  Scenario: Absent selection keeps local ranking
+    Given dispatcher.claude_credential_policy declares mode numbered-slots with no selection
+    When the Dispatcher evaluates admission
+    Then the slot is chosen by the whole-pool ranking of Scenario 278
+```

@@ -3293,5 +3293,13 @@
     "test": "TODO",
     "work_item": "bd-ib-vpvdn4",
     "reason": "A test at the integration tier or above is owed: the commit runner's own suite, delivered by bd-ib-vpvdn4, driving a real rebase stopped on a conflict in a local git fixture whose commit-msg hook appends a trailer."
+  },
+  {
+    "heading": "## Scenario 378 — A central-factory-selection dispatcher projects only the centrally selected slot",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-tvcbmc",
+    "reason": "A real test at the integration tier or above is owed for this heading: the Dispatcher's admission, credential-usability probe, Worker credential projection and host judgement driven under dispatcher.claude_credential_policy selection central-factory-selection with a central factory selection record fixture, asserting that only the named slot is assessed and projected, the no-central-factory-selection skip for a null-profile, stale, absent or undeclared record, that a named slot failing its own headroom never moves the dispatch to another slot, the uncovered fallback continuing, the interactive selection never being read, and local-ranking when selection is absent. bd-ib-tvcbmc owns it."
   }
 ]
