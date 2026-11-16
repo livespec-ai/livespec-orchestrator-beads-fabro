@@ -70,6 +70,9 @@ from livespec_orchestrator_beads_fabro.commands._acp_agent_catalog import CLAUDE
 from livespec_orchestrator_beads_fabro.commands._acp_builtin_candidates import ANTHROPIC_DOMAIN
 from livespec_orchestrator_beads_fabro.commands._acp_candidate_schema import AcpCandidate
 from livespec_orchestrator_beads_fabro.commands._acp_codex_headroom import CodexHeadroomReading
+from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential_policy import (
+    ClaudeCredentialRefusal,
+)
 
 __all__: list[str] = [
     "ABSENT_SEVEN_DAY_READING",
@@ -314,6 +317,11 @@ class SessionHeadroomPolicy:
     `pool_read` is the whole injected slot pool's readings, memoized with `read`
     (which returns the one slot admission chose out of them). It defaults to
     ABSENT, which leaves a single-reading policy exactly as it was.
+
+    `credential_refusal` is why no covered candidate may be admitted at all: an
+    absent or invalid `dispatcher.claude_credential_policy`, or a numbered-slots
+    pool with no declared slot injected. Every covered candidate is then skipped
+    without a reading. It defaults to ABSENT, which admits the pool as assessed.
     """
 
     floor_percent: int
@@ -321,6 +329,7 @@ class SessionHeadroomPolicy:
     read: Callable[[], SessionHeadroomReading]
     codex_read: Callable[[], CodexHeadroomReading] | None = None
     pool_read: Callable[[], tuple[SessionHeadroomReading, ...]] | None = None
+    credential_refusal: ClaudeCredentialRefusal | None = None
 
 
 def session_headroom_reading(

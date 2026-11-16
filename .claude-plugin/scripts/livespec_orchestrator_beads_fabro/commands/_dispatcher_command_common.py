@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from livespec_orchestrator_beads_fabro.commands._acp_preflight_verdict import (
+    CLAUDE_CREDENTIAL_REFUSAL_STAGE,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import DispatchOutcome
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import JournalFile
 from livespec_orchestrator_beads_fabro.commands._dispatcher_loop_selection import run_id
@@ -50,6 +53,14 @@ def dispatch_exit_code(*, outcomes: list[DispatchOutcome]) -> int:
         for outcome in outcomes
     ):
         return EXIT_UNGRADEABLE_CRITERIA
+    # A Claude credential policy refusal (absent or invalid policy, or no declared
+    # slot injected) is a precondition error: committing the policy or injecting
+    # the slot clears it.
+    if all(
+        outcome.status == "failed" and outcome.stage == CLAUDE_CREDENTIAL_REFUSAL_STAGE
+        for outcome in outcomes
+    ):
+        return EXIT_PRECONDITION_ERROR
     return EXIT_FAILURE
 
 
