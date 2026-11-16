@@ -1355,7 +1355,9 @@ def test_a_repair_round_is_budgeted_apart_from_the_review_fix_rounds() -> None:
         == 2 * len(producers - {_REPAIR_NODE, "janitor_failure_route", "fix_open_red_route"}) + 2
     )
     assert budgets["disposition"] == 3
-    assert budgets["review_fix"] == 3
+    # The review-fix route's independent open-Red allowance permits an initial
+    # turn plus two re-entries in each of the three review rounds.
+    assert budgets["review_fix"] == 9
     assert {destination for destination, _ in edges[_REPAIR_NODE]}.isdisjoint(
         {"review_fix", "disposition"}
     )

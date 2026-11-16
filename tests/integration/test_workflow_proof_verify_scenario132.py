@@ -544,7 +544,11 @@ def test_the_fix_budget_admits_every_loop_that_now_feeds_it() -> None:
     assert values["fix"] >= 2 * len(
         producers - {"janitor_failure_route", "refresh_repair", "fix_open_red_route"}
     )
-    assert values["disposition"] == values["review_fix"]
+    assert values["disposition"] == 3
+    # The review-fix node admits each three-round lap's initial turn and its
+    # two possible open-Red re-entries; its route owns the separate consecutive
+    # open-Red bound.
+    assert values["review_fix"] == 9
 
 
 def test_the_review_prompt_reviews_the_latest_captured_record_alongside_the_code() -> None:
