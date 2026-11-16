@@ -65,7 +65,7 @@ _RUN_ID = "commit-00000000000000000000000000000001"
 _FAILED_TARGET = "check-types"
 _ERROR_LINE = 'module.py:3:1 - error: Type of "x" is partially unknown (reportUnknownVariableType)'
 _CONFIGURED_DELTA = 137
-_SETTLE_VISITS = 3
+_SETTLE_VISITS = 9
 _JANITOR_VISIT_CAP = 8
 
 

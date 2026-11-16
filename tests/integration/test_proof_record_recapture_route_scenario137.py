@@ -441,7 +441,8 @@ def test_the_watchdog_knows_the_recapture_route_is_a_command_node() -> None:
 def test_an_exhausted_review_fix_budget_does_not_pre_empt_a_recapture_verdict() -> None:
     """Assertion 3, second half: the recapture route consults neither fix budget.
 
-    The budget lives as `max_visits=3` on `disposition` and `review_fix`, and
+    The budget lives as `max_visits=3` on `disposition` and `max_visits=9` on
+    `review_fix` (three rounds with up to two open-Red re-entries each), and
     `max_visits` ABORTS the run at entry rather than routing — so an exhausted
     budget could only pre-empt a recapture verdict if the recapture route entered
     one of those nodes. It does not, which is asserted as REACHABILITY rather than
@@ -455,7 +456,7 @@ def test_an_exhausted_review_fix_budget_does_not_pre_empt_a_recapture_verdict() 
             for node in parse_workflow_graph(text=_graph_text()).nodes
             if node.name == _REVIEW_FIX
         ).attributes.get("max_visits")
-        == "3"
+        == "9"
     )
     assert (
         next(

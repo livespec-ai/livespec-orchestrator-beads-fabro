@@ -106,8 +106,10 @@ WORKFLOW_DEFAULT_LAYER = WORKFLOW_LAYER
 # The single-node incomplete-turn route and commit-settle node of the pre-split
 # graph (`implement_hook_route`, `implement_commit_settle`) were removed by
 # bd-ib-vvzd3v: the split left no edge entering either, so the engine refused
-# every run. `review_fix_commit_settle` follows `review_fix`'s three visits and
-# `fix_commit_settle` follows `fix`'s two. `janitor_admission` sits ahead of
+# every run. The review-fix loop admits three review rounds, each with an
+# initial turn and two open-Red re-entries, so `review_fix`, its settle node,
+# and its open-Red route each carry nine visits. `fix_commit_settle` follows
+# `fix`'s two. `janitor_admission` sits ahead of
 # each janitor visit and is likewise billed three times; it has its own
 # engine-side ninth visit only to name the exhausted eight-visit bound and
 # preserve the tree, which is not part of a successful run's longest path.
@@ -198,8 +200,9 @@ _WORST_CASE_VISITS: Mapping[str, int] = {
     "proof_grade": 9,
     "proof_grade_route": 3,
     "disposition": 3,
-    "review_fix": 3,
-    "review_fix_commit_settle": 3,
+    "review_fix": 9,
+    "review_fix_commit_settle": 9,
+    "review_fix_open_red_route": 9,
     "pr_refresh": 8,
     "pr_refresh_head": 7,
     "pr": 4,
