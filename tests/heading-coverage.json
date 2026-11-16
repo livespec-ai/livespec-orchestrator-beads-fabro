@@ -3285,5 +3285,13 @@
     "test": "TODO",
     "work_item": "bd-ib-tvcbmc",
     "reason": "A real test at the integration tier or above is owed for this heading: the Dispatcher's admission, credential-usability probe, credential-status probe, Worker credential projection and host judgement driven under dispatcher.claude_credential_policy, asserting the no-declared-slot-injected refusal before any claim for absent, empty and undeclared slots with the unnumbered credential present, the mixed node that continues to an uncovered fallback, the floor skip that never touches the unnumbered credential, a downstream consumer's refusal when the admitted slot is gone, the configuration refusal (exit code 3) for a missing or invalid policy, the explicit legacy-independent fallback, and a codex-acp-only item unaffected by the policy. bd-ib-tvcbmc (the R01 implementation) owns it."
+  },
+  {
+    "heading": "## Scenario 377 — A commit run's commit carries an authored subject, and a refusal inside a stopped rebase leaves the rebase in progress and names the forms that pass",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-vpvdn4",
+    "reason": "A test at the integration tier or above is owed: the commit runner's own suite, delivered by bd-ib-vpvdn4, driving a real rebase stopped on a conflict in a local git fixture whose commit-msg hook appends a trailer."
   }
 ]
