@@ -37,14 +37,23 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_base_advance import 
     BaseAdvancedAfterArming,
     merge_poll_budget_exhausted_detail,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_journal import journal_stage
 from livespec_orchestrator_beads_fabro.commands._dispatcher_merge_wait_handoff import (
     HANDED_OFF_STATUS,
     MergeWaitHandedOff,
     merge_wait_handed_off_detail,
     merge_wait_handed_off_journal_record,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import DispatchPlan, PrView
-from livespec_orchestrator_beads_fabro.commands._dispatcher_pr_view import view_pr
+from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import (
+    DispatchPlan,
+    PrView,
+    pr_disarm_argv,
+    pr_update_branch_argv,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_pr_view import (
+    GH_TIMEOUT_SECONDS,
+    view_pr,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_required_checks import (
     required_check_failure_outcome,
     required_check_names,
@@ -139,7 +148,7 @@ def exhausted_rest_outcome(
     )
 
 
-def _armed_ending(
+def _armed_ending(  # noqa: PLR0911 -- each forge state earns a distinct disposition.
     *,
     outcome_type: type[DispatchOutcome],
     plan: DispatchPlan,
@@ -173,6 +182,23 @@ def _armed_ending(
             merge_sha=seen.merge_sha,
             failed=failed,
         )
+    if seen.merge_state_status == "BEHIND":
+        refreshed = runner.run(
+            argv=pr_update_branch_argv(plan=plan, number=seen.number),
+            cwd=plan.repo,
+            timeout_seconds=GH_TIMEOUT_SECONDS,
+        )
+        journal_stage(journal=journal, plan=plan, stage="pr-update-branch", result=refreshed)
+        if refreshed.exit_code != 0:
+            return None
+        disarmed = runner.run(
+            argv=pr_disarm_argv(plan=plan, number=seen.number),
+            cwd=plan.repo,
+            timeout_seconds=GH_TIMEOUT_SECONDS,
+        )
+        journal_stage(journal=journal, plan=plan, stage="pr-disarm-refreshed", result=disarmed)
+        if disarmed.exit_code != 0:
+            return None
     handed_off = MergeWaitHandedOff(
         factory=plan.fabro_factory_name,
         pr_head=seen.head,

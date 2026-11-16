@@ -70,16 +70,28 @@ def protected_resume_seed(
         return None
     if head == (preserved.preservation_tip_sha or preserved.commit_sha):
         return None
+    # The factory proof anchor binds this published head to its run.  A preserved
+    # work-in-progress ref from that same run therefore has an established order;
+    # only cross-run pairs need a second journal-order lookup.
+    same_run = (
+        gather.anchor is not None
+        and gather.anchor.head == head
+        and gather.anchor.run_id == preserved.source_run_id
+    )
     comparison = preserved_descendant(
         runner=runner,
         repo=repo,
         preservation=preserved,
         published_head=head,
-        head_is_later=published_head_relation(
-            records=journaled,
-            preserved_run_id=preserved.source_run_id,
-            published_head=head,
-            publications=gather.publications,
+        head_is_later=(
+            False
+            if same_run
+            else published_head_relation(
+                records=journaled,
+                preserved_run_id=preserved.source_run_id,
+                published_head=head,
+                publications=gather.publications,
+            )
         ),
     )
     return preserved if isinstance(comparison, PreservedDescendant) else comparison

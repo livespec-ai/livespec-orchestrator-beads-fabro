@@ -192,6 +192,26 @@ def test_a_pull_request_that_merged_between_the_two_reads_proceeds_as_a_merge(
     assert seen == ["MERGED"]
 
 
+def test_a_green_armed_pull_request_behind_at_the_final_read_is_refreshed(
+    tmp_path: Path,
+) -> None:
+    """A strict default branch cannot merge an armed BEHIND pull request unaided."""
+    outcome, runner = _after(
+        repo=tmp_path,
+        queue=[
+            _view(merge_state="BEHIND"),
+            _view(merge_state="BEHIND"),
+            _required_answer(),
+            CommandResult(exit_code=0, stdout="", stderr=""),
+            CommandResult(exit_code=0, stdout="", stderr=""),
+        ],
+    )
+
+    assert ["gh", "pr", "update-branch", "4615"] in runner.calls
+    assert ["gh", "pr", "merge", "4615", "--disable-auto"] in runner.calls
+    assert outcome.status != "blocked"
+
+
 @pytest.mark.parametrize(
     ("rollup", "expected"),
     [

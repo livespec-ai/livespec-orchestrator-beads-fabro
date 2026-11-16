@@ -151,6 +151,8 @@ class _Forge:
         default_factory=lambda: ["check-coverage", "check-lint", "check-types"]
     )
     required_readable: bool = True
+    update_exit_code: int = 0
+    disarm_exit_code: int = 0
     calls: list[list[str]] = field(default_factory=list)
 
     def run(
@@ -170,6 +172,12 @@ class _Forge:
             return CommandResult(
                 exit_code=0, stdout=_required_answer(required=self.required), stderr=""
             )
+        if argv[:3] == ["gh", "pr", "update-branch"]:
+            return CommandResult(
+                exit_code=self.update_exit_code, stdout="", stderr="refresh failed"
+            )
+        if argv[:3] == ["gh", "pr", "merge"]:
+            return CommandResult(exit_code=self.disarm_exit_code, stdout="", stderr="disarm failed")
         if argv[:3] != ["gh", "pr", "view"]:
             return CommandResult(exit_code=0, stdout="", stderr="")
         with_rollup = "statusCheckRollup" in argv[-1]
@@ -305,6 +313,29 @@ def test_a_handed_off_wait_with_every_check_passing_names_no_running_check(tmp_p
     assert outcome.merge_wait_handed_off.running_checks == ()
     rows = [r for r in journal.records if r.get("stage") == "merge-wait-handed-off"]
     assert [r["running_checks"] for r in rows] == [[]]
+
+
+@pytest.mark.parametrize(
+    ("update_exit_code", "disarm_exit_code", "expected_command"),
+    [(1, 0, "update-branch"), (0, 1, "merge")],
+)
+def test_a_failed_refresh_or_disarm_rests_a_behind_pull_request(
+    tmp_path: Path, update_exit_code: int, disarm_exit_code: int, expected_command: str
+) -> None:
+    """A refresh that cannot be safely held off retains the exhausted-budget ending."""
+    forge = _Forge(
+        merge_state="BEHIND",
+        rollup=[{"name": "check-types", "status": "COMPLETED", "conclusion": "success"}],
+        update_exit_code=update_exit_code,
+        disarm_exit_code=disarm_exit_code,
+    )
+
+    outcome = _after_exhaustion(repo=tmp_path, forge=forge, journal=_Journal())
+
+    assert (outcome.status, outcome.stage) == ("blocked", "merge-poll")
+    assert ["gh", "pr", expected_command, "4615"] == next(
+        call for call in forge.calls if call[:3] == ["gh", "pr", expected_command]
+    )[:4]
 
 
 def test_a_pull_request_whose_auto_merge_is_no_longer_armed_still_rests_the_item(
