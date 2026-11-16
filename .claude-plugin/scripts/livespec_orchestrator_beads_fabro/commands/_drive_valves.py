@@ -221,6 +221,7 @@ def _policy_edit(*, call: _ValveCall) -> dict[str, Any] | None:
         return _factory_safety_edit(call=call)
     if call.action in {"set-admission", "set-acceptance"}:
         return set_policy(
+            repo=call.repo,
             config=call.config,
             item=call.item,
             aid=call.action_id,

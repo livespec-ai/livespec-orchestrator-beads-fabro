@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from livespec_orchestrator_beads_fabro import store
@@ -28,6 +29,9 @@ from livespec_orchestrator_beads_fabro.commands._drive_config_schema import (
     ConfigKey,
     parse_config_value,
     value_domain,
+)
+from livespec_orchestrator_beads_fabro.commands._drive_policy_admission_note import (
+    committed_admission_setting_note,
 )
 from livespec_orchestrator_beads_fabro.commands._drive_valve_result import (
     valve_refusal,
@@ -162,13 +166,16 @@ def resolve_blocked_item(
 
 
 def set_policy(
-    *, config: StoreConfig, item: WorkItem, aid: str, action: str, value: str
+    *, repo: Path, config: StoreConfig, item: WorkItem, aid: str, action: str, value: str
 ) -> dict[str, Any]:
     store.update_work_item_policy(
         path=config,
         item_id=item.id,
         admission_policy=value if action == "set-admission" else None,
         acceptance_policy=value if action == "set-acceptance" else None,
+    )
+    admission_setting_note = (
+        committed_admission_setting_note(repo=repo) if action == "set-admission" else ""
     )
     return valve_success(
         aid=aid,
@@ -178,7 +185,7 @@ def set_policy(
         assignee=item.assignee,
         msg=(
             f"Updated {item.id}: {action.removeprefix('set-')} policy -> {value}; "
-            "status unchanged."
+            f"status unchanged.{admission_setting_note}"
         ),
     )
 
