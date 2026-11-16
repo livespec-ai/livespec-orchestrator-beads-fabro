@@ -8450,6 +8450,31 @@ Feature: A fix turn does not spend its time limit on a duplicate check suite
     When the run leaves the stage
     Then the run ends at needs_human with a cause naming the open Red commit
 
+  Scenario: Review_fix visits in earlier review rounds do not count against a later open Red
+    Given a run whose review_fix visits in two earlier review rounds each ended with no open Red
+    And a later review round's review_fix turn ends on an open Red whose Green amend its commit hook refused
+    When review_fix_open_red_route runs
+    Then the run re-enters review_fix to complete that open Red's Green amend
+    And the run does not end at needs_human for the visit limit
+
+  Scenario: Three consecutive passes on one open Red reach the review_fix visit limit
+    Given a review_fix stage whose last commit is an open Red on three consecutive passes of review_fix_open_red_route, with no pass finding no open Red in between
+    When the third such pass runs
+    Then the run ends at needs_human with a LIVESPEC_REVIEW_FIX_OPEN_RED_VISIT_BOUND_EXHAUSTED cause naming that open Red
+
+  Scenario: A pass with no open Red between two open Reds restarts the count
+    Given a review_fix turn whose open Red A was completed by a passing Green amend, so a pass of review_fix_open_red_route found no open Red
+    And a later review_fix turn in the same run ends on a different open Red B whose Green amend its commit hook refused
+    When review_fix_open_red_route runs
+    Then the count starts at one
+    And the run re-enters review_fix rather than ending at needs_human
+
+  Scenario: A new Red authored in place of completing the open one keeps counting
+    Given two consecutive passes of review_fix_open_red_route that found an open Red, with no pass finding no open Red in between
+    And the next review_fix turn authors a new Red commit instead of completing the open one, and ends on it
+    When the third consecutive pass runs
+    Then the run ends at needs_human with a LIVESPEC_REVIEW_FIX_OPEN_RED_VISIT_BOUND_EXHAUSTED cause naming that new open Red
+
   Scenario: An open Red beneath engine checkpoint commits admits the turn's implementation edit
     Given a review_fix turn re-entered to complete an open Red's Green amend
     And two engine checkpoint commits with `fabro(<run>): <stage>` subjects sit above that open Red
@@ -11385,11 +11410,37 @@ Feature: In-turn commits pay the scoped gate, and the full aggregate runs once p
     When its commit hook runs
     Then it runs just check-changed on the change and not the full check aggregate
 
-  Scenario: A fix turn's commit that leaves a changed module's lines uncovered is refused with those lines
-    Given a fix turn committing a change that leaves lines of a product module it changed uncovered
+  Scenario: A fix turn's commit that leaves a changed line uncovered is refused with those lines
+    Given a fix turn committing a change that leaves lines it added or modified in a product module unexecuted by the widened set of test modules
     When its commit hook runs
-    Then the commit is refused with a per-file coverage failure naming that module and each missing line
+    Then the commit is refused with a coverage failure naming that module and each changed line left uncovered
+    And the refusal reports check-check-coverage-incremental as its failed target
     And the full check aggregate is not run
+
+  Scenario: A changed module covered only through other test modules passes the affected-tests gate
+    Given a fix turn committing a change to a product module whose changed lines are all executed by test modules that import it, and none by the test module whose path mirrors the module's
+    When its commit hook runs
+    Then the affected-tests gate measures that module's coverage over every test module that imports it, not over the mirroring test module alone
+    And the commit is not refused for coverage
+    And the full check aggregate is not run
+
+  Scenario: A coverage gap the importing tests show is re-measured over the widened set before the commit is refused
+    Given a fix turn committing a change to a product module whose changed lines are executed only by a test module that loads it with importlib.import_module and a module name built at runtime
+    When its commit hook runs and the test modules that import it leave those lines unexecuted
+    Then the gate re-measures that module's line execution over the importing test modules, every test module naming the module, and every test module with a non-literal dynamic-import call
+    And the commit is not refused for coverage, because that widened set executes those lines
+    And the full check aggregate is not run
+
+  Scenario: An unchanged line the selected tests leave unexecuted does not refuse the commit
+    Given a fix turn committing a change to a product module, one of whose lines the run's branch did not change is executed only by a test module the widened set does not include
+    When its commit hook runs
+    Then the affected-tests gate does not refuse the commit for that unchanged line
+    And the janitor stage's full check aggregate still judges that module's whole-module coverage
+
+  Scenario: An in-turn coverage refusal is countable
+    Given a fix turn committing a change that leaves a changed line of a product module unexecuted by the widened set
+    When its commit hook refuses the commit for coverage
+    Then the commit run's recorded output carries, for that module, one line LIVESPEC_INTURN_COVERAGE_REFUSAL: <module path>:<each refused line>
 
   Scenario: A change the affected-tests gate cannot scope falls back to the full aggregate
     Given a fix or review_fix turn committing a change to a shared configuration file
@@ -11412,7 +11463,7 @@ Feature: In-turn commits pay the scoped gate, and the full aggregate runs once p
     When its commit hook runs
     Then the gate accepts the commit because the staged test fails, without demanding passing tests or coverage
     When commit_green stages the implementation and amends to Green
-    Then the commit hook runs the affected-tests gate and requires the scoped tests and their coverage to pass
+    Then the commit hook runs the affected-tests gate and requires the scoped tests to pass and every changed line to be executed by the widened set
 ```
 
 ## Scenario 256 — A publication that already landed is finished at publish_draft, not a failure
@@ -15798,4 +15849,49 @@ Feature: A fleet dispatcher's Claude credential is always a declared numbered sl
     And every admission-required node of an item offers only codex-acp candidates
     When the Dispatcher evaluates admission for the item
     Then no no-declared-slot-injected refusal applies and admission proceeds under its other conditions
+```
+
+## Scenario 377 — A commit run's commit carries an authored subject, and a refusal inside a stopped rebase leaves the rebase in progress and names the forms that pass
+
+```gherkin
+Feature: A resolved rebase conflict can always be committed
+  As a maintainer whose factory runs refresh onto a moving default branch
+  I want a fix turn's commit of a resolved rebase conflict to pass when it carries an authored subject
+  So that a correct resolution is never refused on every visit until the run's budget is spent
+
+  Scenario: A resolution committed with no authored subject is refused and the rebase stays in progress
+    Given a fix turn whose rebase stopped on a conflict at picked commit C, which the agent resolved and staged
+    And the repository's commit-msg hook appends a Factory-Run-Id trailer
+    When the agent's commit run through the commit runner commits the resolution with an empty authored message
+    Then the commit run settles failed and its recorded output names the commit as having no authored subject line
+    And HEAD is the head the commit run started from
+    And the rebase is still in progress with the index holding the resolution
+    And the agent's in-turn wait report on that commit run states that a rebase is in progress and names git commit -C REBASE_HEAD and git commit -m <subject>, and does not name git commit --no-edit
+
+  Scenario: After a refusal, the resolution committed with the picked commit's own message passes
+    Given the refused commit run of the previous scenario, with the rebase still in progress at picked commit C
+    When the agent's next commit run through the commit runner is git commit -C REBASE_HEAD
+    Then the commit run settles passed
+    And the new commit's first message line is C's authored subject
+    And the rebase moves past C to its next pick when it is continued
+
+  Scenario: A Conventional Commits subject is an authored subject
+    Given a repository whose commit-msg hook appends a Factory-Run-Id trailer
+    When a commit run through the commit runner commits with the message "fix: resolve the conflict"
+    Then the commit run settles passed
+    And the new commit's first message line is "fix: resolve the conflict"
+
+  Scenario: An ordinary commit with no authored subject is still refused
+    Given a repository with no rebase in progress whose commit-msg hook appends a Factory-Run-Id trailer
+    When a commit run through the commit runner commits with an empty authored message
+    Then the commit run settles failed
+    And HEAD is the head the commit run started from
+    And the recorded output names the commit as having no authored subject line
+
+  Scenario: A turn that ends on the refused commit run does not claim the rebase is open
+    Given a fix turn that ends while its latest commit run inside a stopped rebase was refused for having no authored subject
+    And the fix_commit_settle node's abort of that rebase completes
+    When the fix_commit_settle node settles that commit run
+    Then no rebase remains in progress
+    And the fix re-entry brief does not state that the rebase is still in progress
 ```

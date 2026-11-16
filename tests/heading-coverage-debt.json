@@ -1311,6 +1311,13 @@
   {
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
+    "heading": "## Scenario 377 — A commit run's commit carries an authored subject, and a refusal inside a stopped rebase leaves the rebase in progress and names the forms that pass",
+    "work_item": "bd-ib-vpvdn4",
+    "first_seen": "2026-11-16"
+  },
+  {
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
     "heading": "## Scenario 39 — Ratified lesson injects into dispatch briefs",
     "work_item": "bd-ib-heat",
     "first_seen": "2026-07-04"
