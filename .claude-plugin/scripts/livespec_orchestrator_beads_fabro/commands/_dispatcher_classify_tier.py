@@ -87,4 +87,5 @@ def run_classify_tier_command(*, args: argparse.Namespace) -> int:
 
 def _report(*, item_id: str, action: str, recorded: RecordedSpecChangeTier) -> str:
     """Render the classification that now stands against the item."""
-    return f"{item_id}: {action} classification tier {recorded.tier}\n"
+    hold = f"held on {recorded.linked_proposal_topic}" if recorded.is_spec_change else "none"
+    return f"{item_id}: {action} classification recorded tier: {recorded.tier}; hold: {hold}\n"

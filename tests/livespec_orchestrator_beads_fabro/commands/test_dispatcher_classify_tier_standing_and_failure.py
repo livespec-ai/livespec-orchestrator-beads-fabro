@@ -136,7 +136,7 @@ def test_a_stale_existing_record_is_rejudged_and_replaced(
     assert dispatcher.main(argv=["classify-tier", "--repo", str(repo), "--item", _ITEM]) == 0
 
     assert len(_bodies(repo=repo)) == len(before) + 1
-    assert "recorded classification tier spec-change" in capsys.readouterr().out
+    assert "recorded tier: spec-change; hold: held on" in capsys.readouterr().out
 
 
 def test_a_judgement_that_cannot_be_obtained_exits_non_zero_and_writes_nothing(
