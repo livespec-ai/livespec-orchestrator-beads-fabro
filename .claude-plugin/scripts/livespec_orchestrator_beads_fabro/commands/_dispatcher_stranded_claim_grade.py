@@ -51,6 +51,7 @@ __all__: list[str] = [
     "ACTION_ABSENT_RUN_RELEASE",
     "ACTION_ABSENT_RUN_REPEATED",
     "ACTION_HANDOFF_RECONCILE_MERGED",
+    "ACTION_HANDOFF_REFRESH_RELEASE",
     "ACTION_HANDOFF_REQUIRED_CHECK_FAILED",
     "ACTION_HANDOFF_REST",
     "ACTION_TERMINAL_COMPLETION",
@@ -60,6 +61,7 @@ __all__: list[str] = [
     "FORGE_NO_MERGED_PR",
     "FORGE_OPEN_PR",
     "FORGE_UNOBSERVABLE",
+    "HANDOFF_BEHIND",
     "HANDOFF_ENDED",
     "HANDOFF_MERGED",
     "HANDOFF_NONE",
@@ -213,6 +215,10 @@ ACTION_TERMINAL_COMPLETION = "terminal-run-completion"
 ACTION_HANDOFF_RECONCILE_MERGED = "merge-wait-handoff-reconcile-merged"
 ACTION_HANDOFF_REQUIRED_CHECK_FAILED = "merge-wait-handoff-required-check-failed"
 ACTION_HANDOFF_REST = "merge-wait-handoff-rest"
+# The fourth: an armed, passing pull request the forge reports BEHIND a default
+# branch that requires up-to-date branches never lands on its own, so the item is
+# released for a resumed run to refresh it through its own `pr_refresh` stage.
+ACTION_HANDOFF_REFRESH_RELEASE = "merge-wait-handoff-refresh-release"
 
 # What the forge said about the pull request a handed-off merge wait named. A
 # CLOSED vocabulary like the others, with `none` for a claim that was never handed
@@ -225,12 +231,14 @@ HANDOFF_MERGED = "merged"
 HANDOFF_REQUIRED_CHECK_FAILED = "required-check-failed"
 HANDOFF_ENDED = "ended-unmerged"
 HANDOFF_PENDING = "pending"
+HANDOFF_BEHIND = "behind"
 HANDOFF_UNOBSERVABLE = "unobservable"
 
 _HANDOFF_ROUTES: dict[str, str] = {
     HANDOFF_MERGED: ACTION_HANDOFF_RECONCILE_MERGED,
     HANDOFF_REQUIRED_CHECK_FAILED: ACTION_HANDOFF_REQUIRED_CHECK_FAILED,
     HANDOFF_ENDED: ACTION_HANDOFF_REST,
+    HANDOFF_BEHIND: ACTION_HANDOFF_REFRESH_RELEASE,
 }
 
 
