@@ -11448,6 +11448,14 @@ Feature: In-turn commits pay the scoped gate, and the full aggregate runs once p
     When its commit hook refuses the commit for coverage
     Then the commit run's recorded output carries, for that module, one line LIVESPEC_INTURN_COVERAGE_REFUSAL: <module path>:<each refused line>
 
+  Scenario: A module the branch adds, renames or moves counts as wholly changed
+    Given a fix turn committing a product module that the run's branch adds, or renames or moves from another path
+    And the widened set of test modules leaves some of that module's executable lines unexecuted
+    When its commit hook runs
+    Then the affected-tests gate refuses the commit naming that module and each executable line the widened set leaves unexecuted
+    And the refusal reports check-check-coverage-incremental as its failed target
+    And the full check aggregate is not run
+
   Scenario: A change the affected-tests gate cannot scope falls back to the full aggregate
     Given a fix or review_fix turn committing a change to a shared configuration file
     When its commit hook runs
