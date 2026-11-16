@@ -9039,6 +9039,7 @@ Feature: New behaviour gets new spec before it is built
 
   Scenario: An unstated feature is held and the wall refuses it
     Given an implement-kind item typed feature whose asked-for behaviour the spec-stated judgement reports unstated
+    And the item changes or adds a contract between components or repositories
     When the item is filed
     Then the verdict, the generalization target and the proposed-change topic it must link are recorded on the item
     And the item is spec-change tier and is not routed to ready
@@ -9101,6 +9102,7 @@ Feature: New behaviour gets new spec before it is built
   Scenario: A commitment hint does not exempt unstated behaviour
     Given an implement-kind item typed feature carrying a spec_commitment_hint from a ratified proposal
     And the judgement reports part of its asked-for behaviour unstated
+    And the item changes or adds a contract between components or repositories
     When the item is filed
     Then it is spec-change tier and is held for a linked proposal
 
@@ -14959,9 +14961,15 @@ Feature: The spec-change hold covers every classification and follows the item's
   Scenario: A bug-classified ask for unstated behaviour is held
     Given an implement-kind item that the classifier classifies bug
     And the spec-stated judgement reports its asked-for behaviour unstated
+    And the item changes or adds a contract between components or repositories
     When the item is filed
     Then its spec-change tier record reads tier spec-change with a linked proposed-change topic
     And the item is held out of ready
+  Scenario: An internal fix for unstated behaviour is not held
+    Given an implement-kind item classified bug whose asked-for behaviour the judgement reports unstated
+    And the item changes no contract, safety or security guarantee, or promise to users or operators
+    When the item is filed
+    Then its tier record reads tier none and the item routes as every other factory-dispatchable item
   Scenario: A bug restoring stated behaviour routes as before
     Given an implement-kind item classified bug whose asked-for behaviour the judgement reports stated
     When the item is filed
