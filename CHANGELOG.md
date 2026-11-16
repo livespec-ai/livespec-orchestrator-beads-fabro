@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.334.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.333.2...v0.334.0) (2026-11-16)
+
+
+### Features
+
+* **dispatcher:** numbered-slot Claude credential policy (overseer-iyfjbo R01) ([e972339](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/e972339c4b0b9290be5c03381e3ee963b468f8ab))
+
+
+### Bug Fixes
+
+* a red already-satisfied declaration on a seeded tree re-enters Red instead of ending unprovable (bd-ib-zji6m3) ([e9f3c3c](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/e9f3c3cc46d07ca475ae8f78594239a32cdc0058))
+* **dispatcher:** refuse a Claude credential operation without a usable declared policy (bd-ib-tvcbmc) ([294599c](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/294599c7c4b644559c3bfc608d18b896dc809b6f))
+* **dispatcher:** refuse admission before claim under the Claude credential policy (bd-ib-tvcbmc) ([cb50817](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/cb508175cc25a0156beed6169f61d958cf194411))
+* **pytest:** a passing test's non-writable tmp_path tree is removed so it cannot leak inodes under the failed retention policy (livespec-dev-tooling-jxhi63) ([76bc357](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/76bc3575cb3b1f5904c7234b76accfb76c124362))
+* **pytest:** a passing test's tmp_path files are removed so a suite run cannot exhaust a host's /tmp inodes (livespec-dev-tooling-jxhi63) ([4e8d874](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/4e8d874efd3dea582077991d73884fb0c48b26fd))
+
 ## [0.333.2](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.333.1...v0.333.2) (2026-11-16)
 
 
