@@ -41,6 +41,10 @@ dev = [
     "copier==9.6.0",
     "ruff==0.8.6",
     "pyright==1.1.391",
+    # pyright's node comes from this pinned wheel, never from nodeenv: on a cold
+    # cache nodeenv resolves the head of nodejs.org/dist/index.json, which
+    # installed a v27 alpha and broke check-types on 2026-11-15 (igjtqq).
+    "nodejs-wheel-binaries==24.19.0",
     "pytest==8.3.4",
     "pytest-cov==6.0.0",
     "pytest-rerunfailures==14.0",
@@ -66,8 +70,8 @@ dev = [
 # module uses its types module for the canonical cross-repo manifest shape.
 # Pin matches livespec's pin (>=0.2.0; ~/livespec).
 [tool.uv.sources]
-livespec-dev-tooling = { git = "https://github.com/thewoolleyman/livespec-dev-tooling.git", tag = "v1.167.0" }
-livespec-runtime = { git = "https://github.com/thewoolleyman/livespec-runtime.git", tag = "v0.29.1" }
+livespec-dev-tooling = { git = "https://github.com/thewoolleyman/livespec-dev-tooling.git", tag = "v1.211.0" }
+livespec-runtime = { git = "https://github.com/thewoolleyman/livespec-runtime.git", tag = "v0.31.1" }
 
 # ---------------------------------------------------------------------------
 # Ruff — sole linter, formatter, import-sorter, complexity checker.
@@ -242,6 +246,12 @@ reportImplicitStringConcatenation = "error"
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
+# A suite run writes about 105k files under pytest's basetemp on /tmp; kept
+# pytest-N directories exhausted a seat host's tmpfs inodes (2026-11-16,
+# livespec-dev-tooling-jxhi63). Keep only a failed test's tmp_path directory,
+# and only the latest run's basetemp.
+tmp_path_retention_policy = "failed"
+tmp_path_retention_count = 1
 # _bootstrap.bootstrap() sets up sys.path at runtime for the shebang
 # wrappers. Pytest needs the same paths during collection so plugin-
 # package imports and the vendored libs resolve.
@@ -254,6 +264,11 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "--import-mode=importlib",
+    # Inert without --cov. With a bare `--cov=<pkg>` pytest-cov assumes the default
+    # `.coveragerc` (absent here), so a subprocess whose cwd has no pyproject.toml in
+    # view measures statements only and the combine step fails mixing it with branch
+    # data. Naming the file hands every subprocess the same `branch = true` config.
+    "--cov-config=pyproject.toml",
 ]
 
 # ---------------------------------------------------------------------------
@@ -275,9 +290,11 @@ omit = [
     "*/livespec_runtime/*",
     "*/__pycache__/*",
     "/usr/local/bin/*",
-    "tests/e2e/*",
-    "tests/e2e-cli/*",
-    "tests/prompts/*",
+    # Test scaffolding is not first-party source (livespec non-functional
+    # requirements: coverage omits it through an omit-only blocklist). Measuring
+    # tests/ made 72% of measured statements test code and made an untouched
+    # test module a 100% per-file coverage subject (bd-ib-hjo7lb).
+    "tests/*",
     "/tmp/*",
     "mutants/*",
 ]
@@ -357,6 +374,12 @@ exclude_also = [
 # ---------------------------------------------------------------------------
 
 [tool.livespec_dev_tooling]
+# The merge queue's trusted authors (org merge-queue cutover, carrier bd-ib-bcxyfa).
+# ci.yml's merge-group-guard reads this list at the merge group's BASE commit and
+# routes the group to hosted capacity unless every queued PR is same-repository and
+# authored by a name on it. The personal-account factory bot stays until every
+# dispatch host mints as the org App.
+merge_queue_author_allowlist = ["thewoolleyman", "thewoolleyman-factory-bot", "livespec-ai-factory-bot", "livespec-ai-factory-bot[bot]"]
 # OPT IN to the DELEGATED PRE-PUSH GATE (bd-ib-idp5g7, a child of the
 # livespec-dev-tooling plan `delegated-gate-fleet-rollout`). The contract is
 # livespec-dev-tooling's SPECIFICATION/contracts.md §"Delegated pre-push gate"
@@ -383,6 +406,36 @@ exclude_also = [
 # MUST stay above the [[...mirror_pairings]] array-of-tables below, for the same
 # reason `file_lloc_hard_gate` must.
 delegated_gate = true
+# Gate Job resources, declared under livespec-dev-tooling's "Declared gate
+# resources" contract (livespec-dev-tooling >= 1.199.0). The values were
+# measured through the normal gate client on 2026-11-12, on poweredge-xubuntu
+# under near-equal node load (CPU P50 68.8 and 70.4 of 72):
+# - check-per-file-coverage test run: 929.22 s at 8 workers, 796.70 s at 12.
+# - working set: 4.10 GiB at 8 workers, 5.22 GiB at 12 (87% of the 6Gi default).
+# The 6Gi default leaves too little headroom at 12 workers, so 8Gi is declared.
+# The memory figures stand; 8Gi is kept.
+#
+# CPU, 2026-11-15: request and workers are now BOTH 10, so a Kueue gate lane
+# counts the cores this gate really burns. At gate_cpu 5 / 12 workers the Job
+# (no CPU limit) drew about 16 cores against a 5-cpu request: Honeycomb
+# k8s.pod.cpu.usage over the 12 h to ~07:00Z read P90 26.2 cores on
+# gmktec-xubuntu, 14.7 on gamingpc-xubuntu (its whole allocatable) and 48.4 on
+# poweredge-xubuntu. gmktec's 10-cpu lane admitted two of them (32.4 of 32 cores
+# by node cgroups, gates gt5tv and 9jmnf), starving the BestEffort CI runners,
+# and gamingpc read 0.14% idle on gate h5f9x. At 10 cpu a gate fits gmktec's lane
+# once and the PowerEdge's twice, and no 5-cpu lane (gamingpc, hp, the M4) takes
+# one. 10 workers sits between the measured 929 s (8) and 797 s (12) test runs,
+# under the yljbpf 900 s line; 10 is interpolated between those two
+# measurements, not itself measured. REVERT: restore gate_parallelism = 12 and
+# drop gate_cpu, if any node stays under 5% idle with BestEffort full avg60 over
+# 30 across two 10-minute windows and is no better than its 2026-11-15 ~06:58Z
+# baseline (research note 004), or if any gates-cq workload waits more than
+# 10 minutes for admission.
+# Source: livespec-dev-tooling plan gate-job-resources, research notes 003 and
+# 004, epic livespec-dev-tooling-ukoeah, item (i).
+gate_cpu = 10
+gate_parallelism = 10
+gate_memory = "8Gi"
 # The dev host delegates a hand commit's aggregate when it can submit a gates
 # Job; sandbox and credentialless hosts retain the local pre-commit gate. The
 # delegate reports the remote Job and staged-tree hash when it reaches a verdict.
@@ -459,8 +512,10 @@ supervisor_entry_files = [
     "plan/fabro-currency/research/004-fake-acp-agent.py",
     # fleet-launch/: provisional operator scripts run directly by a seat (see fleet-launch/README.md).
     "fleet-launch/ready-set-check.py",
+    "fleet-launch/ledger-item.py",
     "fleet-launch/host-capture-payload.py",
     "fleet-launch/_capture_evidence.py",
+    "fleet-launch/wip-claimed-count.py",
     # The Enemy Unit Test copy of that fake agent: it owns ACP JSON-RPC stdout
     # inside the sandbox for the tier 1 ACP-launch test.
     "fabro-enemy-unit-tests/_fake_acp_agent.py",
@@ -535,6 +590,10 @@ neutral_hook_body_path = { not_applicable = "no neutral hook body is installed i
 # spell the flag somewhere; the alternative to this entry is a second indirection
 # whose innermost layer spells it anyway and is no longer the one place to read.
 destructive_cli_allowlist = [
+    "dev-tooling/reset-test-wrong-to-dispatch-base.sh",
+    "dev-tooling/commit-red.sh",
+    ".claude-plugin/scripts/livespec_orchestrator_beads_fabro/commands/_dispatcher_commit_red_program.sh",
+    ".claude-plugin/scripts/livespec_orchestrator_beads_fabro/commands/_dispatcher_reset_test_wrong_program.sh",
     ".claude-plugin/.fabro/workflows/implement-work-item/prompts/",
     ".claude-plugin/scripts/livespec_orchestrator_beads_fabro/commands/_dispatcher_publication_push.py",
     "orchestrator-image/acceptance-live-golden-master.sh",
@@ -566,6 +625,19 @@ destructive_cli_allowlist = [
 #   work starting, in a process whose source tree is the one being removed,
 #   so no in-process `main()` can stand in. It scrubs the child env exactly
 #   as an allowlisted spawn must.
+# - test_commit_settle_ends_git_operation_yzrguu.py runs the MATERIALIZED commit
+#   runner and the commit-settle node scripts against real merges and rebases in a
+#   throwaway repository. The runner is stdlib-only source written into a sandbox
+#   that has no copy of this package, and the thing under test is the git state it
+#   leaves, so no in-process `main()` can stand in. It scrubs every `GIT_`,
+#   `COVERAGE` and `COV_CORE` variable from the child env.
+# - test_commit_runner_folds_checkpoints_above_open_red_gisyvv.py runs the
+#   MATERIALIZED commit runner's `start` and `wait` against engine-checkpoint
+#   chains above an open Red in a throwaway repository, for the reason the entry
+#   above gives: the runner is stdlib-only source written into a sandbox with no
+#   copy of this package, and what is under test is the commit the amend lands on,
+#   so no in-process `main()` can stand in. It scrubs every `GIT_`, `COVERAGE`
+#   and `COV_CORE` variable from the child env.
 # - test_dispatcher_publication_head.py runs the MATERIALIZED publication-head
 #   program the Dispatcher lands in the sandbox. That program is deliberately
 #   stdlib-only because a governed clone has no copy of this package, and the
@@ -638,10 +710,18 @@ destructive_cli_allowlist = [
 #   and a doubled process table cannot tell a stopped hook from one never
 #   started. It scrubs the child env exactly as an allowlisted spawn must,
 #   dropping every GIT_ and COV_CORE_ variable and COVERAGE_PROCESS_START.
+# - test_routing_schema_nodes_emit_a_directive.py runs every committed
+#   `output_schema="routing"` node script under `sh` in a real git repository
+#   and, for `fix_commit_settle`, first drives the MATERIALIZED sandbox commit
+#   runner through a passed commit run, because what it pins is the stdout the
+#   Fabro engine reads from that shell process on the settle's success exit. It
+#   scrubs the child env exactly as an allowlisted spawn must, dropping every
+#   GIT_, COV_CORE_ and COVERAGE variable.
 #
 # This key MUST stay above the `[[...mirror_pairings]]` array-of-tables
 # below (same TOML attachment reason as `destructive_cli_allowlist`).
 subprocess_spawn_allowlist = [
+    "tests/integration/test_review_fix_failed_commit_cause.py",
     "tests/bin/test_host_side_self_contained_import.py",
     "tests/bin/test_bootstrap_unattended_marker_forwarding.py",
     "tests/bin/test_payload_retention_after_eviction.py",
@@ -662,12 +742,20 @@ subprocess_spawn_allowlist = [
     "tests/bin/test_payload_canary_subject_is_the_candidate.py",
     "tests/livespec_orchestrator_beads_fabro/commands/test_dispatcher_publication_head.py",
     "tests/livespec_orchestrator_beads_fabro/commands/test_dispatcher_hook_limit_program.py",
+    "tests/test_pytest_bare_cov_spelling.py",
     "tests/integration/test_scripted_publication_execution.py",
     "tests/integration/test_scripted_refresh_execution.py",
     "tests/integration/test_pr_refresh_carry_forward_scenario178.py",
     "tests/integration/test_empty_checkpoint_commits_dropped.py",
     "tests/integration/test_sandbox_commit_runner_scenario179.py",
     "tests/integration/test_needs_human_node_timeout_cut_scenario192.py",
+    "tests/integration/test_commit_settle_ends_git_operation_yzrguu.py",
+    "tests/integration/test_commit_settle_restores_flattened_merge_2deww4.py",
+    "tests/integration/test_commit_settle_stopped_rebase_hmed6n.py",
+    "tests/integration/test_commit_runner_refuses_subjectless_commit_7cixf3.py",
+    "tests/integration/test_publish_draft_refuses_subjectless_commit_7cixf3.py",
+    "tests/integration/test_commit_runner_folds_checkpoints_above_open_red_gisyvv.py",
+    "tests/integration/test_routing_schema_nodes_emit_a_directive.py",
 ]
 
 [[tool.livespec_dev_tooling.mirror_pairings]]

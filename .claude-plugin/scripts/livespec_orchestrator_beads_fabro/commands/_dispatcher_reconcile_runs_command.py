@@ -72,16 +72,23 @@ from returns.unsafe import unsafe_perform_io
 
 from livespec_orchestrator_beads_fabro._beads_client import make_beads_client
 from livespec_orchestrator_beads_fabro.commands._config import resolve_fabro_bin
+from livespec_orchestrator_beads_fabro.commands._dispatcher_fleet_run_collection import (
+    registered_dispatching_repositories,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_invoker import invoker_from_args
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import (
     JournalFile,
     ShellCommandRunner,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_ledger_close import load_items
+from livespec_orchestrator_beads_fabro.commands._dispatcher_pass_snapshot import pass_snapshot
 from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import (
     calibration_spans_path,
     journal_path,
     store_config,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_plugin_install_registry import (
+    default_plugin_install_registry,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_claim_lane import (
     reconcile_claim_lane,
@@ -146,46 +153,53 @@ def run_reconcile_runs_command(*, args: argparse.Namespace) -> int:
         path=journal_path(args=args, repo=repo),
         identity=invoker_from_args(args=args),
     )
-    factories = reconcile_factory_targets(repo=repo, factory=args.factory)
-    summary = reconcile_runs(
-        inputs=ReconcileInputs(
-            repo=repo,
-            fabro_bin=(
-                args.fabro_bin if args.fabro_bin is not None else resolve_fabro_bin(cwd=repo)
+    with pass_snapshot():
+        factories = reconcile_factory_targets(repo=repo, factory=args.factory)
+        summary = reconcile_runs(
+            inputs=ReconcileInputs(
+                repo=repo,
+                fabro_bin=(
+                    args.fabro_bin if args.fabro_bin is not None else resolve_fabro_bin(cwd=repo)
+                ),
+                id_prefix=store.prefix,
+                items=load_items(repo=repo),
+                journaled=read_journaled_runs(path=journal.path),
+                runner=ShellCommandRunner(),
+                journal=journal,
+                ledger=make_beads_client(config=store),
+                attribution=repo_run_attribution(repo=repo),
+                telemetry_spans_path=calibration_spans_path(args=args, repo=repo),
+                cancelling_actor=journal.identity.invoker,
+                blocked_run_grace_seconds=unsafe_perform_io(
+                    resolve_blocked_run_grace_seconds(cwd=repo).value_or(
+                        DEFAULT_BLOCKED_RUN_GRACE_SECONDS
+                    )
+                ),
+                # The CLAIM lane, armed. This command is the standalone sweep the
+                # host timer invokes — the third of the three reconciliation
+                # surfaces the stranded-claim clause names.
+                claim_journal=journal,
+                claim_lane=reconcile_claim_lane,
+                # Every other repository this host dispatches for, so ONE timer pass
+                # collects a closed item's ended runs whichever repository
+                # dispatched them.
+                dispatching_repositories=registered_dispatching_repositories(
+                    own_repo=repo, install_record=default_plugin_install_registry()
+                ),
             ),
-            id_prefix=store.prefix,
-            items=load_items(repo=repo),
-            journaled=read_journaled_runs(path=journal.path),
-            runner=ShellCommandRunner(),
-            journal=journal,
-            ledger=make_beads_client(config=store),
-            attribution=repo_run_attribution(repo=repo),
-            telemetry_spans_path=calibration_spans_path(args=args, repo=repo),
+            factories=factories,
+            dry_run=args.dry_run,
+        )
+        record = reconcile_pass_summary(factories=factories, summary=summary)
+        journal_reconcile_pass(journal=journal, summary=record)
+        emit_reconcile_pass_span(
+            summary=record,
+            tenant=store.prefix,
             cancelling_actor=journal.identity.invoker,
-            blocked_run_grace_seconds=unsafe_perform_io(
-                resolve_blocked_run_grace_seconds(cwd=repo).value_or(
-                    DEFAULT_BLOCKED_RUN_GRACE_SECONDS
-                )
-            ),
-            # The CLAIM lane, armed. This command is the standalone sweep the
-            # host timer invokes — the third of the three reconciliation
-            # surfaces the stranded-claim clause names.
-            claim_journal=journal,
-            claim_lane=reconcile_claim_lane,
-        ),
-        factories=factories,
-        dry_run=args.dry_run,
-    )
-    record = reconcile_pass_summary(factories=factories, summary=summary)
-    journal_reconcile_pass(journal=journal, summary=record)
-    emit_reconcile_pass_span(
-        summary=record,
-        tenant=store.prefix,
-        cancelling_actor=journal.identity.invoker,
-        spans_path=calibration_spans_path(args=args, repo=repo),
-        now_ns=time.time_ns(),
-    )
-    _emit(summary=summary, record=record, as_json=args.as_json)
+            spans_path=calibration_spans_path(args=args, repo=repo),
+            now_ns=time.time_ns(),
+        )
+        _emit(summary=summary, record=record, as_json=args.as_json)
     return 1 if _has_failure(summary=summary, record=record) else 0
 
 
@@ -282,11 +296,12 @@ def _reconciled_entries(*, summary: ReconcileRunsSummary) -> list[dict[str, obje
 def _claim_hold_line(*, held: HeldClaim) -> str:
     """One held claim's line, naming a remedy only where the clause owes one."""
     remedy = "" if held.remedy is None else f" remedy={held.remedy}"
+    detail = "" if held.detail is None else f" detail={held.detail}"
     return (
         f"CLAIM   {held.work_item_id}  {_named(value=held.run_id)}  "
         f"factory={_named(value=held.factory_name)} "
         f"host={_named(value=held.dispatching_host)} "
-        f"reason={held.hold_reason}{remedy}\n"
+        f"reason={held.hold_reason}{remedy}{detail}\n"
     )
 
 

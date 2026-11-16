@@ -47,8 +47,16 @@ from typing import Any, Protocol
 
 import pytest
 from hypothesis import settings
+from livespec_orchestrator_beads_fabro.commands import (
+    _dispatcher_definition_of_done_findings as _dod_findings,
+)
+from livespec_orchestrator_beads_fabro.commands import _drive_impl_scope
 from livespec_orchestrator_beads_fabro.commands._acp_node_layers import resolve_acp_nodes
 from livespec_orchestrator_beads_fabro.commands._config_acp import resolve_acp_node_overlays
+from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done_origin_spec import (
+    OriginSpecUnreadable,
+    origin_spec_h2_headings,
+)
 from livespec_orchestrator_beads_fabro.commands._fabro_port import FabroPort
 from livespec_orchestrator_beads_fabro.commands._fabro_port_http import (
     FabroHttpPort,
@@ -97,8 +105,22 @@ def _integration_dump_doubles_serve_run_state(
         return
 
     class _Api:
-        def __init__(self, *, fallback: FabroHttpPort) -> None:
+        def __init__(self, *, fallback: FabroHttpPort, port: FabroPort) -> None:
             self._fallback = fallback
+            self._port = port
+
+        def stream(
+            self, *, run_id: str, after: int | None, timeout_seconds: float
+        ) -> FabroHttpResult:
+            _ = after
+            events = self._port.events(run_id=run_id, timeout_seconds=timeout_seconds)
+            return FabroHttpResult(
+                status=200 if events.command.exit_code == 0 else 503,
+                body=events.command.stdout,
+                error=None,
+                payload=events.payload,
+                succeeded=events.command.exit_code == 0,
+            )
 
         def run_state(self, *, run_id: str, timeout_seconds: float) -> FabroHttpResult:
             _ = (run_id, timeout_seconds)
@@ -139,7 +161,43 @@ def _integration_dump_doubles_serve_run_state(
     monkeypatch.setattr(
         FabroPort,
         "server_api",
-        lambda port: _Api(fallback=FabroHttpPort(target=port.target, transport=port.http)),
+        lambda port: _Api(
+            fallback=FabroHttpPort(target=port.target, transport=port.http), port=port
+        ),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_lifecycle_preservation_ref_deletion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep every close and accept in this suite off the real forge.
+
+    The lifecycle write seam deletes a closed item's preservation refs through
+    `gh api`, which on a host with an authenticated `gh` and a real remote reaches
+    the actual repository, and on any other host fails and journals a deletion
+    failure that is not the subject of the dispatch and reconcile tests asserting
+    their own exact journal stages. So the seam sees an origin that carries no
+    preservation ref. Tests of the deletion itself stand their own forge in.
+    """
+    from collections.abc import Mapping
+
+    from livespec_orchestrator_beads_fabro.commands import _dispatcher_lifecycle_ref_deletion
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
+
+    class _OriginWithoutPreservationRefs:
+        def run(
+            self,
+            *,
+            argv: list[str],
+            cwd: Path,
+            timeout_seconds: float,
+            env: Mapping[str, str | None] | None = None,
+            stdin: int | None = None,
+        ) -> CommandResult:
+            _ = (argv, cwd, timeout_seconds, env, stdin)
+            return CommandResult(exit_code=0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        _dispatcher_lifecycle_ref_deletion, "ShellCommandRunner", _OriginWithoutPreservationRefs
     )
 
 
@@ -318,6 +376,50 @@ def _hermetic_definition_of_done_workflow_shape(
     )
 
 
+# The commit every hermetic dispatch reads as its installed build's identity. Forty
+# hexadecimal characters, so it has the shape of a real commit everywhere it is
+# rendered, and a value no forge serves, so nothing could fetch it by accident.
+HERMETIC_HELPER_BUILD_COMMIT = "0123456789abcdef0123456789abcdef01234567"
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_helper_build_identity_and_reach(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> None:
+    """Keep every dispatch off the forge's helper-build reachability probe.
+
+    The pre-dispatch wall reads the installed build's commit and asks the forge for
+    it (`_dispatcher_helper_build`), and the overlay reads the same identity for the
+    helper manifest. Left ambient, every dispatch test would spawn `git` against
+    the host's install registry and checkout and then fetch from github.com: the
+    factory's first attempt at this change ran its Green hook for more than two
+    hours because the overlay tests reached an unstubbed forge probe (bd-ib-jrawlp,
+    run 01M74SVXDEMF). So the identity is a fixed commit and the probe answers
+    reachable, which is the state of every healthy production dispatch.
+
+    The probe's own module is explicitly left unpatched: it is the suite's
+    assertion that the identity read and the probe do what they say, and it hands
+    both a runner of its own, so it touches no network either.
+    """
+    if request.node.path.name == "test_dispatcher_helper_build.py":
+        return
+    from livespec_orchestrator_beads_fabro.commands import _dispatcher_helper_build as build
+
+    source = build.HelperSource(
+        repository="https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git",
+        commit=HERMETIC_HELPER_BUILD_COMMIT,
+    )
+
+    def hermetic_source(**_kwargs: object) -> build.HelperSource:
+        return source
+
+    def hermetic_probe(**_kwargs: object) -> build.BuildReachReading:
+        return build.BuildReachReading(reachable=True, detail="")
+
+    monkeypatch.setattr(build, "read_helper_source", hermetic_source)
+    monkeypatch.setattr(build, "probe_build_commit", hermetic_probe)
+
+
 def _fresh_codex_auth_json() -> str:
     """A host Codex `auth.json` whose access-token JWT `exp` is a century out.
 
@@ -349,6 +451,23 @@ def _hermetic_codex_home(
     codex_home = tmp_path_factory.mktemp("codex-home")
     _ = (codex_home / "auth.json").write_text(_fresh_codex_auth_json(), encoding="utf-8")
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_dispatch_memory_slice_bound(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Point the published per-loop memory bound at a file that does not exist.
+
+    An `impl:` dispatch reads `/etc/livespec/factory-dispatch-loop-memory-max`
+    to decide whether to launch its loop inside the host's dispatch slice. On the
+    dev host that file exists once the host role converges, so a test driving
+    `drive` with a stand-in runner would otherwise see a scoped launch there and
+    an unscoped one everywhere else. Tests asserting the scoped launch replace
+    `default_scope_host` itself.
+    """
+    absent = tmp_path_factory.mktemp("dispatch-memory-slice") / "factory-dispatch-loop-memory-max"
+    monkeypatch.setattr(_drive_impl_scope, "MEMORY_MAX_PATH", absent)
 
 
 @pytest.fixture(autouse=True)
@@ -559,8 +678,11 @@ def _hermetic_factory_credential_slots(monkeypatch: pytest.MonkeyPatch) -> None:
     every one of them at teardown, so a test asserting the rotation-following
     selection sets the slot it needs back explicitly.
     """
-    for name in [name for name in os.environ if name.startswith(_FACTORY_CREDENTIAL_SLOT_PREFIX)]:
+    _ = [
         monkeypatch.delenv(name, raising=False)
+        for name in list(os.environ)
+        if name.startswith(_FACTORY_CREDENTIAL_SLOT_PREFIX)
+    ]
     # The unnumbered token too: the availability confirmation turn projects whatever
     # `select_factory_credential` names into the factory's environment, so an
     # AMBIENT one (this suite runs under the credential wrapper in the post-merge
@@ -584,6 +706,47 @@ def _hermetic_admission_slot_chooser() -> Iterator[None]:
     register_admission_slot_chooser(chooser=None)
     yield
     register_admission_slot_chooser(chooser=None)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_claude_credential_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read an UNDECLARED Claude credential policy as `legacy-independent` in a test.
+
+    The Dispatcher refuses every Claude-credential operation in a repository that
+    declares no `dispatcher.claude_credential_policy` (SPECIFICATION v382). The
+    suite's fixture repositories predate the key and exercise everything else
+    about a dispatch, so for THEM an absent declaration stands in as the explicit
+    `legacy-independent` mode -- the pool rule they were all written against.
+    A declared policy, valid or not, is read exactly as committed.
+
+    This is a TEST seam, never a product one: production has no default. A test
+    asserting the absent-policy refusal restores the real resolver itself
+    (`test_dispatcher_claude_credential_policy.py` does, for its whole module).
+    """
+    from livespec_orchestrator_beads_fabro.commands import (
+        _dispatcher_claude_credential_policy as credential_policy,
+    )
+    from returns.io import IOResult, IOSuccess
+    from returns.unsafe import unsafe_perform_io
+
+    real = credential_policy.resolve_claude_credential_policy
+    legacy = credential_policy.ClaudeCredentialPolicy(
+        mode=credential_policy.LEGACY_INDEPENDENT, slots=()
+    )
+
+    def legacy_when_undeclared(
+        *, cwd: Path
+    ) -> IOResult[Any, credential_policy.PolicySettingUnreadable]:
+        declared = credential_policy.read_dispatcher_config_value(
+            cwd=cwd, key=credential_policy.CLAUDE_CREDENTIAL_POLICY_KEY
+        )
+        if unsafe_perform_io(declared.value_or(legacy)) is None:
+            return IOSuccess(legacy)
+        return real(cwd=cwd)
+
+    monkeypatch.setattr(
+        credential_policy, "resolve_claude_credential_policy", legacy_when_undeclared
+    )
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -973,6 +1136,44 @@ def _hermetic_fabro_bin(monkeypatch: pytest.MonkeyPatch, _fabro_stub_bin: str) -
     monkeypatch.setenv("LIVESPEC_FABRO_BIN", _fabro_stub_bin)
 
 
+class _EveryHeading(frozenset[str]):
+    """A heading set that carries every heading, for a fixture with no spec tree."""
+
+    def __contains__(self, item: object) -> bool:
+        return True
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_origin_spec_headings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give a throwaway directory with no git repository of its own a spec tree to read.
+
+    The Definition-of-Done wall resolves References headings from the target
+    repository's `origin/master` (work-item bd-ib-ahtcng), which a test's bare
+    `tmp_path` fixture directory has neither of: it is a plain directory under
+    the temp root's shared worktree, not a clone with an origin. The honest
+    stand-in for such a directory is its own `SPECIFICATION/` working tree, which
+    is the only spec tree the fixture ever built. A fixture that never built one
+    has nothing to grade a reference against, so every reference resolves rather
+    than a refusal the test is not about being invented. A directory that IS a git
+    repository (it carries its own `.git`) takes the real remote read, so a test
+    that wants origin behavior builds an origin and gets exactly that.
+    """
+
+    def _read(*, repo: Path) -> frozenset[str] | OriginSpecUnreadable:
+        if (repo / ".git").exists():
+            return origin_spec_h2_headings(repo=repo)
+        if not (repo / "SPECIFICATION").is_dir():
+            return _EveryHeading()
+        headings: set[str] = set()
+        for path in sorted((repo / "SPECIFICATION").glob("*.md")):
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.startswith("## "):
+                    headings.add(f"## {line[3:].strip()}")
+        return frozenset(headings)
+
+    monkeypatch.setattr(_dod_findings, "origin_spec_h2_headings", _read)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _hermetic_source_checkout(tmp_path_factory: pytest.TempPathFactory) -> None:
     """Make pytest's temp root a real, origin-reachable git worktree.
@@ -1106,6 +1307,22 @@ def server_cancel(monkeypatch: pytest.MonkeyPatch) -> ServerCancel:
     state = ServerCancel()
 
     class _Api:
+        def __init__(self, *, port: FabroPort) -> None:
+            self._port = port
+
+        def stream(
+            self, *, run_id: str, after: int | None, timeout_seconds: float
+        ) -> FabroHttpResult:
+            _ = after
+            events = self._port.events(run_id=run_id, timeout_seconds=timeout_seconds)
+            return FabroHttpResult(
+                status=200 if events.command.exit_code == 0 else 503,
+                body=events.command.stdout,
+                error=None,
+                payload=events.payload,
+                succeeded=events.command.exit_code == 0,
+            )
+
         def cancel(self, *, run_id: str, timeout_seconds: float) -> FabroHttpResult:
             _ = (run_id, timeout_seconds)
             state.calls += 1
@@ -1119,7 +1336,7 @@ def server_cancel(monkeypatch: pytest.MonkeyPatch) -> ServerCancel:
                 status=503, body="", error="HTTPError: 503", payload=None, succeeded=False
             )
 
-    monkeypatch.setattr(FabroPort, "server_api", lambda _self: _Api())
+    monkeypatch.setattr(FabroPort, "server_api", lambda port: _Api(port=port))
     return state
 
 
@@ -1180,3 +1397,19 @@ def resolve_test_acp_nodes() -> ResolveAcpNodes:
         return resolution
 
     return _resolve
+
+
+@pytest.fixture(autouse=True)
+def _tmp_path_stays_removable(tmp_path: Path) -> Iterator[None]:
+    """Give a passing test's `tmp_path` tree back its write permission before pytest removes it.
+
+    pytest removes a passing test's `tmp_path` directory under the `failed` retention
+    policy with `ignore_errors=True`, so a tree a fixture left non-writable (a git
+    repository's 0444 objects under 0555 directories) is silently NOT removed and its
+    files stay in /tmp until the host runs out of inodes (livespec-dev-tooling-jxhi63,
+    2026-11-16). This fixture requests `tmp_path`, so it tears down first and restores
+    the owner write bit on every directory in the tree.
+    """
+    yield
+    for directory, _subdirectories, _files in os.walk(tmp_path):
+        Path(directory).chmod(Path(directory).stat().st_mode | 0o700)

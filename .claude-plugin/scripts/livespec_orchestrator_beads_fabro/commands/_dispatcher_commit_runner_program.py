@@ -10,6 +10,11 @@ prompts direct every commit through it:
   its own session so it outlives the tool call, and prints the run id without
   waiting. It refuses `--no-verify` (and the bundled `-n`), and refuses while
   an earlier run is still running, naming that run.
+  An amend started over engine checkpoint commits that sit above an open Red
+  is first moved onto that Red (`git reset --soft`, keeping the checkpoints'
+  tree changes staged), so a re-entered turn's Green amend amends the Red
+  rather than the top checkpoint (bd-ib-gisyvv). The commit arguments are
+  still run unchanged; only the commit they amend is the open Red.
 - `wait <run-id> --timeout-seconds <n>` blocks for at most `n` seconds and
   prints one JSON report: `running`, or the terminal state with the exit
   status, the resulting `HEAD` on `passed`, and the output's final lines.
@@ -29,10 +34,14 @@ program prints back off the run's recorded tool output through
 `DetachedCommitRunner` state machine; the report's JSON keys are therefore the
 contract between the two halves, and `REPORT_*` below names them once.
 
-IT CHANGES NO ENVIRONMENT. The clause forbids setting any variable that skips
-or relaxes a check, so the worker inherits the agent's environment as it is;
-stdin is closed only so that a commit that would open an editor fails rather
-than waiting forever on a terminal nobody holds.
+IT SETS NO VARIABLE, AND REMOVES ONE. The clause forbids setting any variable
+that skips or relaxes a check, so the worker passes the agent's environment on
+as it is, except that `LIVESPEC_AGENT_STAGE` is dropped: that variable only
+activates the publication guard of the projected `push_origin` and `gh`
+wrapper, which an agent's own call must meet, and a tree's test suite run by
+the commit hook must not (Scenario 326). The hook reads no such variable, so
+no check is relaxed. Stdin is closed only so that a commit that would open an
+editor fails rather than waiting forever on a terminal nobody holds.
 """
 
 from __future__ import annotations
@@ -40,12 +49,6 @@ from __future__ import annotations
 from livespec_orchestrator_beads_fabro.commands._dispatcher_node_timeout_cut import (
     NODE_CUT_COMMIT_RUN_SENTINEL,
     NODE_CUT_HOOK_RUN_SENTINEL,
-)
-from livespec_orchestrator_beads_fabro.commands._dispatcher_prepare_payload import (
-    PAYLOAD_ENV_VAR,
-    PrepareStep,
-    payload_write_command,
-    render_prepare_step,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_plugins import (
     sandbox_plugins_root_expansion,
@@ -55,12 +58,13 @@ __all__: list[str] = [
     "COMMIT_RUNNER_PROGRAM_FILENAME",
     "HOOK_BANNER_PATTERN",
     "REPORT_EXIT_CODE_KEY",
+    "REPORT_GIT_REFUSAL_LINE_KEY",
     "REPORT_HEAD_KEY",
+    "REPORT_HOOK_PASSED_KEY",
     "REPORT_HOOK_RAN_KEY",
     "REPORT_OUTPUT_TAIL_KEY",
     "REPORT_RUN_ID_KEY",
     "REPORT_STATE_KEY",
-    "commit_runner_prepare_steps_block",
     "commit_runner_program_path_expansion",
     "commit_runner_program_source",
 ]
@@ -68,16 +72,17 @@ __all__: list[str] = [
 COMMIT_RUNNER_PROGRAM_FILENAME = "livespec-commit-runner.py"
 
 # The lefthook banner a hook run prints, `│ 🥊 lefthook v1.13.6  hook: pre-commit │`
-# as measured; the hook name varies, the `hook: ` prefix does not. One pattern
-# for the direct-commit reader and the sandbox runner, so the two routes cannot
-# disagree about whether a hook ran.
-HOOK_BANNER_PATTERN = r"\blefthook\b.*\bhook: "
+# as measured.  One pattern captures the hook name for the sandbox runner's
+# verdict while preserving the shared reader's answer to whether any hook ran.
+HOOK_BANNER_PATTERN = r"\blefthook\b.*\bhook: \S+"
 
 REPORT_RUN_ID_KEY = "run_id"
 REPORT_STATE_KEY = "state"
 REPORT_EXIT_CODE_KEY = "exit_code"
 REPORT_HEAD_KEY = "head"
 REPORT_HOOK_RAN_KEY = "hook_ran"
+REPORT_HOOK_PASSED_KEY = "hook_passed"
+REPORT_GIT_REFUSAL_LINE_KEY = "git_refusal_line"
 REPORT_FAILED_TARGETS_KEY = "failed_targets"
 REPORT_OUTPUT_TAIL_KEY = "output_tail"
 
@@ -98,6 +103,7 @@ from pathlib import Path
 
 RUNNING = "running"
 NO_VERDICT = "no-verdict"
+STAGE_SETTLES = {"fix": "fix_commit_settle", "review_fix": "review_fix_commit_settle"}
 TAIL_LINES = 60
 BRIEF_TAIL_LINES = 80
 # Worst first: a settled set is described by its least settled run.
@@ -105,12 +111,27 @@ SETTLE_ORDER = (RUNNING, "failed", NO_VERDICT, "passed")
 # The gate aggregate's own list of failed recipes, ended by the first line that is not one.
 FAILED_TARGETS_HEADER = re.compile(r"^Failed targets \(\d+\):\s*$", re.MULTILINE)
 FAILED_TARGET_LINE = re.compile(r"^\s+-\s+(\S+)\s*$")
+# A message whose first line is a trailer: a hyphenated, capitalised key and its colon. A
+# conventional-commit type is one lowercase word, so it never reads as one.
+TRAILER_SUBJECT = re.compile(r"^[A-Z][A-Za-z0-9]*(-[A-Za-z0-9]+)+:(\s|$)")
 # git commit short options whose value follows them, so a bundle ends there.
 VALUE_SHORT_OPTIONS = "mFCct"
 # Short options whose OPTIONAL value is attached (`-uno`), so a bundle ends there too.
 ATTACHED_VALUE_SHORT_OPTIONS = "uS"
 # The repository hook's own banner; a commit whose output lacks it ran no hook.
 HOOK_BANNER = re.compile(__HOOK_BANNER__)
+# The aggregate's terminal passing verdict, which Git may follow with its own refusal.
+HOOK_PASSED = re.compile(r"^All [0-9]+ targets passed\.?$", re.MULTILINE)
+# A just recipe is the most specific name lefthook prints for a failed command.
+HOOK_REFUSAL_RECIPE = re.compile(
+    r"^error: Recipe [`']?([^`'\s]+)[`']? failed", re.MULTILINE
+)
+# Lefthook's closing summary marks a failed command with the boxing glove, `🥊 name (1.2 seconds)`,
+# and a passed one with a check mark; the banner's own glove is boxed and never starts a line.
+LEFTHOOK_FAILED_COMMAND = re.compile("^\U0001f94a (\\S+) \\(", re.MULTILINE)
+LEFTHOOK_SUMMARY_ENTRY = re.compile(r"^\S+ \S+ \([0-9.]+ seconds\)\s*$", re.MULTILINE)
+# A structured event line a check or hook printed, never a line Git printed.
+STRUCTURED_EVENT_LINE = re.compile(r"\{.*\}")
 # The two lines `cut-settle` prints for the host to read; one spelling, substituted.
 CUT_RUN_SENTINEL = "__CUT_RUN_SENTINEL__"
 CUT_HOOK_SENTINEL = "__CUT_HOOK_SENTINEL__"
@@ -123,6 +144,26 @@ OPERATION_HOOKS = {
 GIT_VALUE_OPTIONS = ("-c", "-C", "--git-dir", "--work-tree", "--namespace", "--exec-path")
 TICKS = os.sysconf("SC_CLK_TCK")
 STOP_GRACE_SECONDS = 10.0
+# An engine checkpoint's subject, `fabro(<run-id>): <node> (<status>)`.
+ENGINE_CHECKPOINT_SUBJECT = re.compile(r"^fabro\([^)]*\): ")
+# The red_green_replay trailers that make a commit an open Red: Red without Green.
+TDD_RED_TRAILER = "TDD-Red-Test-File-Checksum:"
+TDD_GREEN_TRAILER = "TDD-Green-Verified-At:"
+FOLDED_CHECKPOINTS_SENTINEL = "LIVESPEC_COMMIT_RUNNER_FOLDED_CHECKPOINTS"
+# Every commit-refusal brief's failing-file section (contracts.md "Every
+# commit-refusal re-entry brief names the failing files from the full recorded
+# output"): at most this many files, each read from the failed targets' own
+# reports in the FULL output, never from its final lines.
+FAILING_FILE_CAP = 40
+COVERAGE_TARGETS = frozenset({"check-per-file-coverage", "check-check-coverage-incremental"})
+LLOC_TARGETS = frozenset({"check-file-lloc"})
+# A coverage table row: name, statements, misses, optional branch columns, cover, missing.
+COVERAGE_ROW = re.compile(
+    r"^(?P<name>\S+)\s+\d+\s+\d+(?:\s+\d+\s+\d+)?\s+(?P<cover>\d+(?:\.\d+)?)%"
+    r"(?:\s+(?P<missing>\S.*?))?\s*$"
+)
+BELOW_COVERAGE_EVENT = "file below 100% coverage"
+LLOC_EVENT_PREFIX = "file LLOC exceeds"
 
 
 class RunnerRefusal(Exception):
@@ -142,6 +183,70 @@ def runs_directory():
 
 def state_path(directory, run_id):
     return directory / (run_id + ".json")
+
+
+def waited_running_path(directory, stage):
+    return directory / "waited-running" / (stage + ".json")
+
+
+def waited_running_runs(directory, stage):
+    path = waited_running_path(directory, stage)
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return value if isinstance(value, list) and all(isinstance(item, str) for item in value) else []
+
+
+def remember_running_wait(directory, stage, run_id):
+    runs = waited_running_runs(directory, stage)
+    if run_id not in runs:
+        runs.append(run_id)
+    path = waited_running_path(directory, stage)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(runs) + "\n", encoding="utf-8")
+
+
+def reset_running_waits(directory, stage):
+    if stage in STAGE_SETTLES:
+        waited_running_path(directory, stage).unlink(missing_ok=True)
+
+
+def open_wait_path(directory, run_id):
+    return directory / "open-waits" / (run_id + ".json")
+
+
+def claim_open_wait(directory, run_id):
+    """Record this process's wait as the run's one open wait, or None when another is open."""
+    path = open_wait_path(directory, run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    own = process_table("/proc").get(os.getpid())
+    claim = {"pid": os.getpid(), "start_ticks": own[4] if own is not None else None}
+    staged = path.with_name(path.name + "." + str(os.getpid()) + ".tmp")
+    staged.write_text(json.dumps(claim, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        while True:
+            try:
+                # A hard link is atomic and fails if the name exists, so only one wait claims.
+                os.link(staged, path)
+            except FileExistsError:
+                if open_wait_owner_alive(path):
+                    return None
+                # The owner was killed before it could release the claim, so it is not open.
+                path.unlink(missing_ok=True)
+            else:
+                return path
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+def open_wait_owner_alive(path):
+    claim = read_record(path) or {}
+    pid, start_ticks = claim.get("pid"), claim.get("start_ticks")
+    if not isinstance(pid, int):
+        return False
+    owner = process_table("/proc").get(pid)
+    return owner is not None and owner[0] != "Z" and owner[4] == start_ticks
 
 
 def read_record(path):
@@ -261,6 +366,71 @@ def skips_hooks(arguments):
     return False
 
 
+def amends(arguments):
+    """True when an ordinary commit's arguments ask for `--amend` (or an abbreviation)."""
+    for argument in arguments:
+        if argument == "--":
+            return False
+        if argument.startswith("--ame") and "--amend".startswith(argument):
+            return True
+    return False
+
+
+def carries_trailer(message, trailer):
+    return any(line.startswith(trailer) for line in message.splitlines())
+
+
+def open_red_under_checkpoints():
+    """The open Red commit under one or more engine checkpoints at HEAD, and their count.
+
+    Walks first-parent from HEAD over engine checkpoint commits. None when HEAD is
+    not a checkpoint, when a checkpoint in the chain is a merge (folding it would
+    flatten the merged-in side), when the first authored commit is not an open Red,
+    or when a merge, rebase or cherry-pick is in progress.
+    """
+    if operation_in_progress() is not None:
+        return None
+    if (runs_directory().parent / "CHERRY_PICK_HEAD").exists():
+        return None
+    folded, commit = 0, "HEAD"
+    while True:
+        line = git_output("rev-list", "--parents", "-n", "1", commit).split()
+        sha, parents = line[0], line[1:]
+        message = git_output("log", "-1", "--format=%B", sha)
+        if ENGINE_CHECKPOINT_SUBJECT.match(message):
+            if len(parents) != 1:
+                return None
+            folded, commit = folded + 1, parents[0]
+            continue
+        if (
+            folded
+            and carries_trailer(message, TDD_RED_TRAILER)
+            and not carries_trailer(message, TDD_GREEN_TRAILER)
+        ):
+            return sha, folded
+        return None
+
+
+def fold_checkpoints_onto_open_red(arguments):
+    """Move an amend onto the open Red under engine checkpoints, keeping their tree staged."""
+    if not amends(arguments):
+        return
+    found = open_red_under_checkpoints()
+    if found is None:
+        return
+    red, folded = found
+    git_output("reset", "--soft", red)
+    print(
+        FOLDED_CHECKPOINTS_SENTINEL
+        + ": the amend now amends open Red commit "
+        + red
+        + ", folding "
+        + str(folded)
+        + " engine checkpoint commit(s) above it into the staged tree",
+        file=sys.stderr,
+    )
+
+
 def start(command, program):
     arguments = commit_arguments(command)
     if arguments is None:
@@ -274,9 +444,19 @@ def start(command, program):
         record = read_record(path)
         if record is not None and current_state(path, record) == RUNNING:
             raise RunnerRefusal("commit run " + path.stem + " is still running; wait on it first")
+    fold_checkpoints_onto_open_red(arguments)
     run_id = "commit-" + uuid.uuid4().hex
     path = state_path(directory, run_id)
-    write_record(path, {"state": RUNNING, "command": command, "root": root})
+    write_record(
+        path,
+        {
+            "state": RUNNING,
+            "command": command,
+            "root": root,
+            "start_head": git_output("rev-parse", "HEAD"),
+            "operation": operation_in_progress(),
+        },
+    )
     with path.with_suffix(".launch.log").open("w", encoding="utf-8") as log:
         worker = subprocess.Popen(
             [sys.executable, program, "worker", run_id],
@@ -290,6 +470,23 @@ def start(command, program):
     path.with_suffix(".pid").write_text(str(worker.pid) + "\n", encoding="utf-8")
     print(run_id)
     return 0
+
+
+def unauthored_commit(record):
+    """The commit a passed run made with no authored subject line, undone, else None.
+
+    The commit is undone with a soft reset to the head the run began from, so HEAD is where
+    the run started and the index still holds what the commit recorded.
+    """
+    start_head = record.get("start_head")
+    head = git_output("rev-parse", "HEAD")
+    if not isinstance(start_head, str) or head == start_head:
+        return None
+    subject = git_output("log", "-1", "--format=%s", head)
+    if subject and TRAILER_SUBJECT.match(subject) is None:
+        return None
+    run_git_operation("reset", "--soft", start_head)
+    return head
 
 
 def worker(run_id):
@@ -310,50 +507,113 @@ def worker(run_id):
             stdin=subprocess.DEVNULL,
             stdout=output,
             stderr=subprocess.STDOUT,
+            env={k: v for k, v in os.environ.items() if k != "LIVESPEC_AGENT_STAGE"},
             check=False,
         )
     if result.returncode < 0:
         write_record(path, {"state": NO_VERDICT, "signal": -result.returncode})
         return 1
     text = path.with_suffix(".output").read_text(encoding="utf-8", errors="replace")
-    terminal = {"state": "passed" if result.returncode == 0 else "failed"}
-    terminal["exit_code"] = result.returncode
+    exit_code = result.returncode
+    subjectless = unauthored_commit(record) if exit_code == 0 else None
+    if subjectless is not None:
+        # Git ran the commit-msg hook BEFORE its empty-message check, so a hook that appends a
+        # trailer turned an empty message into a commit. It is not one: undo it.
+        text += (
+            "LIVESPEC_COMMIT_NO_AUTHORED_SUBJECT: commit " + subjectless
+            + " has no authored subject line (its first message line is a trailer or empty);"
+            + " HEAD was restored to " + str(record.get("start_head"))
+            + ", so no commit was made\n"
+        )
+        path.with_suffix(".output").write_text(text, encoding="utf-8")
+        exit_code = 1
+    terminal = {"state": "passed" if exit_code == 0 else "failed"}
+    for key in ("start_head", "operation"):
+        if record.get(key) is not None:
+            terminal[key] = record[key]
+    if subjectless is not None:
+        terminal["no_authored_subject"] = subjectless
+    terminal["exit_code"] = exit_code
     terminal["hook_ran"] = HOOK_BANNER.search(text) is not None
-    if result.returncode != 0:
-        terminal["failed_targets"] = failed_targets(text)
-    if result.returncode == 0:
+    if terminal["hook_ran"] and hook_passed_output(text):
+        terminal["hook_passed"] = True
+        refusal = git_refusal_line(text) if exit_code != 0 else None
+        if refusal is not None:
+            terminal["git_refusal_line"] = refusal
+    if exit_code != 0:
+        terminal["failed_targets"] = targets_for_refusal(text)
+    if exit_code == 0:
         terminal["head"] = git_output("rev-parse", "HEAD")
     write_record(path, terminal)
     return 0
 
 
-def report(run_id, path, record):
+def report_payload(run_id, path, record):
     record, state = settled(path, record)
     payload = {"run_id": run_id, "state": state}
     if state != RUNNING:
         payload["exit_code"] = record.get("exit_code")
         payload["head"] = record.get("head")
         payload["hook_ran"] = record.get("hook_ran") is True
+        output = full_output(path)
+        if hook_passed(record, output):
+            payload["hook_passed"] = True
+            refusal = recorded_git_refusal(record, output) if state == "failed" else None
+            if refusal is not None:
+                payload["git_refusal_line"] = refusal
         if state == "failed":
             targets = record.get("failed_targets")
             payload["failed_targets"] = (
-                targets if isinstance(targets, list) else failed_targets(full_output(path))
+                targets if isinstance(targets, list) else targets_for_refusal(output)
             )
         payload["output_tail"] = output_tail(path)
+    return payload, state
+
+
+def report(run_id, path, record):
+    payload, _ = report_payload(run_id, path, record)
     print(json.dumps(payload, sort_keys=True))
     return 0
 
 
 def wait(run_id, timeout_seconds):
-    path = state_path(runs_directory(), run_id)
-    deadline = time.monotonic() + max(0.0, timeout_seconds)
-    while True:
+    directory = runs_directory()
+    path = state_path(directory, run_id)
+    stage = os.environ.get("LIVESPEC_AGENT_STAGE")
+    settle_node = STAGE_SETTLES.get(stage)
+    if settle_node is not None and run_id in waited_running_runs(directory, stage):
         record = read_record(path)
         if record is None:
             raise RunnerRefusal("no commit run " + run_id + " is recorded in this repository")
-        if current_state(path, record) != RUNNING or time.monotonic() >= deadline:
-            return report(run_id, path, record)
-        time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+        state = current_state(path, record)
+        raise RunnerRefusal(
+            "commit run " + run_id + " already reported running during " + stage
+            + " stage visit; current state is " + state + "; " + settle_node + " will wait on it"
+        )
+    record = read_record(path)
+    if record is None:
+        raise RunnerRefusal("no commit run " + run_id + " is recorded in this repository")
+    marker = claim_open_wait(directory, run_id)
+    if marker is None:
+        raise RunnerRefusal(
+            "commit run " + run_id + " is " + current_state(path, record)
+            + "; another wait on it is open, so this wait returns at once"
+        )
+    try:
+        deadline = time.monotonic() + max(0.0, timeout_seconds)
+        while True:
+            record = read_record(path)
+            if record is None:
+                raise RunnerRefusal("no commit run " + run_id + " is recorded in this repository")
+            if current_state(path, record) != RUNNING or time.monotonic() >= deadline:
+                payload, state = report_payload(run_id, path, record)
+                if settle_node is not None and state == RUNNING:
+                    remember_running_wait(directory, stage, run_id)
+                print(json.dumps(payload, sort_keys=True))
+                return 0
+            time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+    finally:
+        marker.unlink(missing_ok=True)
 
 
 def full_output(path):
@@ -377,6 +637,155 @@ def failed_targets(text):
     return targets
 
 
+def targets_for_refusal(text):
+    """The aggregate list, or the later hook command that refused the commit."""
+    targets = failed_targets(text)
+    if targets:
+        return targets
+    target = hook_refusal_target(text)
+    return [target] if target is not None else []
+
+
+def structured_event(line):
+    """The JSON object a check logged on this line, or None."""
+    stripped = line.strip()
+    start = stripped.find("{")
+    if start < 0 or not stripped.endswith("}"):
+        return None
+    try:
+        value = json.loads(stripped[start:])
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def coverage_row_file(line):
+    """A coverage table row below 100% as (file, detail), or None."""
+    row = COVERAGE_ROW.match(line)
+    if row is None or row.group("name") == "TOTAL" or float(row.group("cover")) >= 100.0:
+        return None
+    missing = row.group("missing")
+    detail = "uncovered lines " + missing if missing else row.group("cover") + "% covered"
+    return row.group("name"), detail
+
+
+def event_file(event, coverage, lloc):
+    """A check's failing-file event as (file, detail), or None."""
+    name = event.get("file")
+    message = str(event.get("event", ""))
+    if not isinstance(name, str):
+        return None
+    if coverage and message == BELOW_COVERAGE_EVENT:
+        return name, (
+            str(event.get("missing_lines")) + " uncovered lines ("
+            + str(event.get("line_percent")) + "% covered)"
+        )
+    if lloc and message.startswith(LLOC_EVENT_PREFIX) and event.get("level") == "error":
+        return name, (
+            "LLOC " + str(event.get("lloc")) + " over the "
+            + str(event.get("hard_ceiling")) + "-line hard ceiling"
+        )
+    return None
+
+
+def failing_files(text, targets):
+    """Each failing file the failed targets' own reports name, first mention first.
+
+    Only a failed target's kind of report is read, so a coverage table printed by a
+    target that passed is never named; a table row's uncovered lines refine the
+    per-file coverage check's count for the same file.
+    """
+    coverage = bool(COVERAGE_TARGETS.intersection(targets))
+    lloc = bool(LLOC_TARGETS.intersection(targets))
+    found = {}
+    for line in text.splitlines():
+        row = coverage_row_file(line) if coverage else None
+        if row is None:
+            event = structured_event(line)
+            row = None if event is None else event_file(event, coverage, lloc)
+        if row is None:
+            continue
+        name = row[0][2:] if row[0].startswith("./") else row[0]
+        if name not in found or row[1].startswith("uncovered lines "):
+            found[name] = row[1]
+    return list(found.items())
+
+
+def failing_section(text):
+    """The ONE failed-target and failing-file section every commit-refusal brief carries."""
+    text = text.replace("\r", "")
+    targets = targets_for_refusal(text)
+    files = failing_files(text, targets)
+    lines = ["failed targets: " + (" ".join(targets) if targets else "none")]
+    if not files:
+        lines.append("failing files: none reported in the recorded output")
+    else:
+        lines.append("failing files (" + str(len(files)) + "):")
+        lines.extend("- " + name + ": " + detail for name, detail in files[:FAILING_FILE_CAP])
+        if len(files) > FAILING_FILE_CAP:
+            lines.append(str(len(files) - FAILING_FILE_CAP) + " further files omitted")
+    return "\n".join(lines) + "\n"
+
+
+def refusal_section(output_file):
+    """Print a recorded output's failing section, for the Red and Green command programs."""
+    try:
+        text = Path(output_file).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        text = ""
+    sys.stdout.write(failing_section(text))
+    return 0
+
+
+def last_passing_aggregate(text):
+    matches = list(HOOK_PASSED.finditer(text))
+    return matches[-1] if matches else None
+
+
+def hook_passed_output(text):
+    """True when the aggregate passed and no hook that began after it refused the commit."""
+    return last_passing_aggregate(text) is not None and hook_refusal_target(text) is None
+
+
+def hook_refusal_target(text):
+    """Name the check of a hook that began after the aggregate passed and then refused."""
+    passed = last_passing_aggregate(text)
+    if passed is None:
+        return None
+    later_hooks = list(HOOK_BANNER.finditer(text, passed.end()))
+    if not later_hooks:
+        return None
+    hook_output = text[later_hooks[-1].end() :]
+    recipe = HOOK_REFUSAL_RECIPE.search(hook_output)
+    if recipe is not None:
+        return recipe.group(1)
+    command = LEFTHOOK_FAILED_COMMAND.search(hook_output)
+    return command.group(1) if command is not None else None
+
+
+def git_refusal_line(text):
+    """The first line Git printed once every hook had finished its summary."""
+    passed = last_passing_aggregate(text)
+    if passed is None:
+        return None
+    entries = list(LEFTHOOK_SUMMARY_ENTRY.finditer(text, passed.end()))
+    start = entries[-1].end() if entries else passed.end()
+    for line in text[start:].splitlines():
+        stripped = line.strip()
+        if stripped and STRUCTURED_EVENT_LINE.fullmatch(stripped) is None:
+            return stripped
+    return None
+
+
+def hook_passed(record, output):
+    return record.get("hook_ran") is True and hook_passed_output(output)
+
+
+def recorded_git_refusal(record, output):
+    refusal = record.get("git_refusal_line")
+    return refusal if isinstance(refusal, str) else git_refusal_line(output)
+
+
 def brief_text(run_id, path, record, state, timeout_seconds):
     """The re-entry brief for the least settled commit run: what it is and what it showed."""
     named = "Commit run " + run_id + ", which the previous turn started through the commit runner"
@@ -398,10 +807,37 @@ def brief_text(run_id, path, record, state, timeout_seconds):
             + " seconds expired, so it has no verdict yet and no commit is known to exist.\n"
         )
     output = full_output(path)
-    targets = failed_targets(output)
     tail = "\n".join(output.splitlines()[-BRIEF_TAIL_LINES:])
+    if record.get("no_authored_subject"):
+        return (
+            "failed targets: none\n\n"
+            + named
+            + "ended FAILED: the commit it made, " + str(record.get("no_authored_subject"))
+            + ", has no authored subject line (its first message line is a trailer or empty), so"
+            " it was undone; HEAD is back at " + str(record.get("start_head"))
+            + " and no commit was made. Redo that commit through the runner with a non-empty"
+            " authored message (a commit-msg hook appends trailers to an empty one). Its own"
+            " error lines (the tail of its recorded output at "
+            + str(path.with_suffix(".output")) + "):\n\n" + tail + "\n"
+        )
+    if hook_passed(record, output):
+        refusal = recorded_git_refusal(record, output)
+        refusal_text = refusal if refusal is not None else "Git's refusal line was not captured"
+        return (
+            "failed targets: none\n\n"
+            + named
+            + "ended FAILED with exit status "
+            + str(record.get("exit_code"))
+            + "; the repository commit hook passed, and Git then refused the commit: "
+            + refusal_text
+            + "; no commit was made. Its own error lines (the tail of its recorded output at "
+            + str(path.with_suffix(".output"))
+            + "):\n\n"
+            + tail
+            + "\n"
+        )
     return (
-        "failed targets: " + (" ".join(targets) if targets else "none") + "\n\n"
+        failing_section(output) + "\n"
         + named + "ended FAILED with exit status " + str(record.get("exit_code"))
         + "; the repository commit hook "
         + ("ran" if record.get("hook_ran") is True else "did not run")
@@ -410,8 +846,114 @@ def brief_text(run_id, path, record, state, timeout_seconds):
     )
 
 
-def settle(timeout_seconds, brief_file):
-    """Wait live runs and brief the latest terminal hook refusal exactly once."""
+def commit_in_flight(path, proc_root="/proc"):
+    """True while a `git commit` of this run is itself still executing.
+
+    The worker outlives its commit by the instant it takes to write the verdict, so the
+    worker being alive does not mean the commit is still running.
+    """
+    try:
+        group = int(path.with_suffix(".pid").read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return False
+    table = process_table(proc_root)
+    if group not in table:
+        return False
+    return any(
+        table[pid][0] != "Z" and git_operation(argv_of(proc_root, pid)) == "commit"
+        for pid in (group, *descendants(table, group))
+    )
+
+
+def is_ancestor(commit):
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", commit, "HEAD"], capture_output=True, check=False
+    )
+    return result.returncode == 0
+
+
+def checkpointed_merge_parent(record):
+    """The commit an engine checkpoint merged in above a merge commit run's starting head.
+
+    A checkpoint made while the run was in flight commits the merge's index as a
+    two-parent commit and removes MERGE_HEAD, so the merged-in commit survives only as
+    the second parent of the oldest commit above the starting head that has the starting
+    head and one other commit as its parents. None when the run did not begin mid-merge
+    or no such commit exists.
+    """
+    start_head = record["start_head"]
+    if record.get("operation") != "merge":
+        return None
+    above = git_output("rev-list", "--parents", "--reverse", start_head + "..HEAD")
+    for line in above.splitlines():
+        parents = line.split()[1:]
+        if len(parents) == 2 and parents[0] == start_head:
+            return parents[1]
+    return None
+
+
+def reopen_merge(merged_in):
+    """Put back the merge state an engine checkpoint's commit removed."""
+    git_directory = runs_directory().parent
+    (git_directory / "MERGE_HEAD").write_text(merged_in + "\n", encoding="utf-8")
+    message = git_directory / "MERGE_MSG"
+    if not message.exists():
+        message.write_text("Merge commit '" + merged_in + "'\n", encoding="utf-8")
+
+
+def restore_starting_head(path, record):
+    """Put an in-flight amend back on the commit it began from, keeping its index.
+
+    Only while the commit is verifiably still running and HEAD still descends from the
+    commit it began from: a finished amend leaves a HEAD that does not, so its own
+    commit is never moved off the branch. A merge commit run whose merge an engine
+    checkpoint already committed gets that merge back in progress, so the run's commit
+    is again a merge commit of the starting head and the merged-in commit.
+    """
+    start_head = record.get("start_head")
+    if not isinstance(start_head, str):
+        return
+    if git_output("rev-parse", "HEAD") == start_head or not is_ancestor(start_head):
+        return
+    fresh = read_record(path)
+    if fresh is None or recorded_state(fresh) != RUNNING or not commit_in_flight(path):
+        return
+    if operation_in_progress() == "merge":
+        # `git reset --soft` refuses mid-merge, and any reset would delete MERGE_HEAD
+        # before the settle could see the merge: move only the branch tip back.
+        git_output("update-ref", "HEAD", start_head)
+        return
+    merged_in = checkpointed_merge_parent(record)
+    if merged_in is not None:
+        # MERGE_HEAD first: a soft reset would leave the merged tree staged with no merge
+        # open, and the run's commit would then be refused or flatten the merged-in side.
+        reopen_merge(merged_in)
+        git_output("update-ref", "HEAD", start_head)
+        return
+    git_output("reset", "--soft", start_head)
+
+
+def record_stopped_run(path, record):
+    """The record and state of a run just stopped, keeping a verdict it reached itself.
+
+    The running snapshot that led to the stop is stale by now: a worker that recorded
+    passed or failed before it was stopped keeps that verdict, and only a run still
+    recorded as running or as having ended without one is recorded as stopped.
+    """
+    fresh = read_record(path) or record
+    if recorded_state(fresh) in ("passed", "failed"):
+        return fresh, recorded_state(fresh)
+    stopped = {"state": NO_VERDICT, "stopped": True}
+    write_record(path, stopped)
+    return stopped, NO_VERDICT
+
+
+def settle_runs(timeout_seconds, brief_file, restore_head_before_wait, stage):
+    """Wait live runs and brief the latest terminal hook refusal exactly once.
+
+    Returns the settled state of the turn's commit run and the path of its record, or
+    (None, None) when none was recorded.
+    """
     directory = runs_directory()
     brief = Path(brief_file)
     live, records = [], []
@@ -425,15 +967,17 @@ def settle(timeout_seconds, brief_file):
     if not live:
         if not records:
             brief.unlink(missing_ok=True)
-            return 0
+            reset_running_waits(directory, stage)
+            return None, None
         path, record = max(records, key=lambda item: item[0].stat().st_mtime_ns)
         if (
             recorded_state(record) != "failed"
-            or record.get("hook_ran") is not True
+            or not (record.get("hook_ran") is True or record.get("no_authored_subject"))
             or record.get("settled") is True
         ):
             brief.unlink(missing_ok=True)
-            return 0
+            reset_running_waits(directory, stage)
+            return recorded_state(record), path
         write_record(path, {**record, "settled": True})
         brief.parent.mkdir(parents=True, exist_ok=True)
         brief.write_text(
@@ -441,7 +985,13 @@ def settle(timeout_seconds, brief_file):
             encoding="utf-8",
         )
         print(json.dumps({"settled": [{"run_id": path.stem, "state": "failed"}]}, sort_keys=True))
-        return 0
+        reset_running_waits(directory, stage)
+        return "failed", path
+    if restore_head_before_wait:
+        for path in live:
+            record = read_record(path)
+            if record is not None and recorded_state(record) == RUNNING:
+                restore_starting_head(path, record)
     deadline = time.monotonic() + max(0.0, timeout_seconds)
     outcomes = []
     for path in live:
@@ -451,12 +1001,14 @@ def settle(timeout_seconds, brief_file):
             if state != RUNNING or time.monotonic() >= deadline:
                 break
             time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
-        if state == NO_VERDICT:
+        if state == RUNNING and stop_run(path, "/proc"):
+            record, state = record_stopped_run(path, record)
+        elif state == NO_VERDICT:
             # Recorded, so a later settle does not brief this dead run a second time.
             write_record(path, {"state": NO_VERDICT})
         outcomes.append((path, record, state))
     path, record, state = min(outcomes, key=lambda one: SETTLE_ORDER.index(one[2]))
-    if state == "failed" and record.get("hook_ran") is True:
+    if state == "failed" and (record.get("hook_ran") is True or record.get("no_authored_subject")):
         write_record(path, {**record, "settled": True})
     brief.parent.mkdir(parents=True, exist_ok=True)
     brief.write_text(
@@ -465,6 +1017,160 @@ def settle(timeout_seconds, brief_file):
     )
     settled_runs = [{"run_id": one.stem, "state": status} for one, _, status in outcomes]
     print(json.dumps({"settled": settled_runs}, sort_keys=True))
+    reset_running_waits(directory, stage)
+    return state, path
+
+
+def operation_in_progress():
+    """The merge or rebase a turn left in progress in this worktree, or None."""
+    git_directory = runs_directory().parent
+    if any((git_directory / name).is_dir() for name in ("rebase-merge", "rebase-apply")):
+        return "rebase"
+    if (git_directory / "MERGE_HEAD").is_file():
+        return "merge"
+    return None
+
+
+def attempt_git_operation(*argv):
+    """Run one git command that ends an operation; returns (completed, git's own output)."""
+    environment = {**os.environ, "GIT_EDITOR": "true", "GIT_SEQUENCE_EDITOR": "true"}
+    result = subprocess.run(
+        ["git", *argv], capture_output=True, text=True, check=False, env=environment
+    )
+    return result.returncode == 0, (result.stdout + result.stderr).strip()
+
+
+def run_git_operation(*argv):
+    return attempt_git_operation(*argv)[0]
+
+
+def stopped_pick():
+    """The pick a rebase stopped on and every path it left conflicted, or None.
+
+    None when no pick is recorded or no path is conflicted, so a continue that failed for
+    any other reason is still reported only as unresolved.
+    """
+    picked = subprocess.run(
+        ["git", "rev-parse", "--verify", "REBASE_HEAD"],
+        capture_output=True, text=True, check=False,
+    )
+    unmerged = subprocess.run(
+        ["git", "diff", "--name-only", "-z", "--diff-filter=U"],
+        capture_output=True, text=True, check=False,
+    )
+    paths = [path for path in unmerged.stdout.split("\0") if path]
+    if picked.returncode or not paths:
+        return None
+    pick = picked.stdout.strip()
+    subject = subprocess.run(
+        ["git", "log", "-1", "--format=%h %s", pick], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    return subject or pick, paths
+
+
+def undo_flattened_merge(path):
+    """Put the tree back on the head a failed merge commit run began from.
+
+    The engine's per-node checkpoint can commit the merge's index as a single-parent
+    commit, and may delete the merge's state files while doing it, so a failed run that
+    began mid-merge is undone from its own record rather than from MERGE_HEAD: HEAD, the
+    index and every tracked path return to the starting head. Once per run, so a later
+    settle never discards a later turn's work. Returns True when anything had to move.
+    """
+    record = read_record(path) if path is not None else None
+    start_head = (record or {}).get("start_head")
+    if record is None or not isinstance(start_head, str):
+        return False
+    if record.get("operation") != "merge" or record.get("operation_ended") is True:
+        return False
+    write_record(path, {**record, "operation_ended": True})
+    moved = (
+        git_output("rev-parse", "HEAD") != start_head
+        or not run_git_operation("diff", "--quiet", start_head)
+        or not run_git_operation("diff", "--cached", "--quiet", start_head)
+    )
+    return moved and run_git_operation("reset", "--hard", start_head)
+
+
+def stopped_rebase_brief(path, stopped):
+    """The re-entry brief for a passed commit run whose rebase continued onto a conflict."""
+    pick, paths = stopped
+    run = path.stem if path is not None else "the turn's commit run"
+    return (
+        "Commit run " + run + " PASSED mid-rebase, so its commit exists and stays on the"
+        " rebase's HEAD. The settle then ran `git rebase --continue`, which applied the"
+        " following picks and STOPPED on a conflict at pick " + pick + ". The rebase is"
+        " still in progress at that pick. Conflicted paths: " + ", ".join(paths) + ". Resolve"
+        " them, stage them, commit the resolution through the runner, and the next settle"
+        " continues the rebase; do not abort it.\n"
+    )
+
+
+def end_operation(state, stage, path=None):
+    """Leave no merge or rebase in progress once the turn's commit run has settled.
+
+    A FAILED run aborts the operation, which puts HEAD back where the operation began; a
+    PASSED run mid-rebase finishes the rebase instead, because the settled commit sits on
+    the rebase's detached HEAD and an abort would discard it. Any other state, and a passed
+    run with a merge in progress, leaves the tree alone. A failed merge commit run also has
+    its head, index and tracked files put back on the head it began from. A continue that
+    stops on a later conflicting pick leaves the rebase in progress at that pick, where the
+    settled commit stays reachable, and returns a brief naming the pick and its conflicted
+    paths; a command that does not complete journals git's own output. Returns the journal
+    lines and that brief (None when there is none).
+    """
+    if state not in ("failed", "passed"):
+        return [], None
+    named = "stage " + (stage or "implement")
+    lines = []
+    stopped = None
+    for _ in range(3):
+        operation = operation_in_progress()
+        if operation is None or (state == "passed" and operation != "rebase"):
+            break
+        flag = "--abort" if state == "failed" else "--continue"
+        done, said = attempt_git_operation(operation, flag)
+        verb = "aborted" if state == "failed" else "finished"
+        if not done:
+            lines.append(
+                "LIVESPEC_COMMIT_SETTLE_OPERATION_UNRESOLVED: " + named + ": `git " + operation
+                + " " + flag + "` did not complete, so the in-progress " + operation
+                + " was left in place; git said:\n" + (said or "(no output)")
+            )
+            if state == "passed":
+                found = stopped_pick()
+                stopped = stopped_rebase_brief(path, found) if found is not None else None
+            break
+        lines.append(
+            "LIVESPEC_COMMIT_SETTLE_OPERATION_" + verb.upper() + ": " + named + ": " + verb
+            + " the in-progress " + operation + " after the " + state
+            + " commit run; HEAD is " + git_output("rev-parse", "HEAD")
+        )
+    if state == "failed" and undo_flattened_merge(path) and not lines:
+        lines.append(
+            "LIVESPEC_COMMIT_SETTLE_OPERATION_ABORTED: " + named + ": aborted the in-progress"
+            + " merge after the failed commit run; HEAD is " + git_output("rev-parse", "HEAD")
+        )
+    return lines, stopped
+
+
+def settle(timeout_seconds, brief_file, restore_head_before_wait=False, stage=None):
+    """Settle the turn's commit runs, then hand the next node a tree with no operation open.
+
+    The one exception is a rebase that stopped on a later conflicting pick: the brief then
+    reads `failed`, so the fix node re-enters on it with the rebase still open at that pick.
+    """
+    state, path = settle_runs(timeout_seconds, brief_file, restore_head_before_wait, stage)
+    lines, stopped = end_operation(state, stage, path)
+    for line in lines:
+        print(line, file=sys.stderr)
+    brief = Path(brief_file)
+    if stopped is not None:
+        brief.parent.mkdir(parents=True, exist_ok=True)
+        brief.write_text("failed\n" + stopped + "\n".join(lines) + "\n", encoding="utf-8")
+    elif lines and state == "failed" and brief.exists():
+        with brief.open("a", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\nRedo the integration that commit run recorded.\n")
     return 0
 
 
@@ -582,19 +1288,38 @@ def reap(proc_root, pids):
             return
 
 
+def launch_window_group(table, proc_root, run_id):
+    """The pid of a live worker of `run_id` found by its own argv, or None.
+
+    `start` writes the pid file only after it launches the worker, so a run read in that
+    window has a worker and no pid file; the worker's argv still names its run.
+    """
+    for pid, entry in table.items():
+        if entry[0] != "Z" and argv_of(proc_root, pid)[-2:] == ["worker", run_id]:
+            return pid
+    return None
+
+
 def stop_run(path, proc_root):
-    """Stop every process of one commit run: its session, its group and its descendants."""
+    """Stop every process of one commit run: its session, its group and its descendants.
+
+    Returns True when it found a process to stop and False when it had no target, so the
+    caller never records a stop that was not performed.
+    """
+    table = process_table(proc_root)
     try:
         group = int(path.with_suffix(".pid").read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
-        return
-    table = process_table(proc_root)
+        group = launch_window_group(table, proc_root, path.stem)
+        if group is None:
+            return False
     members = {
         pid for pid, entry in table.items() if entry[0] != "Z" and group in (entry[2], entry[3])
     }
     if group in table:
         members.update(descendants(table, group))
     reap(proc_root, sorted(members))
+    return True
 
 
 def in_scope(proc_root, pid, scope):
@@ -674,8 +1399,12 @@ def main(argv, program):
     settle_parser = operations.add_parser("settle")
     settle_parser.add_argument("--timeout-seconds", required=True, type=float)
     settle_parser.add_argument("--brief-file", required=True)
+    settle_parser.add_argument("--restore-head-before-wait", action="store_true")
+    settle_parser.add_argument("--stage", choices=tuple(STAGE_SETTLES))
     cut_parser = operations.add_parser("cut-settle")
     cut_parser.add_argument("--timeout-seconds", required=True, type=float)
+    section_parser = operations.add_parser("refusal-section")
+    section_parser.add_argument("output_file")
     worker_parser = operations.add_parser("worker")
     worker_parser.add_argument("run_id")
     args = parser.parse_args(argv)
@@ -686,9 +1415,16 @@ def main(argv, program):
         if args.operation == "wait":
             return wait(args.run_id, args.timeout_seconds)
         if args.operation == "settle":
-            return settle(args.timeout_seconds, args.brief_file)
+            return settle(
+                args.timeout_seconds,
+                args.brief_file,
+                restore_head_before_wait=args.restore_head_before_wait,
+                stage=args.stage,
+            )
         if args.operation == "cut-settle":
             return cut_settle(args.timeout_seconds)
+        if args.operation == "refusal-section":
+            return refusal_section(args.output_file)
         return worker(args.run_id)
     except RunnerRefusal as refusal:
         print("livespec commit runner: " + str(refusal), file=sys.stderr)
@@ -712,17 +1448,3 @@ def commit_runner_program_source() -> str:
 def commit_runner_program_path_expansion() -> str:
     """The sandbox-local runner path shared by the prepare step and the prompts."""
     return f"{sandbox_plugins_root_expansion()}/{COMMIT_RUNNER_PROGRAM_FILENAME}"
-
-
-def commit_runner_prepare_steps_block() -> str:
-    """Render the prepare step that writes the runner before any ACP stage runs."""
-    root = sandbox_plugins_root_expansion()
-    path = commit_runner_program_path_expansion()
-    step = PrepareStep(
-        script=f'set -eu\nmkdir -p "{root}"\n' + payload_write_command(path_word=f'"{path}"'),
-        env={PAYLOAD_ENV_VAR: commit_runner_program_source()},
-    )
-    return (
-        "\n# --- Dispatcher-materialized detached commit runner (bd-ib-atyefi) ---\n"
-        + render_prepare_step(step=step)
-    )

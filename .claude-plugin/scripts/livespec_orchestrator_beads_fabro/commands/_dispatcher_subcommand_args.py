@@ -68,6 +68,7 @@ def add_codex_cred_refresh_arguments(*, parser: argparse.ArgumentParser) -> None
 
 
 def add_claude_cred_status_arguments(*, parser: argparse.ArgumentParser) -> None:
+    _ = parser.add_argument("--repo", dest="repo", default=None)
     _ = parser.add_argument("--json", dest="as_json", action="store_true")
 
 
@@ -121,6 +122,16 @@ def add_reconcile_merged_arguments(*, parser: argparse.ArgumentParser) -> None:
             "effective acceptance criteria instead of refusing it; proceeds only "
             "when the merged PR resolves and its merge commit is an ancestor of the "
             "default branch, and leaves the item untouched on any non-PASS verdict"
+        ),
+    )
+    _ = parser.add_argument(
+        "--pr",
+        dest="pr",
+        type=int,
+        default=None,
+        help=(
+            "reconcile against this one merged pull request of the item instead of "
+            "ranking the merged pull requests that name it"
         ),
     )
     _ = parser.add_argument("--json", dest="as_json", action="store_true")

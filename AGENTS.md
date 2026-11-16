@@ -29,7 +29,7 @@ commit as failures of the workflow, not as acceptable stopping points.
 2. If the change will modify tracked files, create a dedicated worktree from the
    primary checkout's `master` and do all edits there. Every worktree lives under
    the per-user root `~/.worktrees/<repo>/<branch>` — NEVER as a peer of the
-   clones under `/data/projects`, so the workspace holds only first-class clones.
+   clones under `~/workspace`, so the workspace holds only first-class clones.
    Create it with the worktree-discipline pack's recipe, which adds the
    worktree under that root, provisions the gitignored pack into it, and
    runs the hydrate hook (run it from the primary checkout):
@@ -38,7 +38,7 @@ commit as failures of the workflow, not as acceptable stopping points.
    mise exec -- just worktree-create <branch>
    ```
 
-   A raw `mise exec -- git -C /data/projects/livespec-orchestrator-beads-fabro worktree add -b <branch>
+   A raw `mise exec -- git -C "$HOME/workspace/livespec-orchestrator-beads-fabro" worktree add -b <branch>
    "$HOME/.worktrees/livespec-orchestrator-beads-fabro/<branch>" master` also yields a usable
    worktree — the pre-commit and pre-push hooks install the pack before
    any gate reads it, so the worktree can commit and push with no
@@ -94,19 +94,7 @@ present:
 - **A running Dolt `sql-server`** reachable over **TCP `127.0.0.1:3307`**. Family
   tenants force TCP (not the unix socket); `.beads/config.yaml` carries `dolt.*`
   host/port keys with NO `socket` key.
-- **The tenant password** in env as a single **bare `BEADS_DOLT_PASSWORD`** —
-  injected by THIS project's configured env wrapper. A FAMILY tenant shares the
-  one family password via the family 1Password Environment wrapper
-  `with-livespec-env.sh` (canonical copy at
-  `/data/projects/1password-env-wrapper/with-livespec-env.sh`); an INDEPENDENT
-  (non-family) tenant injects its own tenant password from its own 1Password
-  Environment via its own `with-<project>-env.sh` wrapper. Either way `bd`
-  consumes the same bare var — there is NO per-tenant
-  `BEADS_DOLT_PASSWORD_<tenant>` variable and NO per-tenant→bare mapping. Real
-  isolation comes from the per-tenant SQL user + DB-scoped grant, not from
-  password distinctness or wrapper identity. Secrets are probe-only — `printenv
-  NAME | wc -c`, never echo values — and NEVER committed to `.livespec.jsonc` or
-  `.beads/`.
+- **The tenant password** is injected as the single bare `BEADS_DOLT_PASSWORD` by this project’s configured wrapper. Family tenants share the family password through `/usr/local/bin/with-livespec-env.sh --`; independent tenants retain their own wrapper and password. `bd` consumes the bare variable without per-tenant suffixes or mapping. Isolation comes from the per-tenant SQL user and DB-scoped grant, not wrapper identity. Probe secrets without printing values, and never commit them to `.livespec.jsonc` or `.beads/`.
 - **The `.beads/` pointer files**: `config.yaml` (committed; the `dolt.*` server
   keys) and `metadata.json` (gitignored, regenerable). NEVER run `bd init` inside
   a primary checkout or worktree — it auto-commits and clobbers `.beads/`.
@@ -281,6 +269,16 @@ Plugins, sessions and hosts:
   reload plugins in your own pane → `.ai/plugin-cache-lease-and-rebind.md`.
 - You are driving this repository from Codex or pi →
   `.ai/codex-dogfooding.md` or `.ai/pi-dogfooding.md`.
+- You are about to message, ask, direct or answer another agent session on any
+  host, or run `herdr pane send-text`, `herdr pane run`, `herdr agent prompt` or
+  `tmux send-keys` against a pane you did not create → the fleet's distributed
+  SendMessage protocol, https://github.com/livespec-ai/livespec-dev-tooling/blob/master/%2Eai/distributed-sendmessage-protocol.md.
+  Prefer `SendMessage` (across machines via Remote Control) to message another
+  Claude session, because text typed into its pane can interrupt the
+  maintainer (maintainer ruling 2026-11-14). Typing into a pane is still
+  allowed and nothing blocks it; use it when necessary, such as for a slash
+  command, a picker, a session `SendMessage` cannot reach, or a Codex or pi
+  seat.
 - You need a second agent session for a bounded job, or to message another
   session → `.ai/herdr-helper-sessions.md`.
 - You are opening, moving or placing a herdr tab → `.ai/herdr-plan-tabs.md`.

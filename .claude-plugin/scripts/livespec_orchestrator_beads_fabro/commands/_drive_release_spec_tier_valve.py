@@ -35,6 +35,7 @@ nothing fuzzier, because the attestation is a claim about one clause.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -42,20 +43,28 @@ from returns.pipeline import is_successful
 from returns.unsafe import unsafe_perform_io
 
 from livespec_orchestrator_beads_fabro._store_comments import append_work_item_comment
-from livespec_orchestrator_beads_fabro.commands._dispatcher_dispatch_lock import (
-    live_dispatch_lock,
-)
-from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_gate import (
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_comments import (
     item_comment_bodies,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_io import JournalFile
-from livespec_orchestrator_beads_fabro.commands._drive_merge_hold_arm_guard import (
-    observe_item_run_liveness,
+from livespec_orchestrator_beads_fabro.commands._dispatcher_invoker import FALLBACK_SOURCE
+from livespec_orchestrator_beads_fabro.commands._dispatcher_io import (
+    JournalFile,
+    ShellCommandRunner,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_identity import (
+    computed_publishing_identity,
+)
+from livespec_orchestrator_beads_fabro.commands._drive_release_spec_tier_activity import (
+    release_activity_refusal,
 )
 from livespec_orchestrator_beads_fabro.commands._drive_valve_result import (
     invalid_source_state,
     valve_refusal,
     valve_success,
+)
+from livespec_orchestrator_beads_fabro.commands._intake_valve_claim_writes import (
+    ClaimWriteRefused,
+    valve_claim_refusal,
 )
 from livespec_orchestrator_beads_fabro.commands._spec_change_tier import SPEC_DIRNAME
 from livespec_orchestrator_beads_fabro.commands._spec_change_tier_gate import (
@@ -130,15 +139,14 @@ def release_spec_tier(  # noqa: PLR0913 - each argument is one input of the act.
     if isinstance(resolved, dict):
         return resolved
     version, clause = resolved
+    actor = _attestation_actor(repo=repo, identity=identity)
     append_work_item_comment(
         path=config,
         work_item_id=item.id,
-        body=attestation_comment(
-            item=item, actor=identity.invoker, clause=clause, spec_version=version
-        ),
+        body=attestation_comment(item=item, actor=actor, clause=clause, spec_version=version),
     )
     record = _journal_attestation(
-        repo=repo, identity=identity, item=item, clause=clause, version=version
+        repo=repo, identity=identity, actor=actor, item=item, clause=clause, version=version
     )
     cleared = classify_item_spec_change_tier(item=item, repo=repo, path=config, stage=STAGE_RELEASE)
     if cleared.recorded is None or cleared.is_spec_change:
@@ -180,7 +188,13 @@ def _eligibility_refusal(
     standing = _standing_refusal(config=config, item=item, aid=aid)
     if standing is not None:
         return standing
-    return _activity_refusal(repo=repo, item=item, aid=aid, runner=runner)
+    return release_activity_refusal(
+        repo=repo,
+        item=item,
+        aid=aid,
+        runner=runner,
+        action=RELEASE_SPEC_TIER_ACTION,
+    )
 
 
 def _standing_refusal(*, config: StoreConfig, item: WorkItem, aid: str) -> dict[str, Any] | None:
@@ -203,43 +217,18 @@ def _standing_refusal(*, config: StoreConfig, item: WorkItem, aid: str) -> dict[
     return None
 
 
-def _activity_refusal(
-    *, repo: Path, item: WorkItem, aid: str, runner: HumanValveRunner | None
-) -> dict[str, Any] | None:
-    """Refuse while a run of the item is live, unmeasured, or its ownership lock is held."""
-    liveness = observe_item_run_liveness(repo=repo, work_item_id=item.id, runner=runner)
-    if not liveness.observed:
-        return valve_refusal(
-            aid=aid,
-            wid=item.id,
-            err="live-run",
-            msg=(
-                f"{RELEASE_SPEC_TIER_ACTION} refused: whether a run of {item.id} is live could not"
-                " be established, because the configured factory did not answer with a run"
-                " inventory; the hold stands."
-            ),
-        )
-    if liveness.live_run_ids:
-        return valve_refusal(
-            aid=aid,
-            wid=item.id,
-            err="live-run",
-            msg=(
-                f"{RELEASE_SPEC_TIER_ACTION} refused: {', '.join(liveness.live_run_ids)} is still"
-                f" non-terminal, so a run of {item.id} is live; the hold stands."
-            ),
-        )
-    if live_dispatch_lock(repo=repo, work_item_id=item.id) is not None:
-        return valve_refusal(
-            aid=aid,
-            wid=item.id,
-            err="dispatch-lock-held",
-            msg=(
-                f"{RELEASE_SPEC_TIER_ACTION} refused: a live process holds the dispatch-scoped"
-                f" ownership lock of {item.id}; the hold stands."
-            ),
-        )
-    return None
+def _attestation_actor(*, repo: Path, identity: InvokerIdentity) -> str:
+    """Return the asserted invoker, or a typed identity computed for this press.
+
+    The journal envelope retains the invocation's own invoker and source, including
+    its fallback mark. The attestation actor instead answers who performed the
+    judgement, so a fallback invocation is attributed to its agent session or forge
+    login when either can be computed.
+    """
+    if identity.invoker_source != FALLBACK_SOURCE:
+        return identity.invoker
+    computed = computed_publishing_identity(repo=repo, env=os.environ, runner=ShellCommandRunner())
+    return identity.invoker if computed is None else computed.header_field
 
 
 def _resolved_clause(
@@ -272,6 +261,7 @@ def _journal_attestation(
     *,
     repo: Path,
     identity: InvokerIdentity,
+    actor: str,
     item: WorkItem,
     clause: CondensedClause,
     version: str,
@@ -284,7 +274,7 @@ def _journal_attestation(
     description of it.
     """
     record: dict[str, object] = {
-        "actor": "operator",
+        "actor": actor,
         "stage": RELEASE_SPEC_TIER_STAGE,
         "work_item_id": item.id,
         "heading": clause.heading.rstrip(),
@@ -302,18 +292,29 @@ def _routed_status(*, config: StoreConfig, item: WorkItem, aid: str) -> str | di
     A `rework:pending` item keeps its status and marker, with no intake routing
     and no fresh approval: its execution belongs to the rework route. Every other
     item goes back through intake, which re-grades everything but the hold.
+
+    Intake's route is a claim-changing write. A route the claim-token protocol
+    refused is reported under the protocol's own outcome, as every other valve
+    reports a refused write, and the summary says what this press had already
+    done: the attestation is append-only and the hold it cleared stays cleared.
     """
     if item.status == _ACTIVE:
         return item.status
     routed = apply_intake_dor(path=config, item_id=item.id, checklist=_FILED_ITEM)
-    if not is_successful(routed):
-        return valve_refusal(
+    if is_successful(routed):
+        return unsafe_perform_io(routed.unwrap())
+    failure = unsafe_perform_io(routed.failure())
+    if isinstance(failure, ClaimWriteRefused):
+        return valve_claim_refusal(
             aid=aid,
             wid=item.id,
-            err="intake-routing-failed",
-            msg=(
-                f"intake could not route {item.id} after the release:"
-                f" {unsafe_perform_io(routed.failure())}"
-            ),
+            verb=RELEASE_SPEC_TIER_ACTION,
+            outcome=failure.outcome,
+            already_done="the attestation stands and the hold is cleared",
         )
-    return unsafe_perform_io(routed.unwrap())
+    return valve_refusal(
+        aid=aid,
+        wid=item.id,
+        err="intake-routing-failed",
+        msg=f"intake could not route {item.id} after the release: {failure}",
+    )

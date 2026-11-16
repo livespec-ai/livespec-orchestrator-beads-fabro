@@ -13,7 +13,6 @@ import struct
 import subprocess
 import tempfile
 import termios
-import time
 import tty
 from collections.abc import Callable
 from contextlib import suppress
@@ -37,7 +36,6 @@ _BACKGROUND_QUERY = "\x1b]11;?\x1b\\"
 _FOREGROUND_RESPONSE = "\x1b]10;rgb:ffff/ffff/ffff\x1b\\"
 _BACKGROUND_RESPONSE = "\x1b]11;rgb:0000/0000/0000\x1b\\"
 _TERMINAL_RESPONSES = _FOREGROUND_RESPONSE + _BACKGROUND_RESPONSE
-_CODEX_STARTUP_TIMEOUT_SECONDS = 120
 _CODEX_PROMPT_MARKER = chr(0x203A)
 _GIT_HOOK_ENV_VARS = (
     "GIT_DIR",
@@ -71,15 +69,15 @@ enabled = true
 
 [marketplaces.livespec]
 source_type = "git"
-source = "https://github.com/thewoolleyman/livespec.git"
+source = "https://github.com/livespec-ai/livespec.git"
 
 [marketplaces.livespec-driver-codex]
 source_type = "git"
-source = "https://github.com/thewoolleyman/livespec-driver-codex.git"
+source = "https://github.com/livespec-ai/livespec-driver-codex.git"
 
 [marketplaces.livespec-orchestrator-beads-fabro]
 source_type = "git"
-source = "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git"
+source = "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git"
 """
 
 
@@ -118,9 +116,7 @@ def _prepare_pty(*, master_fd: int, slave_fd: int) -> None:
     fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
 
 
-def _read_until(
-    *, terminal: _Terminal, predicate: Callable[[str], bool], timeout_seconds: float
-) -> str:
+def _read_until(*, terminal: _Terminal, predicate: Callable[[str], bool]) -> str:
     """Judge a new complete screen, never concatenated terminal history.
 
     Codex writes cursor-addressed deltas inside synchronized-output frames.
@@ -128,12 +124,8 @@ def _read_until(
     handles split UTF-8/escape sequences; pending retains partial frames across
     actions. A previously matching screen cannot pass without new output.
     """
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        remaining = max(0.05, deadline - time.monotonic())
-        readable, _, _ = select.select([terminal.fd], [], [], min(0.25, remaining))
-        if not readable:
-            continue
+    while True:
+        select.select([terminal.fd], [], [])
         try:
             chunk = os.read(terminal.fd, 8192)
         except OSError as exc:
@@ -155,7 +147,6 @@ def _read_until(
         current = terminal.text()
         if predicate(current):
             return current
-    raise AssertionError(f"Timed out waiting for Codex picker state:\n{terminal.text()}")
 
 
 def _send(*, fd: int, text: str) -> None:
@@ -175,14 +166,12 @@ def _await_codex_prompt(*, terminal: _Terminal) -> None:
     current = _read_until(
         terminal=terminal,
         predicate=lambda plain: _has_main_prompt(plain=plain) or _has_trust_prompt(plain=plain),
-        timeout_seconds=_CODEX_STARTUP_TIMEOUT_SECONDS,
     )
     if _has_trust_prompt(plain=current):
         _send(fd=terminal.fd, text="\r")
         _read_until(
             terminal=terminal,
             predicate=lambda plain: _has_main_prompt(plain=plain),
-            timeout_seconds=_CODEX_STARTUP_TIMEOUT_SECONDS,
         )
 
 
@@ -198,14 +187,12 @@ def _open_skills_menu(*, terminal: _Terminal) -> None:
     _read_until(
         terminal=terminal,
         predicate=lambda plain: "/skills" in plain and "use skills to improve" in plain,
-        timeout_seconds=15,
     )
     _send(fd=terminal.fd, text="\r")
     _read_until(
         terminal=terminal,
         predicate=lambda plain: "listskills" in _squashed(text=plain)
         and "enable/disableskills" in _squashed(text=plain),
-        timeout_seconds=15,
     )
 
 
@@ -258,36 +245,69 @@ def test_picker_wait_refuses_an_inactive_previously_matching_screen() -> None:
     try:
         # No producer writes a fresh frame. Existing screen content is not an
         # acknowledgement of an input action, even when every token matches.
-        with pytest.raises(AssertionError, match="Timed out"):
-            _read_until(
-                terminal=terminal, predicate=lambda p: _has_result(plain=p), timeout_seconds=0.01
-            )
+        os.close(write_fd)
+        with pytest.raises(AssertionError, match="closed"):
+            _read_until(terminal=terminal, predicate=lambda p: _has_result(plain=p))
     finally:
         os.close(read_fd)
-        os.close(write_fd)
 
 
-def _wait_for_group_exit(*, pgid: int) -> None:
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline:
-        states = subprocess.run(
-            ["ps", "-eo", "pgid=,stat="],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=max(0.01, deadline - time.monotonic()),
-        ).stdout.splitlines()
-        if not any(
-            int(fields[0]) == pgid and not fields[1].startswith("Z")
-            for line in states
-            if len(fields := line.split()) == 2
-        ):
-            return
-        time.sleep(0.01)
-    raise AssertionError(f"Picker process group {pgid} still has live writers")
+def _live_group_members(*, pgid: int) -> list[int]:
+    """The pids of every non-zombie process in the group, as one `ps` snapshot."""
+    states = subprocess.run(
+        ["ps", "-eo", "pid=,pgid=,stat="],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=5,
+    ).stdout.splitlines()
+    return [
+        int(fields[0])
+        for line in states
+        if len(fields := line.split()) == 3
+        and int(fields[1]) == pgid
+        and not fields[2].startswith("Z")
+    ]
 
 
-def _stop_codex(*, proc: subprocess.Popen[bytes], fd: int) -> None:
+def _wait_for_group_exit(*, pgid: int, group_exit_fd: int) -> None:
+    """Block until every writer in the group has terminated, without polling.
+
+    A pidfd becomes readable when its process terminates, whoever its parent
+    is, so the orphaned writers (reaped by init, not by this interpreter) are
+    waited on as events. When pidfds are unavailable, every writer inherits
+    the pipe's write end, so its read end reaches end-of-file after the last
+    writer exits. The group was sent SIGKILL before this runs, so the one
+    snapshot of its members is complete; the 5s bound only keeps a writer that
+    somehow survived from hanging the suite.
+    """
+    descriptors: list[int] = []
+    use_group_exit_event = not hasattr(os, "pidfd_open")
+    try:
+        for pid in _live_group_members(pgid=pgid):
+            if not use_group_exit_event:
+                try:
+                    descriptors.append(os.pidfd_open(pid))
+                except OSError:
+                    use_group_exit_event = True
+        pending = list(descriptors)
+        if use_group_exit_event:
+            pending.append(group_exit_fd)
+        while pending:
+            ready, _, _ = select.select(pending, [], [], 5.0)
+            if not ready:
+                live_writers = _live_group_members(pgid=pgid)
+                raise AssertionError(
+                    f"Picker process group {pgid} still has live writers: {live_writers}"
+                )
+            pending = [descriptor for descriptor in pending if descriptor not in ready]
+    finally:
+        for descriptor in descriptors:
+            os.close(descriptor)
+        os.close(group_exit_fd)
+
+
+def stop_codex(*, proc: subprocess.Popen[bytes], fd: int, group_exit_fd: int) -> None:
     try:
         if proc.poll() is None:
             try:
@@ -308,36 +328,44 @@ def _stop_codex(*, proc: subprocess.Popen[bytes], fd: int) -> None:
             # TemporaryDirectory removes their staging directories.
             with suppress(ProcessLookupError):
                 os.killpg(proc.pid, signal.SIGKILL)
-            _wait_for_group_exit(pgid=proc.pid)
+            _wait_for_group_exit(pgid=proc.pid, group_exit_fd=group_exit_fd)
         finally:
             os.close(fd)
 
 
 def test_picker_cleanup_stops_writers_after_the_parent_exits(*, tmp_path: Path) -> None:
-    witness = tmp_path / "writer-active"
+    release = tmp_path / "release-writer"
     child_pid_file = tmp_path / "writer-pid"
-    proc = subprocess.Popen(
-        [
-            "sh",
-            "-c",
-            'while :; do printf writing > "$1"; sleep 0.01; done & ' 'printf "%s\\n" "$!" > "$2"',
-            "--",
-            str(witness),
-            str(child_pid_file),
-        ],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    os.mkfifo(release)
+    group_exit_read_fd, group_exit_write_fd = os.pipe()
+    try:
+        proc = subprocess.Popen(
+            [
+                "sh",
+                "-c",
+                'read < "$1" & ' 'printf "%s\\n" "$!" > "$2"',
+                "--",
+                str(release),
+                str(child_pid_file),
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            pass_fds=(group_exit_write_fd,),
+            start_new_session=True,
+        )
+    finally:
+        os.close(group_exit_write_fd)
     try:
         assert proc.wait(timeout=5) == 0
-        deadline = time.monotonic() + 5.0
-        while not witness.exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert witness.exists()
         child_pid = int(child_pid_file.read_text(encoding="utf-8"))
-        _stop_codex(proc=proc, fd=os.open(os.devnull, os.O_WRONLY))
+        os.kill(child_pid, 0)
+        stop_codex(
+            proc=proc,
+            fd=os.open(os.devnull, os.O_WRONLY),
+            group_exit_fd=group_exit_read_fd,
+        )
         state = subprocess.run(
             ["ps", "-p", str(child_pid), "-o", "stat="],
             capture_output=True,
@@ -364,10 +392,9 @@ def _exercise_skills_picker(*, master_fd: int) -> str:
         predicate=lambda plain: "enterinsert·escclose" in _squashed(text=plain)
         and "[Skill]" in plain
         and f"{_CODEX_PROMPT_MARKER} $" in plain.splitlines(),
-        timeout_seconds=15,
     )
     _paste(fd=master_fd, text=_PICKER_QUERY)
-    _read_until(terminal=terminal, predicate=lambda p: _has_result(plain=p), timeout_seconds=15)
+    _read_until(terminal=terminal, predicate=lambda p: _has_result(plain=p))
     # Native negative control: stale rows/history cannot pass a changed query.
     _paste(fd=master_fd, text=_NO_MATCH_SUFFIX)
     _read_until(
@@ -375,12 +402,9 @@ def _exercise_skills_picker(*, master_fd: int) -> str:
         predicate=lambda plain: "no matches" in plain
         and f"{_CODEX_PROMPT_MARKER} ${_PICKER_QUERY}{_NO_MATCH_SUFFIX}" in plain.splitlines()
         and not _has_skill_row(plain=plain),
-        timeout_seconds=15,
     )
     _send(fd=master_fd, text="\x7f" * len(_NO_MATCH_SUFFIX))
-    return _read_until(
-        terminal=terminal, predicate=lambda p: _has_result(plain=p), timeout_seconds=15
-    )
+    return _read_until(terminal=terminal, predicate=lambda p: _has_result(plain=p))
 
 
 @pytest.mark.skipif(
@@ -410,19 +434,30 @@ def test_skills_picker_finds_drive_by_short_name() -> None:
         codex_home = Path(codex_home_raw)
         _prepare_codex_home(codex_home=codex_home)
         env["CODEX_HOME"] = str(codex_home)
-        proc = subprocess.Popen(
-            [codex, "--no-alt-screen", "--dangerously-bypass-hook-trust", "-C", str(_REPO_ROOT)],
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            env=env,
-            close_fds=True,
-            start_new_session=True,
-        )
+        group_exit_read_fd, group_exit_write_fd = os.pipe()
+        try:
+            proc = subprocess.Popen(
+                [
+                    codex,
+                    "--no-alt-screen",
+                    "--dangerously-bypass-hook-trust",
+                    "-C",
+                    str(_REPO_ROOT),
+                ],
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                env=env,
+                close_fds=True,
+                pass_fds=(group_exit_write_fd,),
+                start_new_session=True,
+            )
+        finally:
+            os.close(group_exit_write_fd)
         os.close(slave_fd)
         try:
             transcript = _exercise_skills_picker(master_fd=master_fd)
         finally:
-            _stop_codex(proc=proc, fd=master_fd)
+            stop_codex(proc=proc, fd=master_fd, group_exit_fd=group_exit_read_fd)
 
     assert _has_result(plain=transcript), transcript

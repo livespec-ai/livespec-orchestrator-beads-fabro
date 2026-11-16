@@ -38,6 +38,9 @@ from subprocess import run
 from typing import Any, cast
 
 from livespec_orchestrator_beads_fabro._store_merge_hold import update_work_item_merge_hold
+from livespec_orchestrator_beads_fabro.commands._dispatcher_fabro_argv import (
+    merge_queue_retry_argv,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_integration_projection import (
     MERGE_METHOD_FLAGS,
 )
@@ -47,8 +50,12 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_probe_cycle import (
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_status import PrView, parse_pr_view
 from livespec_orchestrator_beads_fabro.commands._drive_merge_hold_arm_guard import (
+    ArmDecision,
     MergeHoldCommandRun,
-    arm_refusal_for_release,
+    arm_decision_for_release,
+)
+from livespec_orchestrator_beads_fabro.commands._drive_merge_hold_head_proof import (
+    MessageOnlyHeadMove,
 )
 from livespec_orchestrator_beads_fabro.commands._drive_reject_valve import HumanValveRunner
 from livespec_orchestrator_beads_fabro.commands._drive_valve_result import (
@@ -69,6 +76,7 @@ _JOURNAL_SUBPATH = ("tmp", "fabro-dispatch-journal.jsonl")
 # it. Walked as a path rather than indexed step by step so the four "is this
 # still a mapping?" guards are one loop instead of four nested branches.
 _MERGE_MODE_RECORD_PATH = ("integration_contract", "fields", "merge_mode", "value")
+_CLEAN_STATUS_ARM_REFUSAL = "Pull request is in clean status (enablePullRequestAutoMerge)"
 # `headRefOid` rides this ONE view because the v145 arm guard compares the
 # pull request's CURRENT head against the head a proof record names, and the
 # view is already taken at the moment the valve decides. A probe of its own
@@ -158,15 +166,20 @@ def _release(*, call: _MergeHoldCall, view: PrView | None) -> dict[str, Any]:
     # that may not is a different answer from one that cannot resolve a strategy
     # -- reporting the strategy fault on a pull request a live run is about to
     # rewrite would send an operator after the wrong thing.
-    refusal = arm_refusal_for_release(
+    decision = arm_decision_for_release(
         repo=call.repo,
         work_item_id=call.item.id,
         pr_number=view.number,
         pr_head=view.head,
         runner=call.runner,
     )
-    if refusal is not None:
-        return valve_refusal(aid=call.aid, wid=call.item.id, err=refusal.error, msg=refusal.message)
+    if decision.refusal is not None:
+        return valve_refusal(
+            aid=call.aid,
+            wid=call.item.id,
+            err=decision.refusal.error,
+            msg=decision.refusal.message,
+        )
     method = journaled_merge_method_flag(repo=call.repo, work_item_id=call.item.id)
     if method is None:
         return valve_refusal(
@@ -184,21 +197,62 @@ def _release(*, call: _MergeHoldCall, view: PrView | None) -> dict[str, Any]:
     # recoverable by re-running the identical action; a pull request armed while
     # the ledger still reads held is a merge nobody can see coming.
     update_work_item_merge_hold(path=call.config, item_id=call.item.id, value=False)
-    armed = _run(call=call, argv=_arm_argv(number=view.number, method=method))
+    armed = _run_merge(call=call, argv=_arm_argv(number=view.number, method=method))
     if armed.returncode != 0:
+        return _arm_failure(
+            call=call,
+            decision=decision,
+            view=view,
+            method=method,
+            stderr=armed.stderr,
+        )
+    return _release_success(
+        call=call,
+        note=(
+            f"auto-merge armed on pull request #{view.number} with {method}"
+            f"{_message_only_note(move=decision.message_only_move)}"
+        ),
+    )
+
+
+def _arm_failure(
+    *,
+    call: _MergeHoldCall,
+    decision: ArmDecision,
+    view: PrView,
+    method: str,
+    stderr: str,
+) -> dict[str, Any]:
+    if not _is_clean_status_arm_refusal(stderr=stderr):
         return valve_refusal(
             aid=call.aid,
             wid=call.item.id,
             err="arm-failed",
             msg=(
                 f"set-merge-hold:off removed the hold on {call.item.id} but arming auto-merge "
-                f"on pull request #{view.number} failed: {armed.stderr}; re-run the action to "
-                "retry the arm."
+                f"on pull request #{view.number} failed: {stderr}; re-run the action to retry "
+                "the arm."
+            ),
+        )
+    merged = _run_merge(call=call, argv=_direct_merge_argv(number=view.number, method=method))
+    if merged.returncode != 0:
+        return valve_refusal(
+            aid=call.aid,
+            wid=call.item.id,
+            err="direct-merge-failed",
+            msg=(
+                f"set-merge-hold:off removed the hold on {call.item.id}; GitHub refused "
+                f"auto-merge on already-clean pull request #{view.number}, then direct merge "
+                f"with {method} failed: {merged.stderr}; re-run the action to retry the merge."
             ),
         )
     return _release_success(
         call=call,
-        note=f"auto-merge armed on pull request #{view.number} with {method}",
+        note=(
+            f"merged directly on pull request #{view.number} with {method} after GitHub refused "
+            "to arm auto-merge for its already-clean status"
+            f"{_message_only_note(move=decision.message_only_move)}"
+        ),
     )
 
 
@@ -218,6 +272,16 @@ def _valve_success(*, call: _MergeHoldCall, msg: str) -> dict[str, Any]:
         status=call.item.status,
         assignee=call.item.assignee,
         msg=f"{msg}; status unchanged.",
+    )
+
+
+def _message_only_note(*, move: MessageOnlyHeadMove | None) -> str:
+    """What the result adds when the armed head moved from the proved head only in its message."""
+    if move is None:
+        return ""
+    return (
+        f" (head {move.current_head} differs from the proved head {move.proved_head} only in "
+        f"its commit message; both carry tree {move.tree})"
     )
 
 
@@ -255,8 +319,26 @@ def _arm_argv(*, number: int, method: str) -> tuple[str, ...]:
     return ("gh", "pr", "merge", str(number), method, "--auto", "--delete-branch")
 
 
+def _direct_merge_argv(*, number: int, method: str) -> tuple[str, ...]:
+    """Merge a pull request already clean enough that GitHub rejects auto-merge."""
+    return ("gh", "pr", "merge", str(number), method, "--delete-branch")
+
+
+def _is_clean_status_arm_refusal(*, stderr: str) -> bool:
+    return _CLEAN_STATUS_ARM_REFUSAL in stderr
+
+
 def _disarm_argv(*, number: int) -> tuple[str, ...]:
     return ("gh", "pr", "merge", str(number), "--disable-auto")
+
+
+def _run_merge(*, call: _MergeHoldCall, argv: tuple[str, ...]) -> MergeHoldCommandRun:
+    """Run one `gh pr merge`, once more without `--delete-branch` if a merge queue refused it."""
+    first = _run(call=call, argv=argv)
+    if first.returncode == 0:
+        return first
+    retry = merge_queue_retry_argv(argv=argv, stderr=first.stderr)
+    return first if retry is None else _run(call=call, argv=tuple(retry))
 
 
 def _run(*, call: _MergeHoldCall, argv: tuple[str, ...]) -> MergeHoldCommandRun:

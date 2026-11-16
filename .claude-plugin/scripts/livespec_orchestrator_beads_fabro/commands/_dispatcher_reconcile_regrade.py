@@ -29,10 +29,26 @@ It never launches a Fabro run, cuts a branch, or re-runs the post-merge
 janitor. The janitor already ran for this item — that is how the merge got
 there — and re-running it would spend a full checkout to answer a question
 about criteria text.
+
+BOTH DISPOSITIONS ARE CLAIM-CHANGING WRITES BY A HUMAN VALVE
+(`SPECIFICATION/contracts.md`, "Claim tokens"): the arm is an attributed
+operator act that parks the item in `acceptance` or closes it. Once
+`dispatcher.claim_tokens` is true each is made only after winning the item's
+current token, and only while the item still rests where the arm read it,
+still carrying `rework:pending`, under the claim row `run_regrade` read before
+anything else. The park is one guarded write. The close is two: `bd close`
+cannot name a successor token, so the arm first wins the token in a write that
+names the successor and changes nothing else, and closes only after that write
+landed. An arm that does not win has written nothing, and reports the
+protocol's outcome on a failed result. Both writes, guarded and unguarded,
+are made in `_dispatcher_reconcile_regrade_claims`, because this module is at
+its size ceiling.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 from returns.unsafe import unsafe_perform_io
@@ -54,22 +70,31 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
     CommandRunner,
     DispatchOutcome,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_journal import run_stage
+from livespec_orchestrator_beads_fabro.commands._dispatcher_incident_closure import (
+    incident_acceptance_for,
+    incident_holds,
+    incident_proof_pointer,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import JournalFile
 from livespec_orchestrator_beads_fabro.commands._dispatcher_item_ledger_reads import (
     read_dispatch_labels,
-)
-from livespec_orchestrator_beads_fabro.commands._dispatcher_lifecycle_writes import (
-    write_work_item_status_and_reconcile,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import store_config
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import (
     DispatchPlan,
     PrView,
-    janitor_venue_contains_merge_argv,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_merged_pr import (
     resolve_merged_pr,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_regrade_claims import (
+    RegradeClaim,
+    refused_regrade_outcome,
+    regrade_claim,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_regrade_containment import (
+    UNMERGED_REFUSAL,
+    merge_containment_refusal,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_valves import (
     DEFAULT_ACCEPTANCE_POLICY,
@@ -79,25 +104,11 @@ from livespec_orchestrator_beads_fabro.io import write_stderr
 from livespec_orchestrator_beads_fabro.types import WorkItem
 
 __all__: list[str] = [
-    "MERGE_CONTAINMENT_STAGE",
     "REGRADE_STAGE",
     "run_regrade",
 ]
 
 REGRADE_STAGE = "regrade"
-MERGE_CONTAINMENT_STAGE = "regrade-merge-containment"
-_CONTAINMENT_TIMEOUT_SECONDS = 30.0
-_UNMERGED_REFUSAL = (
-    "ERROR: reconcile-merged --regrade refused: no merged PR resolves for work-item "
-    "{item_id}, so there is no merged diff to re-grade against. The arm keys on the "
-    "merge itself; drive the fix-forward rework re-dispatch instead.\n"
-)
-_UNCONTAINED_REFUSAL = (
-    "ERROR: reconcile-merged --regrade refused: the merge commit {merge_sha} of PR "
-    "#{pr_number} for work-item {item_id} is not an ancestor of {tip}, so this "
-    "repository cannot show the work landed on the default branch. Fetch {tip} and "
-    "retry, or drive the fix-forward rework re-dispatch instead.\n"
-)
 
 
 def run_regrade(
@@ -115,63 +126,25 @@ def run_regrade(
     `regrade` when it reaches any other verdict and the item is untouched — or
     an exit code when the merge evidence the arm keys on does not hold.
     """
+    # Read FIRST, ahead of the merge evidence and the grading pass: it is what the
+    # arm's disposition is later bound to.
+    claim = regrade_claim(repo=repo, item=item, journal=journal)
     merged = resolve_merged_pr(plan=plan, item=item, runner=runner, journal=journal)
     if isinstance(merged, str):
         _ = write_stderr(text=merged)
         return EXIT_PRECONDITION_ERROR
     if merged is None:
-        _ = write_stderr(text=_UNMERGED_REFUSAL.format(item_id=item.id))
+        _ = write_stderr(text=UNMERGED_REFUSAL.format(item_id=item.id))
         return EXIT_PRECONDITION_ERROR
-    containment = _merge_containment_refusal(
+    containment = merge_containment_refusal(
         plan=plan, item=item, merged=merged, runner=runner, journal=journal
     )
     if containment is not None:
         _ = write_stderr(text=containment)
         return EXIT_PRECONDITION_ERROR
-    return _grade_and_dispose(repo=repo, item=item, merged=merged, runner=runner, journal=journal)
-
-
-def _merge_containment_refusal(
-    *,
-    plan: DispatchPlan,
-    item: WorkItem,
-    merged: PrView,
-    runner: CommandRunner,
-    journal: JournalFile,
-) -> str | None:
-    """Refuse unless the resolved merge commit is an ancestor of the default branch.
-
-    The tip is `origin/<default branch>` read off the plan's ONE resolved
-    contract, exactly as the janitor venue resolves its own, so the arm and the
-    dispatch path cannot come to name two different branches. A commit is its
-    own ancestor, so a tip that IS the merge answers yes.
-
-    This is the half of the evidence an operator cannot assert: a forge that
-    reports a merged pull request says the pull request merged, while the
-    ancestry says THIS repository can see the work on the branch it is about to
-    close the item against.
-    """
-    tip = f"origin/{plan.integration.contract.default_branch}"
-    merge_sha = merged.merge_sha
-    if merge_sha is None:  # pragma: no cover - resolve_merged_pr yields only sha-bearing views
-        return _UNMERGED_REFUSAL.format(item_id=item.id)
-    contains = run_stage(
-        runner=runner,
-        journal=journal,
-        plan=plan,
-        stage=MERGE_CONTAINMENT_STAGE,
-        command=(
-            janitor_venue_contains_merge_argv(plan=plan, tip=tip, merge_sha=merge_sha),
-            plan.repo,
-            _CONTAINMENT_TIMEOUT_SECONDS,
-            None,
-        ),
+    return _grade_and_dispose(
+        repo=repo, item=item, merged=merged, runner=runner, journal=journal, claim=claim
     )
-    if contains.exit_code != 0:
-        return _UNCONTAINED_REFUSAL.format(
-            merge_sha=merge_sha, pr_number=merged.number, item_id=item.id, tip=tip
-        )
-    return None
 
 
 def _grade_and_dispose(
@@ -181,6 +154,7 @@ def _grade_and_dispose(
     merged: PrView,
     runner: CommandRunner,
     journal: JournalFile,
+    claim: RegradeClaim,
 ) -> DispatchOutcome:
     """Run the acceptance pass over the verified merge and dispose on a clear PASS.
 
@@ -208,6 +182,8 @@ def _grade_and_dispose(
     # unreadable label set is NOT a declaration, so it fails closed to the empty
     # marker set exactly as the dispatch-path acceptance valve does.
     labels = read_dispatch_labels(repo=repo, item=item)
+    config = store_config(repo=repo)
+    incident = incident_acceptance_for(config=config, item_id=item.id, merged_pr=merged.number)
     result = run_acceptance_pass(
         repo=repo,
         item=item,
@@ -218,6 +194,7 @@ def _grade_and_dispose(
         # journal is the only place either identifier of the merging dispatch
         # survives into this process.
         journal_path=journal.path,
+        incident=incident.scope,
     )
     # `unsafe_perform_io` is required: `IOResult.value_or` returns `IO[value]`.
     policy = unsafe_perform_io(
@@ -228,8 +205,24 @@ def _grade_and_dispose(
     # a named constant here reads to the lint rule set as a hardcoded secret.
     if result.verdict != "PASS":
         return _leave_regraded_item(item=item, outcome=outcome, verdict=result.verdict)
-    if result.proof is not None and (
-        result.proof.pending_host_captured or result.proof.pending_human_attested
+    # The pointer is made to name the pull request this pass graded, which the plain
+    # pass does on every disposition: `accept` reads the pull request OFF the pointer,
+    # so one left on a superseded pull request refuses a valid replay on the graded one.
+    # It is written only once the claim check has passed, inside the park or the close,
+    # because a refused re-grade writes nothing and must not redirect the pointer.
+    write_pointer = partial(
+        incident_proof_pointer,
+        repo=repo,
+        item=item,
+        outcome=outcome,
+        proof=result.proof,
+        journal=journal,
+        incident=incident,
+    )
+    # A PASS on an incident that still owes final normal proof parks rather than closes.
+    if incident_holds(incident=incident, journal=journal, route="regrade") or (
+        result.proof is not None
+        and (result.proof.pending_host_captured or result.proof.pending_human_attested)
     ):
         return _park_regraded_item(
             repo=repo,
@@ -238,11 +231,20 @@ def _grade_and_dispose(
             policy=policy,
             result=result,
             journal=journal,
+            claim=claim,
+            write_pointer=write_pointer,
         )
-    return _close_regraded_item(repo=repo, item=item, outcome=outcome, journal=journal)
+    return _close_regraded_item(
+        repo=repo,
+        item=item,
+        outcome=outcome,
+        journal=journal,
+        claim=claim,
+        write_pointer=write_pointer,
+    )
 
 
-def _park_regraded_item(
+def _park_regraded_item(  # noqa: PLR0913 — kw-only; the pass's facts and the claim it rests on.
     *,
     repo: Path,
     item: WorkItem,
@@ -250,11 +252,14 @@ def _park_regraded_item(
     policy: str,
     result: AcceptancePassResult,
     journal: JournalFile,
+    claim: RegradeClaim,
+    write_pointer: Callable[[], None],
 ) -> DispatchOutcome:
     """Park a passing re-grade whose host or human proof leg is still pending."""
-    write_work_item_status_and_reconcile(
-        path=store_config(repo=repo), item_id=item.id, status="acceptance"
-    )
+    lost = claim.park()
+    if lost is not None:
+        return refused_regrade_outcome(item=item, outcome=outcome, refusal=lost)
+    write_pointer()
     park_in_acceptance(
         repo=repo,
         item_id=item.id,
@@ -274,7 +279,13 @@ def _park_regraded_item(
 
 
 def _close_regraded_item(
-    *, repo: Path, item: WorkItem, outcome: DispatchOutcome, journal: JournalFile
+    *,
+    repo: Path,
+    item: WorkItem,
+    outcome: DispatchOutcome,
+    journal: JournalFile,
+    claim: RegradeClaim,
+    write_pointer: Callable[[], None],
 ) -> DispatchOutcome:
     """Close a re-graded PASS, which is what clears the `rework:pending` marker.
 
@@ -285,6 +296,10 @@ def _close_regraded_item(
     cleared the marker by hand would be re-asserting what the seam already
     holds, in a second write that can fail on its own.
     """
+    lost = claim.hold()
+    if lost is not None:
+        return refused_regrade_outcome(item=item, outcome=outcome, refusal=lost)
+    write_pointer()
     close_dispatch_item(
         repo=repo,
         item=item,

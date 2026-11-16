@@ -32,13 +32,15 @@ orchestrator-PRIVATE tooling: core's contract sees only the three
   dispatcher.py clear-provider-exhaustion --provider <name> --reason <text>
                                           [--repo <path>] [--invoker <id>]
                                           [--journal <path>]
+  dispatcher.py fresh-ruling --repo <path> --item <id> --reason <text>
+                             [--invoker <id>] [--journal <path>]
   dispatcher.py clear-acp-availability-hold --scope <scope> --hold-key <key>
                                             --reason <text>
                                             [--candidate-key <key>]
                                             [--repo <path>] [--invoker <id>]
                                             [--journal <path>]
-  dispatcher.py reconcile-merged --repo <path> --item <id> [--invoker <id>]
-                                 [--regrade] [--json]
+  dispatcher.py reconcile-merged --repo <path> --item <id> [--pr <number>]
+                                 [--invoker <id>] [--regrade] [--json]
   dispatcher.py post-host-record --repo <path> --item <id>
                                  --verdict <host_recorded|host_verified|
                                             host_not_reproduced>
@@ -48,6 +50,12 @@ orchestrator-PRIVATE tooling: core's contract sees only the three
                                  --verdict <captured|verified|not_reproduced|
                                             human_attested>
                                  --record <path> [--invoker <id>]
+  dispatcher.py seed-ruling --item <id> --ref <ref> --commit <sha>
+                            --reason <text> [--repo <path>] [--invoker <id>]
+                            [--journal <path>]
+  dispatcher.py reseed --item <id> --seed-ref <ref> [--default-branch <name>]
+                       [--reason <text>] [--repo <path>] [--invoker <id>]
+                       [--journal <path>]
   dispatcher.py file-canary --repo <path>
   dispatcher.py probe --repo <path> --item <id> [common flags]
   dispatcher.py dispatch --repo <path> --item <id> [common flags]
@@ -103,6 +111,18 @@ seam), and on any other verdict leaves the item's status, labels and
 `acceptance_failed_ai_passes` exactly as it found them. It launches no Fabro
 run, cuts no branch, and runs no janitor (see
 `_dispatcher_reconcile_regrade`).
+`seed-ruling` records an operator's ruled seed for a released item's next
+dispatch (Scenario 185). It reads origin once and, only when `--ref` stands at
+`--commit`, appends one `livespec-seed-ruling` ledger comment and one
+`seed-ruling` journal record; an absent or moved ref, or a body the shared
+template-opener detector flags, exits 3 and writes neither (see
+`_dispatcher_seed_ruling_command`).
+`reseed` moves a stale preserved seed onto the default branch's tip (see
+`_dispatcher_reseed_command`). It diff-applies the seed's merge-base diff onto the
+tip as one authored commit, publishes it at `refs/livespec/reseed/<item>/<commit>`,
+confirms the ref by a remote read, and rules that ref as the item's next seed. A seed
+carrying no work, or a diff that conflicts (every path named), exits 3 and publishes
+and writes nothing.
 `probe` is the loop probe of contracts.md: the take-never-file health command
 that drives ONE designated, ALREADY-FILED work-item through the whole cycle
 with an assertion at each stage. It refuses
@@ -208,15 +228,19 @@ before EVERY command, so the ~76-minute merge-poll and any >1-hour
 operation re-mint transparently instead of dying on a once-at-start
 export. Token values are never logged, echoed, or journaled.
 
-Sandbox sibling clones: the same overlay appends one depth-1
-prepare-step clone per fleet member (from livespec master's
+Sandbox sibling clones: the same overlay appends one full-history
+prepare-step work clone per fleet member (from livespec master's
 .livespec-fleet-manifest.jsonc, fetched host-side via `gh api` at run-config
 generation; the dispatch target is excluded) and projects the
 non-secret LIVESPEC_SIBLING_CLONES_ROOT=/livespec-siblings into the
 sandbox env table, so cross-repo checks under `just check` resolve
 family siblings inside the sandbox — mirroring livespec CI. An
 unreachable or malformed manifest fails the dispatch fast at the
-`run-config-overlay` stage.
+`run-config-overlay` stage. Tools the sandbox EXECUTES from another
+repository (livespec core's checker, through LIVESPEC_CORE_PLUGIN_ROOT) run
+from a separate shallow, read-only run-from clone under /livespec-run-from at
+the release the governed tree pins, which the janitor and the publication
+stages re-resolve after a refresh.
 
 Connection + consent model: the Ledger connection resolves from the
 TARGET repo's `.livespec.jsonc` (cwd-style `--repo` addressing) plus
@@ -292,7 +316,6 @@ import argparse
 from collections.abc import Callable
 
 from livespec_orchestrator_beads_fabro.commands._acp_hold_clear import (
-    add_clear_acp_availability_hold_arguments,
     run_clear_acp_availability_hold_command,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_admission import (
@@ -326,7 +349,8 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_completion import (
     warn_item_sizing,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dispatch_args import (
-    add_dispatch_common,
+    add_dispatch_arguments,
+    add_loop_arguments,
     add_probe_arguments,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_drift_run_command import (
@@ -335,6 +359,12 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_drift_run_command im
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_inspect import (
     add_factory_inspect_arguments,
     run_factory_inspect_command,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_fresh_ruling import (
+    run_fresh_ruling_command,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_host_only_command import (
+    add_host_only_subcommand,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_host_record_cli import (
     add_post_host_record_arguments,
@@ -367,6 +397,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_loop_selection impor
     ready_items,
     run_id,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_operator_valve_arguments import (
+    add_operator_valve_subcommands,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_otel_wiring import (
     ensure_otel_receiver,
     parse_janitor,
@@ -376,7 +409,6 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_post_verdict import 
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_probe import run_probe_command
 from livespec_orchestrator_beads_fabro.commands._dispatcher_provider_exhaustion_clear import (
-    add_clear_provider_exhaustion_arguments,
     run_clear_provider_exhaustion_command,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_merged import (
@@ -403,6 +435,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_run_commands import 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_images_command import (
     add_sandbox_images_arguments,
     run_sandbox_images_command,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_seed_subcommands import (
+    SEED_SUBCOMMAND_HANDLERS,
+    add_seed_subcommands,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_subcommand_args import (
     add_claude_cred_status_arguments,
@@ -485,6 +521,7 @@ _SUBCOMMAND_HANDLERS: dict[str, Callable[..., int]] = {
     "dispatch": run_dispatch_command,
     "drift-run": _run_drift_run,
     "file-canary": run_file_canary_command,
+    "fresh-ruling": run_fresh_ruling_command,
     "idle-slot-audit": run_idle_slot_audit_command,
     "inspect": run_factory_inspect_command,
     "janitor-check": run_janitor_check,
@@ -497,6 +534,7 @@ _SUBCOMMAND_HANDLERS: dict[str, Callable[..., int]] = {
     "reconcile-runs": run_reconcile_runs_command,
     "resume": run_resume_command,
     "sandbox-images": run_sandbox_images_command,
+    **SEED_SUBCOMMAND_HANDLERS,
     "spec-check": run_spec_check,
 }
 
@@ -517,16 +555,12 @@ def _build_parser() -> argparse.ArgumentParser:
     add_codex_cred_refresh_arguments(parser=subparsers.add_parser("codex-cred-refresh"))
     add_codex_cred_status_arguments(parser=subparsers.add_parser("codex-cred-status"))
     add_claude_cred_status_arguments(parser=subparsers.add_parser("claude-cred-status"))
-    add_clear_provider_exhaustion_arguments(
-        parser=subparsers.add_parser("clear-provider-exhaustion")
-    )
-    add_clear_acp_availability_hold_arguments(
-        parser=subparsers.add_parser("clear-acp-availability-hold")
-    )
+    add_operator_valve_subcommands(add_parser=subparsers.add_parser)
     add_spec_check_arguments(parser=subparsers.add_parser("spec-check"))
     add_janitor_check_arguments(parser=subparsers.add_parser("janitor-check"))
     add_idle_slot_audit_arguments(parser=subparsers.add_parser("idle-slot-audit"))
     add_sandbox_images_arguments(parser=subparsers.add_parser("sandbox-images"))
+    add_seed_subcommands(add_parser=subparsers.add_parser)
     add_drift_run_arguments(parser=subparsers.add_parser("drift-run"))
     add_reconcile_runs_arguments(parser=subparsers.add_parser("reconcile-runs"))
     add_reconcile_merged_arguments(parser=subparsers.add_parser("reconcile-merged"))
@@ -534,13 +568,9 @@ def _build_parser() -> argparse.ArgumentParser:
     add_post_plan_record_arguments(parser=subparsers.add_parser("post-plan-record"))
     add_file_canary_arguments(parser=subparsers.add_parser("file-canary"))
     add_factory_inspect_arguments(parser=subparsers.add_parser("inspect"))
+    add_host_only_subcommand(subparsers=subparsers, handlers=_SUBCOMMAND_HANDLERS)
     add_probe_arguments(parser=subparsers.add_parser("probe"))
-    add_dispatch_common(parser=(dispatch := subparsers.add_parser("dispatch")))
-    _ = dispatch.add_argument("--item", dest="item", required=True)
+    add_dispatch_arguments(parser=subparsers.add_parser("dispatch"))
     add_resume_arguments(parser=subparsers.add_parser("resume"))
-    add_dispatch_common(parser=(loop := subparsers.add_parser("loop")))
-    _ = loop.add_argument("--budget", dest="budget", type=int, required=True)
-    _ = loop.add_argument("--parallel", dest="parallel", type=int, default=1)
-    _ = loop.add_argument("--dry-run", dest="dry_run", action="store_true")
-    _ = loop.add_argument("--item", dest="items", action="append", default=None)
+    add_loop_arguments(parser=subparsers.add_parser("loop"))
     return parser

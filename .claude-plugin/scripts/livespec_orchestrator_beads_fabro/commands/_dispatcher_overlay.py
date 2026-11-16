@@ -21,6 +21,10 @@ inputs needs — when the factory-environment env-table keying below needed room
 under this file's LLOC ceiling (bd-ib-kyeor4), and it deliberately left NO
 re-export shim behind, exactly as `escape_minijinja_literal` did: a shim would
 have bought none of the room the split was for.
+
+`codex_prepare_steps_block` owns the release-verified
+`codex_driver_hooks_prepare_steps_block` projection with the other Codex-only
+prepare steps.
 """
 
 from __future__ import annotations
@@ -29,17 +33,6 @@ import json
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from livespec_orchestrator_beads_fabro.commands._dispatcher_codex_auth_projection import (
-    codex_auth_env_lines,
-    codex_auth_prepare_steps_block,
-)
-from livespec_orchestrator_beads_fabro.commands._dispatcher_codex_otel_config import (
-    codex_otel_env_lines,
-    codex_otel_prepare_steps_block,
-)
-from livespec_orchestrator_beads_fabro.commands._dispatcher_commit_runner import (
-    commit_runner_prepare_steps_block,
-)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_use_projection import (
     CredentialUseDeclaration,
     CredentialUseProjection,
@@ -48,6 +41,12 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_use_proje
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_default_branch_fetch import (
     default_branch_fetch_prepare_steps_block,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_gate_subject import (
+    dod_gate_subject_prepare_steps_block,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_driver_hooks import (
+    claude_driver_hooks_prepare_steps_block,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_provenance import (
     factory_run_id_prepare_steps_block,
@@ -63,14 +62,22 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_git_author import (
     resolve_workflow_git_author,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_git_credential_helper import (
+    git_credential_helper_env_lines,
     git_credential_helper_prepare_steps_block,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_harness_shell_policy import (
     harness_settings_prepare_steps_block,
     harness_shell_env_lines,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_helper_build import HelperSource
+from livespec_orchestrator_beads_fabro.commands._dispatcher_helper_fetch import (
+    helper_fetch_prepare_steps_block,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_hook_limit_program import (
     hook_limit_graph_prepare_steps_block,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_overlay_codex import (
+    codex_fragments,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_overlay_graph import (
     absolute_graph_path,
@@ -83,10 +90,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_overlay_sandbox_imag
     resolve_sandbox_image,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_overlay_siblings import (
-    SIBLING_CLONES_ROOT_ENV_VAR,
     SiblingClones,
-    core_plugin_env_line,
-    sibling_clone_steps_block,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plugin_cache_gate import (
     plugin_cache_gate_prepare_steps_block,
@@ -100,8 +104,8 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_entry import 
     ResumeCheckout,
     resume_checkout_prepare_steps_block,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_review_guard import (
-    review_guard_prepare_steps_block,
+from livespec_orchestrator_beads_fabro.commands._dispatcher_run_from_clones import (
+    sandbox_clone_fragments,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_image_source import (
     COMMITTED_RUN_CONFIG_IMAGE,
@@ -121,6 +125,9 @@ from livespec_orchestrator_beads_fabro.commands._factory_github_app import (
     github_app_table,
 )
 
+# `codex_fragments` includes `codex_driver_hooks_prepare_steps_block` after
+# Codex auth and telemetry configuration have materialized CODEX_HOME.
+
 __all__: list[str] = [
     "CURRENCY_GATE_ENV_VALUE",
     "CURRENCY_GATE_ENV_VAR",
@@ -136,7 +143,7 @@ CURRENCY_GATE_ENV_VAR = "LIVESPEC_CURRENCY_GATE"
 CURRENCY_GATE_ENV_VALUE = "fail"
 
 
-def render_run_config_overlay(  # noqa: PLR0913, PLR0915 — kw-only pure overlay builder; each field is an independent projection input.
+def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pure overlay builder; each field is an independent projection input, and each `None` return is one unrenderable input the caller reports as a pre-launch refusal.
     *,
     committed_text: str,
     workflow_dir: Path,
@@ -174,12 +181,17 @@ def render_run_config_overlay(  # noqa: PLR0913, PLR0915 — kw-only pure overla
     credential_use: CredentialUseDeclaration | None = None,
     resume_checkout: ResumeCheckout | None = None,
     publication_metadata: PublicationMetadata | None = None,
+    dod_gate_subject: str | None = None,
     # Whether this dispatch's sandbox inherits the fleet's own check suite, and so
     # needs the gitignored worktree-discipline pack that suite reads. Decided ONCE
     # from the plan's resolved contract by `_dispatcher_loop_overlay` and forwarded
     # here; False for a direct caller, which renders exactly the overlay it did
     # before the step existed (bd-ib-tlmq3m).
     provision_worktree_pack: bool = False,
+    # The installed build the sandbox fetches its helper programs from. The
+    # Dispatcher passes the identity it read for this dispatch; None reads it
+    # here, from the same install record, so every rendering carries the fetch.
+    helper_source: HelperSource | None = None,
 ) -> str | None:
     """Render the dispatch-time run-config overlay.
 
@@ -227,6 +239,12 @@ def render_run_config_overlay(  # noqa: PLR0913, PLR0915 — kw-only pure overla
     caller that renders none projects no title line and no body step, which is
     exactly the overlay every direct caller rendered before.
 
+    `dod_gate_subject` is the Definition-of-Done judgement subject only the
+    `dod_gate` node grades, rendered by the caller that holds the work-item for
+    the reason `publication_metadata` is. It rides a materialized file rather than
+    the goal, which Fabro injects into every ACP node (bd-ib-tzvtgc); a caller
+    that renders none projects no step.
+
     `factory_environment` keys the run-scoped `[environments.<id>.env]` table,
     because that table is read by the engine ONLY under the environment the run
     intent selected — `[environments.<selected id>]` plus the id-less
@@ -262,6 +280,14 @@ def render_run_config_overlay(  # noqa: PLR0913, PLR0915 — kw-only pure overla
     which installs the guard with no deadline for it to enforce; a caller
     projecting nothing at all passes None for both, which renders no guard and
     leaves ordinary execution untouched.
+
+    `helper_source` is the installed plugin build the sandbox fetches every
+    helper program from (`_dispatcher_helper_fetch`): the overlay carries the
+    helper manifest and the one setup step that fetches and verifies them, and
+    no helper's source. It is not optional in effect. Absent, the identity is read
+    from the install record the pre-dispatch wall probed, a local read with no
+    forge call, and a build with no identity renders no overlay at all, because
+    there would be no commit for the sandbox to fetch.
     """
     if codex_auth_snapshot is not None and not isinstance(credential_use, CredentialUseProjection):
         return None
@@ -297,14 +323,8 @@ def render_run_config_overlay(  # noqa: PLR0913, PLR0915 — kw-only pure overla
     rewritten = substitute_input_tokens(text=rewritten, prepare_inputs=prepare_inputs)
     token_literal = json.dumps(token)
     github_token_literal = json.dumps(github_token)
-    sibling_steps = "" if siblings is None else sibling_clone_steps_block(siblings=siblings)
-    sibling_env_line = (
-        ""
-        if siblings is None
-        else f"{SIBLING_CLONES_ROOT_ENV_VAR} = {json.dumps(siblings.clones_root)}\n"
-    )
+    clones = sandbox_clone_fragments(siblings=siblings)
     currency_gate_env_line = f"{CURRENCY_GATE_ENV_VAR} = {json.dumps(CURRENCY_GATE_ENV_VALUE)}\n"
-    core_plugin_env = core_plugin_env_line(siblings=siblings)
     otel_env_lines = _otel_env_lines(otel_env=otel_env)
     tmux_steps = tmux_tmpdir_prepare_steps_block()
     tmux_env_line = tmux_tmpdir_env_lines()
@@ -321,10 +341,10 @@ def render_run_config_overlay(  # noqa: PLR0913, PLR0915 — kw-only pure overla
     # the Petri-era runner performs no Git operations of its own, so without this
     # every in-sandbox push reaches origin with no credential (bd-ib-52zt3o).
     git_credential_helper_steps = git_credential_helper_prepare_steps_block()
-    codex_steps = codex_auth_prepare_steps_block(codex_auth_snapshot=codex_auth_snapshot)
-    codex_env_lines = codex_auth_env_lines(codex_auth_snapshot=codex_auth_snapshot)
-    codex_otel_steps = codex_otel_prepare_steps_block(codex_otel_config=codex_otel_config)
-    codex_otel_env = codex_otel_env_lines(codex_otel_config=codex_otel_config)
+    codex_steps, codex_environment = codex_fragments(
+        codex_auth_snapshot=codex_auth_snapshot,
+        codex_otel_config=codex_otel_config,
+    )
     # The hook-limit observer rides the SAME root as the plugin-cache gate's
     # publication helpers, and its limit is read back off the very file this run
     # will execute, whose `publish_draft` attribute carries the literal duration
@@ -340,15 +360,18 @@ def render_run_config_overlay(  # noqa: PLR0913, PLR0915 — kw-only pure overla
             graph_artifact=graph_artifact, written_graph=resolved_graph, warn=warn
         )
     )
-    # The review-turn guard rides the commit runner's slot: both are small stdlib
-    # programs written below the same plugins root before any ACP stage runs.
-    commit_runner_steps = commit_runner_prepare_steps_block() + review_guard_prepare_steps_block()
+    # Rendered FIRST among the Dispatcher's own steps, because every step after
+    # it that runs a helper program runs the copy this one fetched and verified.
+    helper_fetch_steps = helper_fetch_prepare_steps_block(source=helper_source)
+    if helper_fetch_steps is None:
+        return None
     factory_provenance_steps = factory_run_id_prepare_steps_block(dispatch_id=dispatch_id)
-    # Rendered FIRST among the Dispatcher-materialized steps, which puts it
-    # immediately after the committed `git fetch --unshallow` whose single-branch
-    # refspec it completes. Every later step and every graph node that diffs the
-    # dispatch base then sees the ref, rather than depending on which of them the
-    # agent happened to reach first.
+    # Rendered immediately after the helper fetch, ahead of every other
+    # Dispatcher-materialized step, which keeps it right behind the committed
+    # `git fetch --unshallow` whose single-branch refspec it completes (the fetch
+    # touches no ref of the clone). Every later step and every graph node that
+    # diffs the dispatch base then sees the ref, rather than depending on which
+    # of them the agent happened to reach first.
     dispatch_base_steps = default_branch_fetch_prepare_steps_block(prepare_inputs=prepare_inputs)
     author_env_lines = git_author_env_lines(author=git_author)
     # Rendered immediately after the dispatch base, so EVERY later step and every
@@ -383,19 +406,19 @@ def render_run_config_overlay(  # noqa: PLR0913, PLR0915 — kw-only pure overla
     return (
         rewritten
         + github_app_table(github_app=github_app)
+        + helper_fetch_steps
         + dispatch_base_steps
         + git_identity_steps
         + worktree_pack_steps
         + factory_provenance_steps
-        + sibling_steps
+        + clones.steps
         + tmux_steps
         + harness_settings_steps
         + gh_refresh_steps
         + git_credential_helper_steps
         + codex_steps
-        + codex_otel_steps
+        + claude_driver_hooks_prepare_steps_block()
         + plugin_cache_steps
-        + commit_runner_steps
         + resume_checkout_steps
         + credential_use_steps
         # The pull-request body, materialized as a FILE because the stage hands
@@ -404,21 +427,24 @@ def render_run_config_overlay(  # noqa: PLR0913, PLR0915 — kw-only pure overla
         # sandbox plugins root is not known host-side and the pinned engine
         # expands no `${...}` in an env value.
         + publication_metadata_prepare_steps_block(metadata=publication_metadata)
+        + dod_gate_subject_prepare_steps_block(subject=dod_gate_subject)
         + "\n# --- Dispatcher-materialized run-scoped credential projection"
         + "\n# --- (UNCOMMITTED; mode 600; deleted when the run returns) ---\n"
         + f"[environments.{env_environment_id}.env]\n"
         + f"CLAUDE_CODE_OAUTH_TOKEN = {token_literal}\n"
         + f"GITHUB_TOKEN = {github_token_literal}\n"
+        # Process-level github.com helper, so a fetch GitHub refuses anonymously
+        # is retried authenticated from ANY git process, the committed chain's
+        # `uv sync` included (bd-ib-awv2iu).
+        + git_credential_helper_env_lines()
         + author_env_lines
         + tmux_env_line
         + harness_shell_env
         + gh_refresh_env_lines
-        + sibling_env_line
-        + core_plugin_env
+        + clones.env_lines
         + currency_gate_env_line
         + otel_env_lines
-        + codex_env_lines
-        + codex_otel_env
+        + codex_environment
         + credential_use_env
         + proof_store_env
         + proof_grade_env

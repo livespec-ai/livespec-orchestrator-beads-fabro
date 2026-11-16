@@ -100,6 +100,13 @@ __all__: list[str] = [
     "GUARD_REFUSAL_EXIT_CODE",
     "GUARD_SCRIPT_PATH",
     "GUARD_TERM_GRACE_SECONDS",
+    "PROOF_CAPTURE_GIT_BIN_PATH",
+    "PROOF_CAPTURE_GIT_READ_ONLY_ENV_VAR",
+    "PROOF_CAPTURE_HOOKS_PATH",
+    "PROOF_CAPTURE_PROTECTED_CHECKOUT_ENV_VAR",
+    "PROOF_CAPTURE_PROTECTED_CHECKOUT_PATH",
+    "REVIEW_BIN_PATH",
+    "REVIEW_READ_ONLY_ENV_VAR",
     "credential_use_deadline_epoch_capped",
     "guard_script_text",
     "guarded_acp_command",
@@ -140,6 +147,31 @@ CREDENTIAL_USE_UNPROTECTED_ENV_VAR = "LIVESPEC_CREDENTIAL_USE_UNPROTECTED"
 # hand-edited env table is not a statement, and treating one as a statement is
 # the same fail-open the absence arm exists to prevent.
 CREDENTIAL_USE_UNPROTECTED_VALUE = "1"
+
+# A proof-capture adapter selects the Git launcher that refuses tree writes. The
+# marker travels through the adapter's leading environment assignments, while
+# this guard owns the PATH change so an ACP command cannot replace it with a
+# later Git configuration flag.
+PROOF_CAPTURE_GIT_READ_ONLY_ENV_VAR = "LIVESPEC_PROOF_CAPTURE_GIT_READ_ONLY"
+
+# The read-only rule protects the run's checkout, not every repository a turn
+# touches. The launcher and the private hooks refuse a commit only when its
+# target shares a common git directory with this checkout; a scratch repository
+# a test fixture builds elsewhere keeps its own hooks and commits normally.
+PROOF_CAPTURE_PROTECTED_CHECKOUT_ENV_VAR = "LIVESPEC_PROOF_CAPTURE_PROTECTED_CHECKOUT"
+PROOF_CAPTURE_PROTECTED_CHECKOUT_PATH = "/workspace"
+
+# The Dispatcher writes these assets beside its credential-use guard, outside
+# every target clone. Proof capture runs for every tenant, including repositories
+# that do not carry this plugin's own `.claude-plugin` directory.
+PROOF_CAPTURE_GIT_BIN_PATH = "/workspace/.livespec/proof-capture-bin"
+PROOF_CAPTURE_HOOKS_PATH = "/workspace/.livespec/proof-capture-hooks"
+
+# Review is also read-only, but its boundary covers the commands that turn a
+# grading pass into implementation or a janitor pass.  The credential-use guard
+# starts every ACP adapter, including Codex, so this marker is adapter-neutral.
+REVIEW_READ_ONLY_ENV_VAR = "LIVESPEC_REVIEW_READ_ONLY"
+REVIEW_BIN_PATH = "/workspace/.livespec/review-bin"
 
 # Where the prepare step writes the guard inside the sandbox.
 GUARD_SCRIPT_PATH = "/workspace/.livespec/credential-use-guard.sh"
@@ -280,6 +312,8 @@ set -u
 
 deadline="${{{CREDENTIAL_USE_DEADLINE_ENV_VAR}:-}}"
 unprotected="${{{CREDENTIAL_USE_UNPROTECTED_ENV_VAR}:-}}"
+proof_capture_git_read_only="${{{PROOF_CAPTURE_GIT_READ_ONLY_ENV_VAR}:-}}"
+review_read_only="${{{REVIEW_READ_ONLY_ENV_VAR}:-}}"
 
 mode="run"
 if [ "${{1:-}}" = "--check-start" ]; then
@@ -287,6 +321,79 @@ if [ "${{1:-}}" = "--check-start" ]; then
     shift
 elif [ "${{1:-}}" = "--" ]; then
     shift
+fi
+
+# A proof-capture turn is read-only. Git evaluates `-c core.hooksPath=...`
+# after the environment-backed configuration channel, so a hook path alone is
+# replaceable by the command it is meant to govern. The stage instead prepends
+# its launcher HERE, before the guarded command starts; the launcher sees the
+# subcommand before Git processes any command-line configuration.
+if [ -n "$proof_capture_git_read_only" ]; then
+    if [ "$proof_capture_git_read_only" != "1" ]; then
+        echo "LIVESPEC_PROOF_CAPTURE_GIT_LAUNCHER_REFUSED: " \\
+             "{PROOF_CAPTURE_GIT_READ_ONLY_ENV_VAR} is '$proof_capture_git_read_only'," \\
+             "not the one read-only marker this launcher accepts." >&2
+        exit {GUARD_REFUSAL_EXIT_CODE}
+    fi
+    if [ "$mode" != "check" ]; then
+        proof_capture_git_bin="{PROOF_CAPTURE_GIT_BIN_PATH}"
+        if [ ! -x "$proof_capture_git_bin/git" ]; then
+            # The production path above is Dispatcher-materialized. This nearby
+            # fallback keeps a relocated guard self-contained for a hermetic
+            # sandbox while still never consulting the target repository.
+            proof_capture_git_bin="$(dirname "$0")/.livespec/proof-capture-bin"
+        fi
+        if [ ! -x "$proof_capture_git_bin/git" ]; then
+            echo "LIVESPEC_PROOF_CAPTURE_GIT_LAUNCHER_ABSENT: proof_capture is" \\
+                 "read-only, but its stage-scoped git launcher is not executable" \\
+                 "at $proof_capture_git_bin/git." >&2
+            exit {GUARD_REFUSAL_EXIT_CODE}
+        fi
+        PATH="$proof_capture_git_bin:$PATH"
+        export PATH
+    fi
+fi
+
+# Review is a grading stage regardless of which ACP adapter runs it.  Claude's
+# PreToolUse hook is useful defence in depth, but Codex has no Claude hook
+# surface.  Put the command launchers on PATH before the adapter starts so both
+# harnesses receive the same immediate refusal.
+if [ -n "$review_read_only" ]; then
+    if [ "$review_read_only" != "1" ]; then
+        echo "LIVESPEC_REVIEW_GUARD_REFUSED: {REVIEW_READ_ONLY_ENV_VAR} is" \\
+             "'$review_read_only', not the one read-only marker this launcher" \\
+             " accepts." >&2
+        exit {GUARD_REFUSAL_EXIT_CODE}
+    fi
+    if [ "$mode" != "check" ]; then
+        review_bin="{REVIEW_BIN_PATH}"
+        if [ ! -x "$review_bin/git" ] || [ ! -x "$review_bin/just" ] || \\
+           [ ! -x "$review_bin/mise" ] || \\
+           [ ! -x "$review_bin/livespec-implement-check-suite" ]; then
+            echo "LIVESPEC_REVIEW_GUARD_REFUSED: review is read-only, but its" \\
+                 " stage-scoped command launchers are not executable at" \\
+                 " $review_bin." >&2
+            exit {GUARD_REFUSAL_EXIT_CODE}
+        fi
+        review_real_just="$(command -v just || true)"
+        if [ ! -x "$review_real_just" ]; then
+            echo "LIVESPEC_REVIEW_GUARD_REFUSED: review cannot locate the real" \\
+                 " just executable before installing its command launchers." >&2
+            exit {GUARD_REFUSAL_EXIT_CODE}
+        fi
+        LIVESPEC_REVIEW_REAL_JUST="$review_real_just"
+        export LIVESPEC_REVIEW_REAL_JUST
+        review_real_mise="$(command -v mise || true)"
+        if [ ! -x "$review_real_mise" ]; then
+            echo "LIVESPEC_REVIEW_GUARD_REFUSED: review cannot locate the real" \\
+                 " mise executable before installing its command launchers." >&2
+            exit {GUARD_REFUSAL_EXIT_CODE}
+        fi
+        LIVESPEC_REVIEW_REAL_MISE="$review_real_mise"
+        export LIVESPEC_REVIEW_REAL_MISE
+        PATH="$review_bin:$PATH"
+        export PATH
+    fi
 fi
 
 # THE UNPROTECTED ARM. The host declares here that this dispatch projects no

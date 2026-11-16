@@ -318,6 +318,7 @@ def emit_outcomes(*, outcomes: list[DispatchOutcome], as_json: bool) -> None:
 # that populate them: a fabro failure, a degraded step outcome, and a
 # dead-implementer truncation.
 _OPTIONAL_OUTCOME_FIELDS: tuple[str, ...] = (
+    "already_satisfied_base",
     # The three readings the overtaken-arming ending measured, which only that
     # ending carries. Dropped on the same terms as the needs-human verdict
     # below, and for the same reason sharpened once more: the field's PRESENCE
@@ -325,6 +326,9 @@ _OPTIONAL_OUTCOME_FIELDS: tuple[str, ...] = (
     # outcome would put the key on dispatches that are not that ending and
     # leave a consumer discriminating by its value instead of its presence.
     "base_advanced",
+    # The handoff a merge wait took, which only that ending carries, dropped on
+    # the same terms as the field above.
+    "merge_wait_handed_off",
     "dead_implementer_condition",
     # Factory identity is carried only by the terminal cancellation arm so
     # its ledger disposition can name where the operator cancelled the run.
@@ -353,6 +357,10 @@ _OPTIONAL_OUTCOME_FIELDS: tuple[str, ...] = (
     # reached the parser are both None, so an explicit null would read as a
     # positive finding about a terminal nobody observed.
     "needs_human_reason",
+    # The final checkpoint is evidence only a post-checkpoint terminal observed;
+    # omit it from unrelated outcome payloads rather than reporting a null as a
+    # failed observation.
+    "final_git_commit_sha",
     # The hook-over-limit event, dropped on the same terms. The reason is the
     # ATTRIBUTION one again, and at its sharpest: an explicit null here would
     # read as "this run's hooks stayed inside their limits", which is a positive
@@ -388,6 +396,11 @@ _OPTIONAL_OUTCOME_FIELDS: tuple[str, ...] = (
     # takes.
     "reclassified_turns",
     "remedy",
+    # What the sandbox provider reported about the container, dropped on the
+    # same ATTRIBUTION terms: an explicit null would read as "this run's
+    # container termination was read and showed nothing", a positive finding
+    # only a failed run's observation takes.
+    "sandbox_termination",
     "step",
     # The acceptance verdict, which only an outcome that reached the post-merge
     # acceptance valve carries. Dropping it when unset keeps every pre-merge and

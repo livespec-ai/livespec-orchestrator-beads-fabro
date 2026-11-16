@@ -48,13 +48,19 @@ valve's duty is the narrower one implemented here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from livespec_orchestrator_beads_fabro._store_description import update_work_item_description
 from livespec_orchestrator_beads_fabro.commands._dispatcher_effective_criteria import (
     EffectiveCriteria,
     effective_criteria,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_host_leg import decisive_reproduction
+from livespec_orchestrator_beads_fabro.commands._dispatcher_incident_closure import (
+    INCIDENT_OBLIGATION_ERR,
+    closure_obligations_for,
+    incident_refusal_detail,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import ShellCommandRunner
 from livespec_orchestrator_beads_fabro.commands._dispatcher_lifecycle_writes import (
@@ -69,16 +75,26 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_pointer import
     pointer_in,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_record import (
-    PROOF_RECORD_TITLE,
     VERDICT_HOST_VERIFIED,
     VERDICT_HUMAN_ATTESTED,
     ProofRecord,
     latest_proof_record,
 )
+from livespec_orchestrator_beads_fabro.commands._drive_accept_valve_leg import (
+    OutstandingLeg,
+    host_leg,
+    human_leg,
+)
 from livespec_orchestrator_beads_fabro.commands._drive_valve_result import (
     invalid_source_state,
     valve_refusal,
     valve_success,
+)
+from livespec_orchestrator_beads_fabro.commands._intake_valve_claim_writes import (
+    WRITER_HUMAN_VALVE,
+    ClaimWrite,
+    resting_at,
+    valve_claim_refusal,
 )
 
 if TYPE_CHECKING:
@@ -96,26 +112,17 @@ __all__: list[str] = [
 HOST_REPLAY_PENDING_ERR = "host-replay-pending"
 HUMAN_ATTESTATION_PENDING_ERR = "human-attestation-pending"
 _ACCEPTANCE_STATUS = "acceptance"
-_HOST_RECORD_FORMAT = (
-    f"{PROOF_RECORD_TITLE} — {VERDICT_HOST_VERIFIED} — <session identity> — <UTC timestamp>"
-)
-_HUMAN_RECORD_FORMAT = (
-    f"{PROOF_RECORD_TITLE} — {VERDICT_HUMAN_ATTESTED} — <human identity> — <UTC timestamp>"
+# What an accept that carried the human-attested link has done by the time its
+# close is refused. The pointer is rewritten first, and a refused close does
+# not restore it; the rewrite is idempotent, so a second press is safe.
+_POINTER_REWRITTEN = (
+    "the proof pointer in the item's description was already rewritten to cite the "
+    "human-attested record, and that rewrite stands"
 )
 _NO_POINTER_DETAIL = (
     "the description carries no Proof of Done pointer, so the pull request"
     " holding the record cannot be identified"
 )
-
-
-@dataclass(frozen=True, kw_only=True)
-class _OutstandingLeg:
-    """One leg still owed, the assertions it covers, and the record that clears it."""
-
-    err: str
-    assertions: tuple[str, ...]
-    record_format: str
-    awaited: str
 
 
 def accept_item(
@@ -129,9 +136,20 @@ def accept_item(
     """Accept one parked item, or refuse it while a host or human leg is outstanding."""
     if item.status != _ACCEPTANCE_STATUS:
         return invalid_source_state(aid=action_id, item=item, expected=_ACCEPTANCE_STATUS)
+    # An expedited incident is accepted only once its chain records `closed`:
+    # a human press is not final normal proof, and an expedited merge is not one.
+    incident = closure_obligations_for(config=config, item_id=item.id)
+    if incident:
+        detail = incident_refusal_detail(item_id=item.id, outstanding=incident)
+        return valve_refusal(
+            aid=action_id,
+            wid=item.id,
+            err=INCIDENT_OBLIGATION_ERR,
+            msg=f"accept refused: {detail}.",
+        )
     criteria = effective_criteria(item=item)
     if not criteria.pending_leg_assertions:
-        return _close(config=config, item=item, action_id=action_id)
+        return _close(repo=repo, config=config, item=item, action_id=action_id)
     return _gated_accept(
         repo=repo, config=config, item=item, action_id=action_id, criteria=criteria, runner=runner
     )
@@ -175,7 +193,7 @@ def _gated_accept(
         )
     human = criteria.human_attested_assertions
     if not human:
-        return _close(config=config, item=item, action_id=action_id)
+        return _close(repo=repo, config=config, item=item, action_id=action_id)
     attested = (
         None
         if records is None
@@ -189,7 +207,9 @@ def _gated_accept(
             detail=f"no such record on pull request #{pointer.pull_request}",
         )
     _carry_both_links(config=config, item=item, pointer=pointer, record=attested)
-    return _close(config=config, item=item, action_id=action_id)
+    return _close(
+        repo=repo, config=config, item=item, action_id=action_id, already_done=_POINTER_REWRITTEN
+    )
 
 
 def _records(
@@ -205,27 +225,42 @@ def _records(
 def _unreproduced_host_assertions(
     *, criteria: EffectiveCriteria, records: tuple[ProofRecord, ...] | None
 ) -> tuple[str, ...]:
-    """The host-captured assertions no `host_verified` record lists as reproduced.
+    """The host-captured assertions no decisive `host_verified` record reproduces.
 
     An UNREADABLE pull request (`records is None`) leaves every host assertion
     outstanding, which is the same answer an empty pull request gives and is the
     right one for both: the valve disposes on observed evidence, and a failed read
     is evidence of nothing.
+
+    Records are shared by every item whose run used the pull request, so the newest
+    record can name a sibling item's assertions. Each assertion therefore finds its
+    own newest record that names it; a record that omits it decides nothing.
     """
     host = criteria.host_captured_assertions
     if not host:
         return ()
-    verified = (
-        None
-        if records is None
-        else latest_proof_record(records=records, verdict=VERDICT_HOST_VERIFIED)
-    )
-    if verified is None:
+    if records is None:
         return host
-    return tuple(one for one in host if verified.reproduced(assertion=one) is not True)
+    return tuple(
+        one for one in host if not _host_assertion_reproduced(records=records, assertion=one)
+    )
 
 
-def _leading_leg(*, criteria: EffectiveCriteria) -> _OutstandingLeg:
+def _host_assertion_reproduced(*, records: tuple[ProofRecord, ...], assertion: str) -> bool:
+    """Whether the newest record that decides one assertion lists it as reproduced.
+
+    Decided by the same table the post-merge pass reads, so a `host_not_reproduced`
+    record outranks an earlier reproduction and a `host_verified` record listing the
+    assertion as not reproduced decides nothing.
+    """
+    for record in reversed(records):
+        decision = decisive_reproduction(record=record, assertion=assertion)
+        if decision is not None:
+            return decision[0]
+    return False
+
+
+def _leading_leg(*, criteria: EffectiveCriteria) -> OutstandingLeg:
     """The leg a no-pointer refusal reports, host first for the usual reason.
 
     A no-pointer item owes every leg it declares, and the refusal can name one; the
@@ -237,22 +272,12 @@ def _leading_leg(*, criteria: EffectiveCriteria) -> _OutstandingLeg:
     return _human_leg(assertions=criteria.human_attested_assertions)
 
 
-def _host_leg(*, assertions: tuple[str, ...]) -> _OutstandingLeg:
-    return _OutstandingLeg(
-        err=HOST_REPLAY_PENDING_ERR,
-        assertions=assertions,
-        record_format=_HOST_RECORD_FORMAT,
-        awaited="an independent host replay of",
-    )
+def _host_leg(*, assertions: tuple[str, ...]) -> OutstandingLeg:
+    return host_leg(assertions=assertions, err=HOST_REPLAY_PENDING_ERR)
 
 
-def _human_leg(*, assertions: tuple[str, ...]) -> _OutstandingLeg:
-    return _OutstandingLeg(
-        err=HUMAN_ATTESTATION_PENDING_ERR,
-        assertions=assertions,
-        record_format=_HUMAN_RECORD_FORMAT,
-        awaited="human attestation of",
-    )
+def _human_leg(*, assertions: tuple[str, ...]) -> OutstandingLeg:
+    return human_leg(assertions=assertions, err=HUMAN_ATTESTATION_PENDING_ERR)
 
 
 def _carry_both_links(
@@ -275,8 +300,33 @@ def _carry_both_links(
     )
 
 
-def _close(*, config: StoreConfig, item: WorkItem, action_id: str) -> dict[str, Any]:
-    write_work_item_status_and_reconcile(path=config, item_id=item.id, status="done")
+def _close(
+    *,
+    repo: Path,
+    config: StoreConfig,
+    item: WorkItem,
+    action_id: str,
+    already_done: str | None = None,
+) -> dict[str, Any]:
+    """Close the accepted item; `already_done` is what this press wrote before the close."""
+    lost = ClaimWrite(
+        repo=repo,
+        path=config,
+        item_id=item.id,
+        writer=WRITER_HUMAN_VALVE,
+        intent="accept",
+        still_as_decided=resting_at(status=_ACCEPTANCE_STATUS),
+    ).write_status(
+        status="done",
+        reconcile=True,
+        unguarded=lambda: write_work_item_status_and_reconcile(
+            path=config, item_id=item.id, status="done"
+        ),
+    )
+    if lost is not None:
+        return valve_claim_refusal(
+            aid=action_id, wid=item.id, verb="accept", outcome=lost, already_done=already_done
+        )
     return valve_success(
         aid=action_id,
         wid=item.id,
@@ -287,9 +337,7 @@ def _close(*, config: StoreConfig, item: WorkItem, action_id: str) -> dict[str, 
     )
 
 
-def _refusal(
-    *, item: WorkItem, action_id: str, leg: _OutstandingLeg, detail: str
-) -> dict[str, Any]:
+def _refusal(*, item: WorkItem, action_id: str, leg: OutstandingLeg, detail: str) -> dict[str, Any]:
     """The refusal, naming every assertion the leg covers AND the record format.
 
     Both halves are required by the clause and neither substitutes for the other:

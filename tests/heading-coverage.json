@@ -97,9 +97,9 @@
     "heading": "## Planning Lane realization",
     "spec_root": "SPECIFICATION",
     "spec_file": "contracts.md",
-    "test": "TODO",
-    "reason": "Added by the planning-lane-realization revise pass (epic livespec-zs22, increment 3a / work-items livespec-zs22.5 + livespec-zs22.3). The shared heading_coverage check is satisfied by enumerating every SPECIFICATION/ H2 heading; the plan front-end's behavior is exercised by the e2e-cli fixture and the handoff self-sufficiency gate rather than a unit test, so a real test id is populated by the governed propose-change/revise resulting_files[] mechanism once this heading gains an exercising test.",
-    "work_item": "bd-ib-heat"
+    "test": "tests.integration.test_plan_archive_completeness_review_scenario55.test_scenario55_archive_commissions_and_requires_complete_durable_review",
+    "reason": "Bound by bd-ib-h5jr5x to an integration-tier scenario test that creates a real plan and closed child through the plan package, proves the archive entry point commissions a supplied fresh completeness reviewer when no durable evidence exists, refuses a review that withholds coverage for a deferred research requirement, and archives only after valid independent evidence is durable.",
+    "work_item": "bd-ib-h5jr5x"
   },
   {
     "heading": "## Dispatch-time baseline conformance gate",
@@ -276,27 +276,27 @@
     "heading": "## Scenario 8 \u2014 Intake Definition-of-Ready triage",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "tests.integration.test_intake_dor_scenario8.test_single_acceptance_item_is_tagged_ready",
+    "test": "tests.integration.test_intake_dor_scenario8.test_auto_admission_single_acceptance_item_lands_ready",
     "clauses": [
       {
         "gap_id": "gap-55i6toie",
         "scenario": "Scenario 8 \u2014 Intake Definition-of-Ready triage"
       }
     ],
-    "reason": "Integration-tier acceptance for the shared intake Definition-of-Ready checklist (livespec_orchestrator_beads_fabro.intake_dor) that all three capture front-ends call: the three Scenario-8 cases (single-acceptance->ready, epic->needs-regroom, non-verifiable-or-blocked->not-yet-actionable) are exercised through the real store/client seam against the in-memory FakeBeadsClient (the hermetic CI backend). The bound node id is the single-acceptance->ready journey; the epic->needs-regroom and non-verifiable/blocked->not-yet-actionable cases are sibling tests in the same module, with the per-gate precedence pinned by evaluate()."
+    "reason": "Integration-tier acceptance for the shared intake Definition-of-Ready checklist (livespec_orchestrator_beads_fabro.intake_dor) that all three capture front-ends call: the three Scenario-8 cases (single-acceptance->ready, epic->needs-regroom, non-verifiable-or-blocked->not-yet-actionable) are exercised through the real store/client seam against the in-memory FakeBeadsClient (the hermetic CI backend). The bound node id is the auto-admission single-acceptance->ready journey; the manual-admission pending-approval case, the epic->backlog case and the non-verifiable/blocked cases are sibling tests in the same module, with the per-gate precedence pinned by evaluate()."
   },
   {
     "heading": "## Scenario 9 \u2014 backlog bounce state and transitions",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "tests.integration.test_regroom_state_machine_scenario9.test_groom_approval_exits_needs_regroom_by_filing_ready_slices",
+    "test": "tests.integration.test_regroom_state_machine_scenario9.test_close_regroomed_out_closes_backlog_item_with_replacement_reason",
     "clauses": [
       {
         "gap_id": "gap-qyvkjjyg",
         "scenario": "Scenario 9 \u2014 backlog bounce state and transitions"
       }
     ],
-    "reason": "Integration-tier acceptance for the needs-regroom state machine (livespec_orchestrator_beads_fabro.regroom): the three Scenario-9 transitions are exercised through the real store/client seam against the in-memory FakeBeadsClient (the hermetic CI backend). The bound node id is the exit-by-filing-ready-slices journey; the entry-via-DoR-failure and entry-via-non-convergence-bounce transitions are sibling tests in the same module."
+    "reason": "Integration-tier acceptance for the needs-regroom state machine (livespec_orchestrator_beads_fabro.regroom): the three Scenario-9 transitions are exercised through the real store/client seam against the in-memory FakeBeadsClient (the hermetic CI backend). The bound node id is the groom-approval journey that regrooms the original backlog item out (not silently dropped); the refusal cases are sibling tests in the same module."
   },
   {
     "heading": "## Scenario 10 \u2014 Dispatcher never auto-approves a manual-admission spec-change item",
@@ -315,14 +315,14 @@
     "heading": "## Scenario 11 \u2014 Dispatcher bounces a non-converging slice to backlog",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "tests.integration.test_dispatcher_non_convergence_scenario11.test_dispatch_bounces_stalled_slice_to_backlog",
+    "test": "tests.integration.test_dispatcher_non_convergence_scenario11.test_dispatch_bounces_dot_non_converged_slice_to_backlog",
     "clauses": [
       {
         "gap_id": "gap-rs4tkntz",
         "scenario": "Scenario 11 \u2014 Dispatcher bounces a non-converging slice to backlog"
       }
     ],
-    "reason": "Integration-tier acceptance for the Dispatcher's non-convergence bounce (slice bd-ib-dnw2ei, gap-rs4tkntz): under the work-item-state-machine lifecycle the bounce target is the first-class backlog status (the slice leaves the WIP for re-grooming), not the prior needs-regroom label. The dispatch CLI is driven through the real store/client seam against the in-memory FakeBeadsClient (the hermetic CI backend); the bound node id is the stalled-slice bounce-to-backlog journey; the DOT-marker bounce, the no-bounce-on-ordinary-failure/green cases, and the predicate cases are sibling tests in the same module."
+    "reason": "Integration-tier acceptance for the Dispatcher's non-convergence bounce (slice bd-ib-dnw2ei, gap-rs4tkntz): under the work-item-state-machine lifecycle the bounce target is the first-class backlog status (the slice leaves the WIP for re-grooming), not the prior needs-regroom label. The dispatch CLI is driven through the real store/client seam against the in-memory FakeBeadsClient (the hermetic CI backend). The bound node id is the DOT-marker non-converged slice bounce-to-backlog journey; the no-bounce-on-ordinary-failure/green cases and the predicate cases are sibling tests in the same module."
   },
   {
     "heading": "## Scenario 12 \u2014 Dispatcher emits calibration telemetry",
@@ -433,8 +433,8 @@
     "heading": "## Scenario 20 \u2014 Review gate routes a green build through code review before PR",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "tests.integration.test_workflow_acp_adapter_parameterized.test_implementer_and_review_nodes_use_their_respective_inputs",
-    "reason": "Integration-tier acceptance for Scenario 20: the bound node id inspects the shipped implement-work-item Fabro graph and verifies the implementer nodes (`implement`, `fix`, `pr`, and `review_fix`) use the Codex-routable `acp_adapter` input while the review-only node uses the separate Claude `review_adapter`; sibling tests prove the review adapter is pinned through ANTHROPIC_MODEL + CLAUDE_CODE_EFFORT_LEVEL and no ACP node hard-codes the Claude adapter. The gate is BLOCKING by default: a past-cap blocking finding escalates the item to blocked / needs-human unless the effective merge_on_review_cap ships it (contracts.md \u00a7\"Dispatcher policy settings\"); the graph's approve/fix edge behavior is codified in the workflow DOT, and the blocking/ship-on-cap disposition binds its test when the dispatcher-policy-settings implementation slice lands."
+    "test": "tests.integration.test_workflow_acp_adapter_parameterized.test_scenario20_review_approve_edge_is_conditioned",
+    "reason": "Integration-tier acceptance for Scenario 20: the bound node id inspects the shipped implement-work-item Fabro graph and verifies the review gate's approve edge leaves `review` only through an explicit `preferred_label=approve` condition and that nothing routes from `review` to `pr` without the proof replay, so a green build reaches publication only through the review gate; sibling tests in the same module prove the label-only routing through admission, the unconditional needs-human fallback and the bounded review-fix loop. The gate is BLOCKING by default: a past-cap blocking finding escalates the item to blocked / needs-human unless the effective merge_on_review_cap ships it (contracts.md \u00a7\"Dispatcher policy settings\"); the graph's approve/fix edge behavior is codified in the workflow DOT, and the blocking/ship-on-cap disposition binds its test when the dispatcher-policy-settings implementation slice lands."
   },
   {
     "heading": "## Scenario 21 \u2014 Codex plugin discovery and full-access posture",
@@ -448,7 +448,7 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "contracts.md",
     "test": "TODO",
-    "reason": "Ratified at the approval-model restoration (design record: repo thewoolleyman/livespec, plan/archive/work-item-state-machine, decisions 26/32): plain-English semantics for the seven lifecycle states, the approve-is-pending-approval-to-ready transition rule, the maintainer's verbatim rationale, and the intent-preservation clauses. Definitional semantics + process clauses; the transition behaviors are exercised via Scenarios 8/10/23/31/33's bindings, and the post-ratification rework slice binds the re-targeted behaviors when its tests land.",
+    "reason": "Ratified at the approval-model restoration (design record: repo livespec-ai/livespec, plan/archive/work-item-state-machine, decisions 26/32): plain-English semantics for the seven lifecycle states, the approve-is-pending-approval-to-ready transition rule, the maintainer's verbatim rationale, and the intent-preservation clauses. Definitional semantics + process clauses; the transition behaviors are exercised via Scenarios 8/10/23/31/33's bindings, and the post-ratification rework slice binds the re-targeted behaviors when its tests land.",
     "work_item": "bd-ib-heat"
   },
   {
@@ -530,8 +530,8 @@
     "heading": "## Scenario 32 \u2014 Adopter-target dispatch compatibility",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "tests.integration.test_adopter_dispatch_app_reach_scenario32.test_scenario32_an_unreachable_adopter_target_refuses_before_any_run_exists, tests.integration.test_adopter_dispatch_prepare_steps_scenario32.test_scenario32_an_adopter_carrying_its_own_workflow_runs_its_own_prepare_chain, tests.integration.test_adopter_dispatch_pull_primary_scenario32.test_scenario32_the_pull_primary_stage_pulls_the_targets_own_default_branch",
-    "reason": "Bound by bd-ib-7fcmla, which re-owned this entry under coordinator ruling R662 (gitops-fleet-capacity-monitoring, 2026-10-22): every owner the previous reason named (bd-ib-z2ctra, bd-ib-hkzcfb, bd-ib-w4iaaf) is done, so the entry had no live owner and check-no-todo-registry could not see the debt. One integration-tier node id per gherkin block, each driving production code against the committed adopter fixture: the App-reach preflight through the REAL pre-dispatch wall, so \"refuses BEFORE launching\" is observable as a refusal that reached no admission; the target-local workflow resolution plus the prepare-parameter projection, because the steps that run come from the dispatched workflow AND from the typed values it reads and either alone can smuggle a fleet constant; and the post-merge janitor's pull-primary stage through the REAL post_merge, since the argv builder alone cannot show the flow reaches it. Each module carries its own positive control, because every assertion here is an ABSENCE and an absence reported by an instrument that cannot return a hit is not evidence.",
+    "test": "tests.integration.test_adopter_dispatch_app_reach_scenario32.test_scenario32_an_unreachable_adopter_target_refuses_before_any_run_exists",
+    "reason": "Bound by bd-ib-7fcmla, which re-owned this entry under coordinator ruling R662 (gitops-fleet-capacity-monitoring, 2026-10-22): every owner the previous reason named (bd-ib-z2ctra, bd-ib-hkzcfb, bd-ib-w4iaaf) is done, so the entry had no live owner and check-no-todo-registry could not see the debt. This integration-tier node drives the App-reach preflight through the real pre-dispatch wall, so \"refuses BEFORE launching\" is observable as a refusal that reached no admission. Its instruments include the identity and reach probes and the journaled preflight refusal, so an absence of a launch is not inferred from an uninformative exit code.",
     "work_item": "bd-ib-heat"
   },
   {
@@ -763,9 +763,9 @@
     "heading": "## Scenario 55 \u2014 plan archive commissions a missing independent completeness review",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "TODO",
-    "reason": "Added by the automatic-archive-completeness-review revision. The behavior requires an integration-tier or higher exercising test because it coordinates a real plan, ledger evidence, and archive state; the implementation slice bd-ib-ydjf7k supplies that binding.",
-    "work_item": "bd-ib-heat"
+    "test": "tests.integration.test_plan_archive_completeness_review_scenario55.test_scenario55_archive_commissions_and_requires_complete_durable_review",
+    "reason": "Bound by bd-ib-h5jr5x to an integration-tier scenario test that creates a real plan and closed child through the plan package, proves the archive entry point commissions a supplied fresh completeness reviewer when no durable evidence exists, refuses a review that withholds coverage for a deferred research requirement, and archives only after valid independent evidence is durable.",
+    "work_item": "bd-ib-h5jr5x"
   },
   {
     "heading": "## Not-human-gated decision constraints",
@@ -832,7 +832,7 @@
     "heading": "## ACP node timeouts",
     "spec_root": "SPECIFICATION",
     "spec_file": "contracts.md",
-    "test": "tests.livespec_orchestrator_beads_fabro.commands.test_dispatcher_node_timeouts.test_configured_node_keeps_its_value_and_others_take_the_default",
+    "test": "tests.livespec_orchestrator_beads_fabro.commands.test_dispatcher_node_timeouts.test_configured_node_keeps_its_value_and_others_keep_their_declaration",
     "work_item": "bd-ib-cnkf",
     "reason": "Bound by bd-ib-cnkf: a configured node timeout renders as its own literal duration while every unconfigured node resolves to the 1800-second default. A contracts.md heading MAY bind a unit-tier test; the same module covers the validation refusals, the no-template-opener rendering, and the derived subprocess ceiling."
   },
@@ -847,8 +847,8 @@
     "heading": "## Scenario 64 \u2014 Every Codex ACP node runs a pinned model, and the opt-out is a true no-op",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "tests.integration.test_dispatcher_codex_pins_and_provider_limits_scenarios64_65.test_scenario64_dispatcher_renders_pinned_codex_adapters_and_true_opt_out",
-    "reason": "Ratified as retroactive cover for PR #1711. Bound to an integration-tier test that renders the Dispatcher Fabro inputs for both Codex adapters, validates repo-level tier overrides, and proves the empty-model opt-out renders the unpinned base adapter byte-for-byte."
+    "test": "tests.integration.test_dispatcher_codex_pins_and_provider_limits_scenarios64_65.test_scenario64_a_structured_codex_entry_pins_exactly_the_node_it_names",
+    "reason": "Ratified as retroactive cover for PR #1711. Bound to an integration-tier test. The bound node id renders the Dispatcher Fabro inputs for a structured Codex entry and proves it pins exactly the node it names while every other node is unaffected; the unconfigured-defaults and retired-key cases are sibling tests in the same module. The Scenario 64 explicit opt-out case (the manual form rendering the un-pinned base string) has no integration-tier test in this repository yet."
   },
   {
     "heading": "## Scenario 65 \u2014 A provider ceiling is permanent and surfaces the provider's own sentence",
@@ -1026,7 +1026,7 @@
     "heading": "## Scenario 89 \u2014 Node timeouts resolve from configuration and land as literal durations",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "tests.integration.test_node_timeouts_scenario89.test_configured_node_keeps_its_value_and_others_default",
+    "test": "tests.integration.test_node_timeouts_scenario89.test_configured_node_keeps_its_value_and_others_keep_workflow_defaults",
     "work_item": "bd-ib-cnkf",
     "reason": "Bound by bd-ib-cnkf to the integration-tier journey: a real dispatch through dispatcher.main reads back the workflow graph the run receives and asserts the configured node keeps its value while the others take the 1800-second default. The same module carries the scenario's other three cases \u2014 the all-default render with no template opener, the derived subprocess ceiling, and the refusal before any run exists."
   },
@@ -1034,7 +1034,7 @@
     "heading": "## Scenario 90 \u2014 The Codex adapter is identified by its baked path and pinned through its environment",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "tests.integration.test_codex_adapter_baked_path_scenarios90_91.test_scenario90_a_default_dispatch_renders_both_adapters_in_their_ratified_forms",
+    "test": "tests.integration.test_codex_adapter_baked_path_scenarios90_91.test_scenario90_a_codex_pinned_dispatch_renders_both_adapters_in_their_ratified_forms",
     "work_item": "bd-ib-nr3pon",
     "reason": "Bound by bd-ib-nr3pon (commission item E2) leg (a) to the INTEGRATION-tier journey the scenario describes: a real three-layer resolution against this repository's committed workflow inputs, rendered through the dispatch argv builder, asserting the publish adapter is its env assignments in sorted key order followed by the baked /opt/livespec/codex-acp/bin/codex-acp path, that model and model_reasoning_effort ride inside CODEX_CONFIG rather than as -c arguments, and that the Claude implementer string is byte-identical. The same module carries the scenario's other three cases \u2014 the publish class declaring INITIAL_AGENT_MODE agent-full-access, a review node routed to Codex rendering read-only, and the prohibition on identifying the adapter by package name. A unit-tier test cannot discharge it: the assertion is about the adapter string a real dispatch renders."
   },
@@ -1369,8 +1369,8 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "Integration-tier coverage is owed by the post-revise implementation mirror for livespec-n33rwg.10. The test must drive the real store and candidate-composition seams across next, the needs-attention implementation item composed from next, idle-factory output, and the Dispatcher drain, with discriminating human-only, groom-kind, and repaired-gradeable controls; no current implementation can honestly bind the new behavior before that mirror lands.",
-    "work_item": "livespec-n33rwg.10"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-4zdihj, this tenant's implementation item for Scenario 128, binds it to the real integration test. Repointed from the cross-tenant owner livespec-n33rwg.10, which this repository's ledger cannot resolve.",
+    "work_item": "bd-ib-4zdihj"
   },
   {
     "heading": "## Scenario 129 \u2014 A structured candidate renders through the catalogs and keeps the manual form as the escape hatch",
@@ -1518,17 +1518,15 @@
     "heading": "## Scenario 147 \u2014 A plan deadline survives pointer rewrites and permits causal recovery",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "TODO",
-    "reason": "A real integration-tier test is owed for this new behavior; the named work item owns landing it, with released host capture and independent replay additionally owed where the scenario requires them.",
-    "work_item": "bd-ib-zi5ygh"
+    "test": "tests.integration.test_plan_result_budget_scenario147",
+    "reason": "Bound after its closed owner bd-ib-zi5ygh landed PR #2904: this module drives every sanctioned pointer writer and asserts the original budget survives; tests.integration.test_plan_causal_recovery_scenario147 exercises the overdue-never-blocks and optional typed causal recovery sub-scenarios. Not reached by either module at the integration tier: the replacement-write plan-progress-event and the partial-write reconciliation lines."
   },
   {
     "heading": "## Scenario 148 \u2014 Unattended resume observes expired, legacy and unobservable progress",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "TODO",
-    "reason": "A real integration-tier test is owed for this new behavior; the named work item owns landing it, with released host capture and independent replay additionally owed where the scenario requires them.",
-    "work_item": "bd-ib-zi5ygh"
+    "test": "tests.integration.test_plan_resume_progress_scenario148",
+    "reason": "Bound after its closed owner bd-ib-zi5ygh landed PR #2904: this module exercises the overdue and unobservable unattended-resume sub-scenarios; tests.integration.test_plan_legacy_tracking_scenario148 exercises the legacy-read sub-scenario."
   },
   {
     "heading": "## Scenario 149 \u2014 Acknowledgment cannot discharge a target-effect relay",
@@ -1582,32 +1580,31 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "A real integration-tier test is owed.",
-    "work_item": "bd-ib-z46mth"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xuott6 owes it, replacing the closed owner bd-ib-z46mth, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xuott6"
   },
   {
     "heading": "## Scenario 155 \u2014 A pane wait ends on non-working, missing and uncertain states",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "TODO",
-    "reason": "A real integration-tier test is owed.",
-    "work_item": "bd-ib-s3rj6d"
+    "test": "tests.e2e.test_session_wait_pane_live_herdr",
+    "reason": "Bound after its closed owner bd-ib-s3rj6d: this e2e module drives each pane state, a missing pane, a changed server generation and an unreadable server on a real isolated herdr server."
   },
   {
     "heading": "## Scenario 156 \u2014 The shared deadline bounds stalled probes and telemetry",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "A real integration-tier test is owed.",
-    "work_item": "bd-ib-z46mth"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xuott6 owes it, replacing the closed owner bd-ib-z46mth, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xuott6"
   },
   {
     "heading": "## Scenario 157 \u2014 Inventory distinguishes produced and acknowledged wake-ups",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "A real integration-tier test is owed.",
-    "work_item": "bd-ib-z46mth"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xuott6 owes it, replacing the closed owner bd-ib-z46mth, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xuott6"
   },
   {
     "heading": "## Scenario 158 \u2014 The host turn-end check exposes outstanding wait mismatches",
@@ -1722,24 +1719,23 @@
     "heading": "## Scenario 171 \u2014 A still-running master CI run makes the preflight wait, not refuse",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "tests.integration.test_master_ci_pending_wait_scenario171.test_scenario171_pending_master_ci_green_within_bound_dispatches_and_journals_pass, tests.integration.test_master_ci_pending_wait_scenario171.test_scenario171_pending_master_ci_red_within_bound_refuses_naming_run, tests.integration.test_master_ci_pending_wait_scenario171.test_scenario171_newer_green_master_ci_run_replaces_wait_target, tests.integration.test_master_ci_pending_wait_scenario171.test_scenario171_pending_master_ci_expiry_defers_without_claim",
-    "reason": "Bound to integration-tier Dispatcher journeys for the master-CI preflight's bounded wait on a still-running default-branch run: green proceeds, red refuses, a newer run is followed, and bound expiry defers with reason master-ci-pending. Bound by bd-ib-yzk2h2, which re-owns the completed bd-ib-ex35cb test debt.",
+    "test": "tests.integration.test_master_ci_pending_wait_scenario171.test_scenario171_pending_master_ci_green_within_bound_dispatches_and_journals_pass",
+    "reason": "Bound to an integration-tier Dispatcher journey for the master-CI preflight's bounded wait on a still-running default-branch run: green proceeds after the pending run completes and journals the pass. Bound by bd-ib-yzk2h2, which re-owns the completed bd-ib-ex35cb test debt.",
     "work_item": "bd-ib-yzk2h2"
   },
   {
     "heading": "## Scenario 172 \u2014 A stall-watchdog cancel is never non-convergence: a first cancel is released and recovered, a second rests for a human",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "TODO",
-    "reason": "Ratified 2026-10-12 by the stall-watchdog-cancel-recovery revision (plan stall-watchdog-false-kills, epic bd-ib-laf735). Integration-tier tests are owed for the watchdog liveness rule (bd-ib-qsk4o5), the not-non-convergence routing and second-cancel rest (bd-ib-nfbyot), the cancel-record resume anchor (bd-ib-3snvbf), and the released item's resume or seeded re-dispatch (bd-ib-qgcpoc). Revision v147 re-pointed this binding from bd-ib-3snvbf to bd-ib-qgcpoc after bd-ib-3snvbf's Definition of Done was re-cut on 2026-10-15; bd-ib-qgcpoc, the last carrier to land, owns the binding.",
-    "work_item": "bd-ib-qgcpoc"
+    "test": "tests.integration.test_dispatcher_stall_cancel_scenario172",
+    "reason": "Bound after its closed owner bd-ib-qgcpoc landed PR #3199: this module is the heading's declared integration binding and exercises the not-non-convergence routing, the cancel record, the first-cancel release and replay, the second-cancel rest and calibration. Not reached by this module: the three watchdog-liveness sub-scenarios and the cancel-anchor and proof-record-precedence sub-scenarios."
   },
   {
     "heading": "## Scenario 173 \u2014 The progress watchdog observes its bound run by id and never lists the factory's run history",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "tests.integration.test_watchdog_bound_run_poll_scenario173.test_scenario173_a_bound_run_is_polled_by_id_and_the_history_is_never_listed_again",
-    "reason": "Integration-tier acceptance for the Dispatcher progress watchdog's run-observation rule (contracts.md, the \u201cObserving the run\u201d paragraph), implemented by bd-ib-6pdigz. The journey is driven through the PRODUCTION launcher \u2014 real WatchedFabroLauncher, real FabroPort, real per-poll observation seam, real threading \u2014 against a scripted CommandRunner and the in-memory FakeBeadsClient; only the fabro subprocess is stood in, and it is stood in at the ARGV, because the rule is about which call each poll ISSUES and no returned run distinguishes a per-run read from a listing that contained the same row. The bound node id is the listing-then-read case, which carries BOTH halves of the clause on one dispatch: the listing is permitted before the bind and forbidden after it, and a fixture showing only the second half could not tell a correct build from one that never discovered its run. The terminal-run, no-longer-held and failed-read cases are sibling tests in the same module; the last two are asserted against each other because a vanished run, a run the factory still holds, and a read that observed nothing all report matched: False and would satisfy a boolean-only assertion identically.",
+    "reason": "Integration-tier acceptance for the Dispatcher progress watchdog's run-observation rule (contracts.md, the \u201cObserving the run\u201d paragraph), implemented by bd-ib-6pdigz. The journey is driven through the PRODUCTION launcher \u2014 real WatchedFabroLauncher, real FabroPort, real per-poll observation seam, real threading \u2014 against a scripted CommandRunner and the in-memory FakeBeadsClient; only the fabro subprocess is stood in, and it is stood in at the ARGV, because the rule is about which call each poll ISSUES and no returned run distinguishes a per-run read from a listing that contained the same row. The bound node id is the listing-then-read case, which carries BOTH halves of the clause on one dispatch: the listing is permitted before the bind and forbidden after it, and a fixture showing only the second half could not tell a correct build from one that never discovered its run. The terminal-run, no-longer-held and failed-read cases are sibling tests in the same module; the last two are asserted against each other because a vanished run, a run the factory still holds, and a read that observed nothing all report matched: False and would satisfy a boolean-only assertion identically. The seven cases that revise the-dispatcher-s-watch-still adds to this scenario (the status and stage list read in one request, an unchanged poll that issues no other factory read, the events read at a stage boundary, the events read at a terminal state or needs-human, an open command node read from the stage list holding off the stall cancel, the events read before a stall cancel, and a failed pre-decision events read deferring the decision) are not exercised by this test; the implementing work-item bd-ib-22j24v owns their tests.",
     "work_item": "bd-ib-6pdigz"
   },
   {
@@ -1751,7 +1747,7 @@
     "work_item": "bd-ib-7f66ar"
   },
   {
-    "heading": "## Scenario 175 \u2014 A run past the whole-run wall budget is exported, cancelled and rested for a human",
+    "heading": "## Scenario 175 \u2014 A run past the whole-run wall budget continues while it progresses, and otherwise is exported, cancelled and rested for a human",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "tests.integration.test_run_wall_budget_scenario175"
@@ -1767,8 +1763,8 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "Ratified 2026-10-14 by the v134 revision (plan publish-draft-green-work-loss, epic bd-ib-acrr56). PARTIALLY BOUND: the maintainer's groom ruling of 2026-10-14 split the heading, and bd-ib-xi63mq has implemented and bound its publish_draft command-node sub-scenarios at the integration tier -- 'publish_draft resolves its timeout from configuration' by tests.integration.test_repository_publication_timeouts, and both over-limit-push sub-scenarios by tests.integration.test_workflow_publish_draft_hook_limit and tests.integration.test_needs_human_hook_over_limit_cause. An integration-tier test is still OWED for the two implement-node sub-scenarios ('An over-limit commit hook is reaped before the next commit' and 'A recovered hook-over-limit event is not the cause of a later stop'); work-item bd-ib-6p7kkd implements them and owns that binding, gated on the runtime prerequisite bd-ib-svw54x -- no ACP or app-server interface exposes the agent's tool-call limit, or the moment a tool call is ended by it, while the hook's process tree is still observable (measured on run 01M4WVSQ3GN7TVDHFM9QKSWJDA). The row stays TODO rather than naming one of the bound tests, because naming a test would report the whole heading as covered while two of its five sub-scenarios have no test at all.",
-    "work_item": "bd-ib-xi63mq"
+    "reason": "A test at the integration tier or above is owed for this heading. bd-ib-ntqv42 owns it; bd-ib-6p7kkd, the previous owner, is open but its Definition of Done promises no test for this heading.",
+    "work_item": "bd-ib-ntqv42"
   },
   {
     "heading": "## Scenario 179 \u2014 A sandbox commit whose hook outlasts one tool call completes with the hook's own verdict",
@@ -1824,8 +1820,8 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "Ratified by revision v147 accepting proposal released-item-recovery-routing (plan stall-watchdog-false-kills, epic bd-ib-laf735). Recovery routing is not implemented yet; an integration-tier test is owed for the six sub-scenarios, and work-item bd-ib-qgcpoc implements them and owns that binding. The same mechanism discharges the shared provider-limit carriers bd-ib-ogymgj and bd-ib-kn7ktk.",
-    "work_item": "bd-ib-qgcpoc"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xuott6 owes it, replacing the closed owner bd-ib-qgcpoc, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xuott6"
   },
   {
     "heading": "## Scenario 186 \u2014 A provider exhaustion observed on one credential account does not refuse dispatch on another account of the same vendor",
@@ -1892,8 +1888,8 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "Ratified by revision v157 accepting proposal stranded-claim-release (plan run-lifecycle-false-verdicts, epic bd-ib-qen6rr). The claim half of run reconciliation (owning-host absent-run release, terminal-run completion, graded holds, convergent recovery) is not implemented yet; an integration-tier test is owed for the sub-scenarios, and work-item bd-ib-m0t0 implements them and owns that binding.",
-    "work_item": "bd-ib-m0t0"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xuott6 owes it, replacing the closed owner bd-ib-m0t0, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xuott6"
   },
   {
     "heading": "## Scenario 197 \u2014 A sandbox agent cannot remove the clone's repository or empty its whole tree, and ordinary in-tree removals still run",
@@ -1912,11 +1908,11 @@
     "work_item": "bd-ib-dpkip6"
   },
   {
-    "heading": "## Scenario 199 \u2014 A fix turn runs the check suite once per tree and counts a commit hook's full green run",
+    "heading": "## Scenario 199 \u2014 A fix turn grades each tree once, through its commit hook",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "tests.prompts.test_fix_check_suite_once_per_tree_scenario199.test_every_directive_to_run_the_suite_carries_the_once_per_tree_rule",
-    "reason": "Prompt-tier acceptance for this heading, completed by bd-ib-k6dwyv. The tier is tests.prompts (a declared scenario tier) because the deliverable IS the prose: the obligation is discharged by the agent out of the fix prompt and is rendered by no Python caller, so nothing host-side can observe whether a turn chose to run the suite twice, and the engine reports the resulting timeout as an ordinary node failure. The bound node id is the DIRECTIVE-SITE enumeration rather than a case reading the new section, because the defect was never a missing paragraph: each site that directs a run of the suite said to re-run it until green with no exemption, so a rule stated in a section the directive never references leaves the directive saying the thing that cost run 01M56YAEWMS8 its turn. That case collects every list item carrying the check-suite workflow input and requires the rule AT each of them, which fails for a third directive added later without it, and its count control asserts the enumeration reached both known sites so a splitter that matched nothing fails rather than reporting clean. The heading's three gherkin scenarios are sibling cases in the same module, each asserted POSITIVELY as the sentences that grant the arm rather than by probing for the absence of a phrase: the hook-run-counts scenario (test_a_hook_green_full_suite_run_is_counted_as_the_turn_s_run_for_that_tree), the partial-run-or-later-change scenario (test_a_partial_hook_run_or_a_later_change_still_owes_a_full_run), and the refresh-repair integrated-tree scenario (test_the_rule_reaches_the_refresh_repair_steps_integrated_tree); two further siblings pin that the rule relaxes neither the obligation nor the janitor re-run behind it, and that the section is read before the turn-finishing guidance. The graph control (test_the_graph_scan_names_one_fix_prompt_that_is_on_disk) is what makes the prompt under test the file the fix node actually dispatches."
+    "test": "tests.prompts.test_fix_check_suite_once_per_tree_scenario199.test_the_commit_hook_run_is_the_turn_s_only_grading_of_a_tree",
+    "reason": "Prompt-tier acceptance for this heading, completed by bd-ib-z5yzyq. The deliverable IS the fix prompt's prose, discharged by the agent turn and rendered by no Python caller. The bound case requires the sentences making the commit hook the turn's only grading of a tree with no full check suite run directed beyond it. Sibling cases in the same module bind an unchanged tree, reproduction through the failing tests a target's output names, a return without an exit status being still running, no second live suite, and a changed or Red-fast-path tree being committed through the hook; the dispatched prompt is bound in tests/livespec_orchestrator_beads_fabro/commands/test_dispatcher_payload_fix_prompt.py. Its control (test_the_graph_scan_names_one_fix_prompt_that_is_on_disk) derives the fix prompt from workflow.fabro's node block."
   },
   {
     "heading": "## Scenario 200 \u2014 A refresh whose conflicts lie only in declared record files merges them without a repair round",
@@ -1953,7 +1949,7 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "tests.integration.test_implement_completion_field_scenario204",
-    "reason": "Integration-tier acceptance for this heading, completed by bd-ib-ahxcjx. The module binds all three sub-scenarios of the v165 completion-field rule, and the tier is tests.integration because two layers are needed and neither establishes the other: the committed graph decides where an incomplete turn routes and what the implement stage's completion gate costs, and the gate's own shipped script bytes decide what counts as a stated completion. The three sub-scenarios execute those bytes against a real throwaway clone -- a stated incomplete and a stated nothing each exit non-zero with the partial-progress cause on stderr and in the stage-cause file the needs_human terminal renders, and a stated complete exits zero and leaves no cause behind -- while the graph cases assert the gate sits on implement's own fallthrough ahead of the diff breaker and routes its failures to the terminal an outcome=failed implement reaches. The prompt half of the clause, which directs the turn to state the field at all, is tests.prompts.test_implement_completion_field. The v208 hook-refusal sub-scenarios (re-entry, exhausted budget, nothing staged, staged-but-accepted) are bound by tests.integration.test_implement_hook_refusal_reentry_scenario204, which executes the implement_hook_route script against a clone with a stub pre-commit hook (bd-ib-y7372n). v262 (proposal implement-red-green-node-split) rewrote this scenario for the red/green node split; rebinding its test to the new nodes is owed at the integration tier: livespec-dev-tooling-sv6m5p (plan implement-test-performance) owns it; the implementation children are filed under that plan."
+    "reason": "Integration-tier acceptance for this heading, completed by bd-ib-ahxcjx. The module binds all three sub-scenarios of the v165 completion-field rule, and the tier is tests.integration because two layers are needed and neither establishes the other: the committed graph decides where an incomplete turn routes and what the implement stage's completion gate costs, and the gate's own shipped script bytes decide what counts as a stated completion. The three sub-scenarios execute those bytes against a real throwaway clone -- a stated incomplete and a stated nothing each exit non-zero with the partial-progress cause on stderr and in the stage-cause file the needs_human terminal renders, and a stated complete exits zero and leaves no cause behind -- while the graph cases assert the gate sits on implement's own fallthrough ahead of the diff breaker and routes its failures to the terminal an outcome=failed implement reaches. The prompt half of the clause, which directs the turn to state the field at all, is tests.prompts.test_implement_completion_field. The v208 hook-refusal sub-scenarios (re-entry, exhausted budget, nothing staged, staged-but-accepted) were bound by a test that executed the implement_hook_route script (bd-ib-y7372n); that node was removed from the graph by bd-ib-vvzd3v, because the red/green split had left it unreachable, and the test was removed with it. v262 (proposal implement-red-green-node-split) rewrote this scenario for the red/green node split; rebinding its test to the new nodes is owed at the integration tier: livespec-dev-tooling-sv6m5p (plan implement-test-performance) owns it; the implementation children are filed under that plan."
   },
   {
     "heading": "## Scenario 205 \u2014 Gap detection enumerates headings without an exercising test",
@@ -1968,16 +1964,15 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified in v168 with proposal provider-refusal-booked-as-success, and the owning work-item bd-ib-wkfwtx lands the integration-tier test that binds this entry.",
-    "work_item": "bd-ib-wkfwtx"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xuott6 owes it, replacing the closed owner bd-ib-wkfwtx, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xuott6"
   },
   {
     "heading": "## Scenario 210 \u2014 Reconciliation clears a stale fabro assignee from a ready item, and holds with a named reason every one it cannot clear",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified in v169 with proposal stale-fabro-assignee-reconciliation, and the owning work-item bd-ib-3lbt4o lands the integration-tier test that binds this entry.",
-    "work_item": "bd-ib-3lbt4o"
+    "test": "tests.integration.test_stale_assignee_clearance_scenario210",
+    "reason": "Completed by bd-ib-3lbt4o (v169). The integration module drives the real reconcile-runs pass: a failed, absent and succeeded run each clear the assignee, leave the item released for recovery and write one journal record and one comment, a second pass writes nothing, and an unattributable, other-host or live-run stale assignee is held unchanged. test_dispatcher_stale_assignee_clearance drives the claim survey over the in-memory ledger for each sub-scenario: a failed, absent and succeeded run each clear the assignee with one journal record and one comment; every hold reason of the stale assignee hold order is listed and leaves the item unchanged; an interrupted clearance writes only its missing effects; a second pass writes nothing; and a human move before the assignee write is held claim-changed. test_dispatcher_stale_assignee_release binds the released-for-recovery grading, and the reconcile-merged ready-item case lives in tests.integration.test_reconcile_merged_locally_built_item_scenario245."
   },
   {
     "heading": "## Scenario 206 \u2014 The spec-change tier is decided by the spec-stated judgement, and a feature waits for ratification",
@@ -2115,8 +2110,8 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal publish-push-refusal-names-its-cause, and the owning work-item bd-ib-35kfra makes a refused publish_draft push name its cause (pre-push hook failed targets, non-fast-forward, unreachable origin), together with the test that binds this entry.",
-    "work_item": "bd-ib-35kfra"
+    "reason": "A test at the integration tier or above is owed for this heading. bd-ib-ntqv42 owns it; bd-ib-7owmkq, the previous owner, is open but its Definition of Done promises no test for this heading.",
+    "work_item": "bd-ib-ntqv42"
   },
   {
     "heading": "## Scenario 225 \u2014 The publish-branch reclaim finds an earlier dispatch journaled in another worktree",
@@ -2135,12 +2130,12 @@
     "work_item": "bd-ib-reapbq"
   },
   {
-    "heading": "## Scenario 220 \u2014 An exhausted merge-poll budget on an open pull request rests the item for resume",
+    "heading": "## Scenario 220 \u2014 An exhausted merge-poll budget hands an armed, passing pull request to reconciliation",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "tests.integration.test_merge_poll_budget_exhausted_scenario220.test_an_open_non_conflicting_pull_request_at_expiry_rests_the_item_for_resume",
-    "reason": "Integration-tier acceptance for the Scenario 220 clause, implemented by bd-ib-l6rleb. The named case binds the heading's first sub-scenario: it drives the production engine and the production post-run disposition against the in-memory tenant, with the forge reporting the pull request open and not in conflict when the poll budget is spent, and asserts the item rests at blocked with blocked_reason needs-human, the outcome detail names resolve-blocked then resume, the dispatch exits 4, and one ledger comment carries the marker line livespec-merge-poll-budget-exhausted. The second sub-scenario, a pull request merged on the final read, is the sibling case in the same module, with a conflicting pull request as the control. The unit-tier decisions are tests.livespec_orchestrator_beads_fabro.commands.test_dispatcher_merge_poll_budget_exhausted.",
-    "work_item": "bd-ib-l6rleb"
+    "test": "tests.integration.test_merge_wait_handoff_lifecycle_scenario220.test_a_handed_off_pull_request_that_merges_is_accepted_by_the_next_pass",
+    "reason": "Integration-tier binding for the handed-off merge wait. The named case drives the production engine and post-run disposition against the in-memory tenant until the merge wait ends on an armed pull request whose required check is still running (item left active, exit 0, journal row and ledger comment), then drives the production stranded-claim survey over the dispatch journal that dispatch wrote: the claim is held while the pull request is open and passing, and reconciled with no resolve-blocked and no resume once the forge reports it merged. The same module binds the failed-required-check and closed-without-merging endings, and test_merge_poll_budget_exhausted_scenario220 binds the merged-at-expiry, disarmed, conflicting and failed-check endings of the merge wait itself.",
+    "work_item": "bd-ib-bacahf"
   },
   {
     "heading": "## Scenario 218 \u2014 A brief pointing at another work-item's evidence carries an advisory finding",
@@ -2211,16 +2206,16 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal dod-judgement-shared-rubric, and the owning work-item bd-ib-gob6gl makes every taking of the Definition-of-Done judgement grade one subject by one rubric, together with the test that binds this entry.",
-    "work_item": "bd-ib-gob6gl"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xuott6 owes it, replacing the closed owner bd-ib-gob6gl, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xuott6"
   },
   {
     "heading": "## Scenario 240 \u2014 A recorded Definition-of-Done verdict binds every host taking on identical digests, and opposite verdicts are journaled",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal dod-judgement-verdict-binding, and the owning work-item bd-ib-8zyan makes a recorded Definition-of-Done verdict bind every host taking on identical digests and journals opposite verdicts, together with the test that binds this entry.",
-    "work_item": "bd-ib-8zyan"
+    "reason": "An integration-tier test is owed for this heading: ratified with proposal dod-judgement-verdict-binding, and the closed work-item bd-ib-8zyan makes a recorded Definition-of-Done verdict bind every host taking on identical digests and journals opposite verdicts, together with the test that binds this entry. bd-ib-ntqv42 owns the owed test.",
+    "work_item": "bd-ib-ntqv42"
   },
   {
     "heading": "## Scenario 241 \u2014 A repository naming the fleet default dispatches to the factory the registry designates, and moving the fleet default re-routes it with no repository commit",
@@ -2249,8 +2244,8 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal codex-session-headroom (v209), and the owning work-item bd-ib-4jdgcw makes admission read the Codex usage window and skip covered codex-acp candidates, together with the test that binds this entry.",
-    "work_item": "bd-ib-4jdgcw"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xuott6 owes it, replacing the closed owner bd-ib-4jdgcw, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xuott6"
   },
   {
     "heading": "## Scenario 244 \u2014 reconcile-merged resolves a merged pull request by head ref, then title, then body mention",
@@ -2278,8 +2273,8 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal fabro-dump-shared-timeout (v224), and the owning work-item bd-ib-exyiqr replaces the three private 300-second dump constants with one shared 900-second bound, together with the test that binds this entry.",
-    "work_item": "bd-ib-exyiqr"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xuott6 owes it, replacing the closed owner bd-ib-exyiqr, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xuott6"
   },
   {
     "heading": "## Scenario 248 \u2014 A pull request merged before its refresh ends the run as a finished publication",
@@ -2293,9 +2288,8 @@
     "heading": "## Scenario 249 \u2014 Implement and review_fix turns run their touched tests green, stage one test per Red, and update pinning tests with prompt edits",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "TODO",
-    "reason": "A prompt-tier test is owed for this heading: ratified with proposal agent-stage-test-discipline (v227), and the owning work-item bd-ib-v5f7fd adds the three test-discipline rules to the implement and review_fix prompts, together with the test that binds this entry.",
-    "work_item": "bd-ib-v5f7fd"
+    "test": "tests.prompts.test_implement_review_fix_green_discipline",
+    "reason": "Bound at the prompt tier the row required, after its closed owner bd-ib-v5f7fd landed PR #3818: the module reads both graph-derived stage prompts and asserts the three test-discipline rules."
   },
   {
     "heading": "## Scenario 250 \u2014 A work item whose id contains a dot dispatches from a dot-free workflow directory distinct to its id",
@@ -2331,15 +2325,15 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal check-aggregate-runs-targets-concurrently, and the owning work-item bd-ib-6zy3zd makes dev-tooling/just-check.sh run its independent targets concurrently, together with the test that binds this entry.",
-    "work_item": "bd-ib-6zy3zd"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xuott6 owes it, replacing the closed owner bd-ib-6zy3zd, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xuott6"
   },
   {
-    "heading": "## Scenario 255 \u2014 A commit inside an implement or review_fix turn runs the affected-tests gate, and the janitor runs the full aggregate once",
+    "heading": "## Scenario 255 \u2014 A commit inside an implement, fix or review_fix turn runs the affected-tests gate, and the janitor runs the full aggregate once",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal in-turn-commits-run-the-affected-tests-gate, and the owning work-item bd-ib-72hvx5 makes the commit hook of implement and review_fix turns run the affected-tests gate with a full-aggregate fallback, together with the test that binds this entry.",
+    "reason": "An integration-tier test is owed for this heading: ratified with proposal in-turn-commits-run-the-affected-tests-gate, and the owning work-item bd-ib-72hvx5 makes the commit hook of implement and review_fix turns run the affected-tests gate with a full-aggregate fallback, together with the test that binds this entry. Extended at v319 (proposal fix-turn-commits-run-the-affected-tests-gate) to fix turns and to workflow.fabro graph-reading test selection; those cases are owed by work-item bd-ib-fde4ie.",
     "work_item": "bd-ib-72hvx5"
   },
   {
@@ -2355,8 +2349,8 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal proof-only-resume-of-a-merged-pull-request, and the owning work-item bd-ib-opd3hq builds the proof-only resume arm on a merged pull request, together with the test that binds this entry.",
-    "work_item": "bd-ib-opd3hq"
+    "reason": "A test at the integration tier or above is owed for this heading. bd-ib-ntqv42 owns it; bd-ib-o5kdau, the previous owner, is open but its Definition of Done promises no test for this heading.",
+    "work_item": "bd-ib-ntqv42"
   },
   {
     "heading": "## Scenario 258 \u2014 A review or proof_verify turn that succeeds without a verdict label is retried once before it reaches needs_human",
@@ -2387,8 +2381,8 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal fail-just-check-when-acp, and the owning work-item bd-ib-aqrdhl adds the check-acp-preflight-config target to just check, together with the test that binds this entry.",
-    "work_item": "bd-ib-aqrdhl"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xuott6 owes it, replacing the closed owner bd-ib-aqrdhl, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xuott6"
   },
   {
     "heading": "## Scenario 261 \u2014 A declared merge-gate suite runs inside the factory run",
@@ -2419,8 +2413,8 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal server-enforced-dispatch-claim-generation, and the owning work-item bd-ib-jjws2 implements the server-enforced rotating claim token protocol, together with the test that binds this entry.",
-    "work_item": "bd-ib-jjws2"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xuott6 owes it, replacing the closed owner bd-ib-jjws2, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xuott6"
   },
   {
     "heading": "## Scenario 264 \u2014 A filing shows the non-closed items it may duplicate",
@@ -2451,16 +2445,15 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for these headings: ratified with proposal a-parked-plan-child-that, and the owning work-item bd-ib-sappap adds the dispatcher classify-tier verb, together with the test that binds this entry.",
-    "work_item": "bd-ib-sappap"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xuott6 owes it, replacing the closed owner bd-ib-sappap, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xuott6"
   },
   {
     "heading": "## Dispatcher classify-tier invocation surface",
     "spec_root": "SPECIFICATION",
     "spec_file": "contracts.md",
-    "test": "TODO",
-    "reason": "An integration-tier test is owed for these headings: ratified with proposal a-parked-plan-child-that, and the owning work-item bd-ib-sappap adds the dispatcher classify-tier verb, together with the test that binds this entry.",
-    "work_item": "bd-ib-sappap"
+    "test": "tests.livespec_orchestrator_beads_fabro.commands.test_dispatcher_classify_tier",
+    "reason": "Bound after its closed owner bd-ib-sappap landed PR #4065: the module drives the dispatcher classify-tier entry point against the fake tenant and observes the appended record; test_dispatcher_classify_tier_standing_and_failure covers the standing, re-judge and cannot-judge bullets. A contracts.md heading, so the unit tier is admissible."
   },
   {
     "heading": "## Scenario 268 \u2014 A work-item rider reaches only the stages it names",
@@ -2475,8 +2468,8 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "tests.integration.test_bd_guard_capture_start_scenario269.test_scenario269_binds_the_declared_check_to_capture_start_observations",
-    "reason": "Integration-tier binding: the declared check reaches the black-box shell regression that exercises Scenario 269's slow-start and failed-start telemetry harness behaviours.",
-    "work_item": "bd-ib-qbwd7n"
+    "reason": "Integration-tier binding: the declared check reaches the black-box shell regression that exercises Scenario 269's slow-start and failed-start telemetry harness behaviours. The three cases added by revise topic bd-guard-harness-start-capture (a failed liveness probe is not an exit, the bounded stop, and the unstoppable server named as a failed case) are owed at the integration tier by bd-ib-w4bbbd, which extends this test and bd-guard/test/test-capture-start.sh to cover them.",
+    "work_item": "bd-ib-w4bbbd"
   },
   {
     "heading": "## Scenario 270 \u2014 A successor retires a dead owner's terminal wait without rewriting it",
@@ -2491,8 +2484,8 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal snippets-and-helper-scripts-bind, and the owning work-item bd-ib-uyg266 adds the registered-root command and the session-start staleness warning, together with the test that binds this entry.",
-    "work_item": "bd-ib-uyg266"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xuott6 owes it, replacing the closed owner bd-ib-uyg266, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xuott6"
   },
   {
     "heading": "## Scenario 272 \u2014 A factory-captured assertion whose proof surface no sandbox capability provides is named in the gate's finding",
@@ -2507,24 +2500,24 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal run-goal-omits-advisory-definition-of-done-finding-comments, and the owning work-item bd-ib-2dwxbu makes the rendered run goal omit filing-time advisory Definition-of-Done finding comments while still listing later operator comments, together with the test that binds this entry.",
-    "work_item": "bd-ib-2dwxbu"
+    "reason": "A test at the integration tier or above is owed for this heading. bd-ib-ntqv42 owns it; bd-ib-lxohlb, the previous owner, is open but its Definition of Done promises no test for this heading.",
+    "work_item": "bd-ib-ntqv42"
   },
   {
     "heading": "## Scenario 274 \u2014 One query by run id says why each factory step ended",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal factory-step-span-attributes, and the owning work-item livespec-dev-tooling-ipcm33 emits the factory step spans; the exercising proof is a host-captured Honeycomb query over spans from a real factory run, and the stop-reason attribute additionally waits on bd-ib-rmaxqf.",
-    "work_item": "livespec-dev-tooling-ipcm33"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-tqzazn emits the Factory step span attributes from the Petri engine and admits them at the receiver, and owns the binding. Repointed from the cross-tenant owner livespec-dev-tooling-ipcm33, which this repository's ledger cannot resolve.",
+    "work_item": "bd-ib-tqzazn"
   },
   {
     "heading": "## Factory step span attributes",
     "spec_root": "SPECIFICATION",
     "spec_file": "contracts.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal factory-step-span-attributes, and the owning work-item livespec-dev-tooling-ipcm33 emits the factory step spans; the exercising proof is a host-captured Honeycomb query over spans from a real factory run, and the stop-reason attribute additionally waits on bd-ib-rmaxqf.",
-    "work_item": "livespec-dev-tooling-ipcm33"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-tqzazn emits the Factory step span attributes from the Petri engine and admits them at the receiver, and owns the binding. Repointed from the cross-tenant owner livespec-dev-tooling-ipcm33, which this repository's ledger cannot resolve.",
+    "work_item": "bd-ib-tqzazn"
   },
   {
     "heading": "## Scenario 275 \u2014 A factory ACP node loads only the instruction files, skills, plugins and MCP tools its declaration names",
@@ -2539,8 +2532,8 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal sandbox-capabilities-mirror-records-measured-image, and the owning work-item bd-ib-o23n2x adds the measured-image key beside the capability mirror, the stale-mirror and unverifiable-mirror reports, and the repository check, together with the test that binds this entry.",
-    "work_item": "bd-ib-o23n2x"
+    "reason": "A test at the integration tier or above is owed for this heading. bd-ib-ntqv42 owns it; bd-ib-yq55nk, the previous owner, is open but its Definition of Done promises no test for this heading.",
+    "work_item": "bd-ib-ntqv42"
   },
   {
     "heading": "## Scenario 277 \u2014 A merged pull request with no finished factory run, or whose run died after the merge, is re-proven by the proof-only arm",
@@ -2555,8 +2548,8 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal factory-credential-from-whole-slot-pool, and the owning work-item bd-ib-5d6ewf selects the factory credential from the whole slot pool, together with the test that binds this entry.",
-    "work_item": "bd-ib-5d6ewf"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xuott6 owes it, replacing the closed owner bd-ib-5d6ewf, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xuott6"
   },
   {
     "heading": "## Scenario 279 \u2014 A materialized workflow.toml over the engine's limit is caught at build time and refused before claim",
@@ -2571,8 +2564,8 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal label-every-host-model-judgement, and the owning work-item bd-ib-h23kbx labels every host model-judgement spawn with a livespec.caller resource attribute, together with the test that binds this entry.",
-    "work_item": "bd-ib-h23kbx"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-l7uzvb owes it, replacing the closed owner bd-ib-h23kbx, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-l7uzvb"
   },
   {
     "heading": "## Scenario 281 \u2014 An ended run's Kubernetes sandbox survives while its item awaits a human and is deleted through its provider once the item closes",
@@ -2586,25 +2579,25 @@
     "heading": "## Scenario 285 \u2014 Red and Green run as separate nodes and every implement commit is made by a command node",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal implement-red-green-node-split (v262); livespec-dev-tooling-sv6m5p (plan implement-test-performance) owns it; the implementation children are filed under that plan.",
-    "work_item": "livespec-dev-tooling-sv6m5p"
+    "test": "tests.integration.test_implement_red_green_graph_scenario285",
+    "reason": "Scenario 285 is exercised against the released workflow payload and a scratch-repository reset helper.",
+    "work_item": "bd-ib-vy75ws"
   },
   {
     "heading": "## Scenario 289 \u2014 A Green amend whose staged test fails is refused before the rest of its gate's tests run",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal test-performance-gates (v263); the owning work-item bd-ib-v3iw35 makes the pre-commit hook run a Green amend's staged tests before the rest of its gate's tests, together with the test that binds this entry.",
-    "work_item": "bd-ib-v3iw35"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-l7uzvb owes it, replacing the closed owner bd-ib-v3iw35, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-l7uzvb"
   },
   {
     "heading": "## Scenario 290 \u2014 With no projected parallelism the test worker count follows the CPUs the process may use",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal test-performance-gates (v263); the owning work-item bd-ib-zneh24 makes dev-tooling/just-test-nprocs.sh derive the worker count from the cgroup CPU quota or affinity mask, together with the test that binds this entry.",
-    "work_item": "bd-ib-zneh24"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-l7uzvb owes it, replacing the closed owner bd-ib-zneh24, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-l7uzvb"
   },
   {
     "heading": "## Scenario 288 \u2014 An absent five-hour window is no five-hour limit, and the seven-day status still governs",
@@ -2627,16 +2620,16 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: the exercising proof is a host-captured Honeycomb query after a real dispatch, in which a factory Codex dispatch's handle_responses span is queried in Honeycomb and must carry both measured cache-token keys; owned by work-item bd-ib-3k3nxw.",
-    "work_item": "bd-ib-3k3nxw"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-l7uzvb owes it, replacing the closed owner bd-ib-3k3nxw, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-l7uzvb"
   },
   {
     "heading": "## Scenario 293 \u2014 A factory Claude API-request record carries its cache-write lifetimes and dispatch id",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: the exercising proof is a host-captured Honeycomb query after a real dispatch, in which a factory Claude dispatch's API-request records are queried in Honeycomb and must carry the lifetime split, dispatch id and request id; owned by work-item bd-ib-t7yjrb.",
-    "work_item": "bd-ib-t7yjrb"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-l7uzvb owes it, replacing the closed owner bd-ib-t7yjrb, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-l7uzvb"
   },
   {
     "heading": "## Scenario 294 \u2014 A terminated dispatch emits one terminal span with its outcome and one span per attempt",
@@ -2675,8 +2668,8 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: ratified with proposal fabro-fork-rust-gates-and (v278), and the owning work-item bd-ib-dqxcsh adds the test exercising the fork's carrier-branch gate and carrier-build venue together with the change.",
-    "work_item": "bd-ib-dqxcsh"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-l7uzvb owes it, replacing the closed owner bd-ib-dqxcsh, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-l7uzvb"
   },
   {
     "heading": "## Scenario 301 \u2014 A verified delegated press satisfies a human valve and is recorded as delegated",
@@ -2707,23 +2700,606 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: the owning work-item bd-ib-uhcn36 adds the capped, FIFO-ordered resume launcher under fleet-launch/ and the check-fleet-launch harness cases exercising a resume waiting at the fleet cap and binding behind an older impl ticket.",
-    "work_item": "bd-ib-uhcn36"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-l7uzvb owes it, replacing the closed owner bd-ib-uhcn36, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-l7uzvb"
   },
   {
     "heading": "## Scenario 303 \u2014 The committed launch-time preflight runs under a PATH-resetting wrapper with a string-form adapter entry",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: the owning work-item bd-ib-pys5lt upstreams the launcher-local preflight deltas into dev-tooling/dod-preflight.sh and adds the test running it under a PATH-resetting wrapper with a string-form adapter entry.",
-    "work_item": "bd-ib-pys5lt"
+    "reason": "An integration-tier test is owed for this heading: bd-ib-l7uzvb owes it, replacing the closed owner bd-ib-pys5lt, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-l7uzvb"
+  },
+  {
+    "heading": "## Scenario 304 \u2014 The check aggregate refuses a test that sleeps in real time or judges a wall-clock bound, unless an exemption marker states why",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A test at the integration tier or above is owed for this heading. bd-ib-ntqv42 owns it; bd-ib-t5yvcj, the previous owner, is open but its Definition of Done promises no test for this heading.",
+    "work_item": "bd-ib-ntqv42"
+  },
+  {
+    "heading": "## Scenario 305 \u2014 The run refreshes before the janitor, so publish_draft pushes the janitor-passed head without a second aggregate",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "tests.integration.test_workflow_refresh_before_janitor_scenario305",
+    "reason": "Integration-tier execution against a real throwaway origin: the janitor refreshes before its declared aggregate and records the exact passed head; publish_draft then pushes that head unchanged after a further default-branch move; conflict and aggregate-red refreshes restore the agent head and record their refresh-repair brief for the existing fix route. The three refresh-merge cases added at v319 (proposal janitor-refresh-merge-grades-once) are owed by work-item bd-ib-yqjaut.",
+    "work_item": "bd-ib-fvgkw4"
+  },
+  {
+    "heading": "## Scenario 306 \u2014 A janitor-green run cancelled for a factory restart has its committed tree published to a preservation ref",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: a-janitor-green-run-cancelled was ratified 2026-11-04 and the owning work-item bd-ib-vraou4 adds the Dispatcher's cancel-for-restart command, which publishes a janitor-green run's committed tree to refs/livespec/preserved-publish/<work-item-id>/ before cancelling it, the same best-effort publication when an outside cancel of a janitor-green run is reported, the livespec-preserved-tree ledger comment, and a re-dispatch brief naming the preserved tree, with the test exercising each of those paths.",
+    "work_item": "bd-ib-vraou4"
   },
   {
     "heading": "## Dispatch pre-launch step attribution and concurrency",
     "spec_root": "SPECIFICATION",
     "spec_file": "contracts.md",
     "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: the owning work-item bd-ib-bpkqan journals start and end records for every pre-launch step, runs independent pre-launch steps concurrently, computes per-loop-pass facts once, and tests the default branch's ref first in the source-checkout preflight, with the test exercising those dispatcher behaviours.",
-    "work_item": "bd-ib-bpkqan"
+    "reason": "A test at the integration tier or above is owed for this heading. bd-ib-ntqv42 owns it; bd-ib-sif27g, the previous owner, is open but its Definition of Done promises no test for this heading.",
+    "work_item": "bd-ib-ntqv42"
+  },
+  {
+    "heading": "## Expedited incident lifecycle",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "contracts.md",
+    "test": "tests.integration.test_incident_lifecycle_walk.test_one_incident_walks_every_attempt_and_its_repayment_on_the_real_chain",
+    "reason": "Bound after its closed owner bd-ib-dzbwaq: the walk drives one incident through genesis, arm, merge, revert, regression reopen, corrected attempts, repayment and completion on the real orchestrator and dev-tooling chain."
+  },
+  {
+    "heading": "## Scenario: an incident keeps one item with explicit current operation ownership",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-l7uzvb owes it, replacing the closed owner bd-ib-dzbwaq, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-l7uzvb"
+  },
+  {
+    "heading": "## Scenario: incident entry defers slow admission without creating another identity",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-l7uzvb owes it, replacing the closed owner bd-ib-dzbwaq, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-l7uzvb"
+  },
+  {
+    "heading": "## Scenario: incident provenance exceptions remain exact and repayable",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "tests.integration.test_incident_provenance_receipts.test_factory_provenance_recognizes_a_trusted_receipt_only_for_its_exact_pr_head_and_landed_commits"
+  },
+  {
+    "heading": "## Scenario: a successful incident merge reenters normal factory on the same item",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-l7uzvb owes it, replacing the closed owner bd-ib-riguvj, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-l7uzvb"
+  },
+  {
+    "heading": "## Scenario: a deferred-proof-only finding is repaired without reverting healthy master",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-l7uzvb owes it, replacing the closed owner bd-ib-riguvj, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-l7uzvb"
+  },
+  {
+    "heading": "## Scenario: incident completion requires final normal proof rather than an old repair merge",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-l7uzvb owes it, replacing the closed owner bd-ib-mnny4v, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-l7uzvb"
+  },
+  {
+    "heading": "## Scenario: an attributable regression fences repayment and reopens the same incident",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-l7uzvb owes it, replacing the closed owner bd-ib-k5teti, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-l7uzvb"
+  },
+  {
+    "heading": "## Scenario 307 \u2014 The committed fleet-launch launchers enforce the repository hold, WIP gate, breakage exception, re-ticket, gmktec hold and candidate target",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: the owning work-item bd-ib-3ufx6l ports the repository hold, WIP gate, breakage exception, early-exit re-ticket, gmktec hold and candidate-target gates into the committed fleet-launch/ launchers and adds the check-fleet-launch harness cases exercising each.",
+    "work_item": "bd-ib-3ufx6l"
+  },
+  {
+    "heading": "## Scenario 308 \u2014 A required check that fails terminally on infrastructure is re-run once and files a flake item",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xwwn23 owes it, replacing the closed owner bd-ib-tckulg, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xwwn23"
+  },
+  {
+    "heading": "## Scenario 309 \u2014 Fleet-launch launchers share one WIP claim-count read per repository per time-to-live",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: the owning work-item bd-ib-zwtfbq carries the shared per-repository WIP claim-count cache into the committed fleet-launch/ launchers and adds the check-fleet-launch harness cases exercising one projection read per time-to-live, stale recomputation, own-marker exclusion, failed-recomputation no-hold and cached-uncached equality.",
+    "work_item": "bd-ib-zwtfbq"
+  },
+  {
+    "heading": "## Scenario 310 \u2014 A terminal dispatch span carries its run class, execution target and sandbox cost",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: the owning work-item bd-ib-faprof adds the four terminal-span cost attributes (run class, execution target, sandbox CPU-seconds and peak memory) and their allowlist entries, with cases for a pod sandbox on gmktec-xubuntu and for an unreadable sandbox control group.",
+    "work_item": "bd-ib-faprof"
+  },
+  {
+    "heading": "## Scenario 311 \u2014 Dropping an attribute the scheduler requires fails the check",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: the owning work-item bd-ib-atmome adds the emitted-attribute vocabulary and the just-check member that reads livespec-dev-tooling's required_columns.json from the pinned package, with cases for a renamed vocabulary key and a dropped allowlist key.",
+    "work_item": "bd-ib-atmome"
+  },
+  {
+    "heading": "## Scenario 312 \u2014 A fleet launcher that exits without a run leaves a terminal line, and its ready item's ticket is re-taken or reported",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xwwn23 owes it, replacing the closed owner bd-ib-rk7mbd, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xwwn23"
+  },
+  {
+    "heading": "## Scenario 313 \u2014 A failed scheduled default-branch workflow run becomes one ledger item per failed job",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: the owning work-item bd-ib-pgbr52 adds dispatcher.py breakage-pass, with cases for a failed run filing one item per failed job, a re-run at the same head commit filing nothing, a green run filing nothing, and an unreadable workflow failing visibly.",
+    "work_item": "bd-ib-pgbr52"
+  },
+  {
+    "heading": "## Scenario: incident entry owns one initial authority before a carrier PR exists",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-l7uzvb owes it, replacing the closed owner bd-ib-dzbwaq, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-l7uzvb"
+  },
+  {
+    "heading": "## Scenario 314 \u2014 A fleet launcher screens a host-only item with the Dispatcher's predicate and never re-tickets a permanent refusal",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: the owning work-item bd-ib-v52w7a adds the host-only screen and the exit-5 no-re-ticket rule to the committed fleet-launch/ launchers, with check-fleet-launch harness cases for a host-only verdict, a drive exiting 5 and a drive exiting 1 before listing.",
+    "work_item": "bd-ib-v52w7a"
+  },
+  {
+    "heading": "## Scenario 315 \u2014 A hand-picked dispatch of a host-only item is refused with exit code 5 and one REFUSED line",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: the owning work-item bd-ib-t5aju3 makes every permanent pre-dispatch refusal of a hand-picked dispatch, the host-only refusal included, exit 5 with exactly one REFUSED: stderr line, and adds dispatcher.py host-only.",
+    "work_item": "bd-ib-t5aju3"
+  },
+  {
+    "heading": "## Scenario 316 \u2014 A repository hold scoped to dispatch launches holds fresh dispatches and lets resumes run",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xwwn23 owes it, replacing the closed owner bd-ib-fa5elg, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xwwn23"
+  },
+  {
+    "heading": "## Scenario 317 \u2014 Each committing step of a run preserves the run branch's tip to an ordered work-in-progress ref",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: the owning work-item bd-ib-ofvsr3 adds the preserving step at the end of implement_commit_settle, fix_commit_settle, review_fix_commit_settle and needs_human that creates numbered refs/livespec/wip refs under the tree guard, plus the check that fails a commit-settling step without it.",
+    "work_item": "bd-ib-ofvsr3"
+  },
+  {
+    "heading": "## Scenario 318 \u2014 A run's ending names its latest preserved capture on the item",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xwwn23 owes it, replacing the closed owner bd-ib-xdhe5z, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xwwn23"
+  },
+  {
+    "heading": "## Scenario 319 \u2014 A re-dispatch starts from the latest run's latest preserved capture",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: the owning work-item bd-ib-v6br5b adds recovery routing that seeds a re-dispatch from the latest run's highest-numbered work-in-progress ref, with the end-to-end seeded continuation case.",
+    "work_item": "bd-ib-v6br5b"
+  },
+  {
+    "heading": "## Scenario 320 \u2014 Preservation refs are deleted when the Dispatcher closes or collects an item's runs",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xwwn23 owes it, replacing the closed owner bd-ib-efiasj, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xwwn23"
+  },
+  {
+    "heading": "## Scenario 321 \u2014 drive names the stage and offending sources of a goal-template preflight refusal",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: the owning work-item bd-ib-it2d makes drive's human summary of a pre-run Dispatcher refusal name the refusing stage and its detail, naming each offending field and each ledger comment by id and creation instant for a goal-minijinja-preflight refusal, with the --json payload unchanged.",
+    "work_item": "bd-ib-it2d"
+  },
+  {
+    "heading": "## Scenario 322 \u2014 A comment-poisoned item is superseded by a successor that passes the goal-template preflight",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: the owning work-item bd-ib-it2d adds dispatcher.py supersede-contaminated, which files one successor through the capture filing seam, copies instruction comments with a provenance line and neutralized openers while keeping a FOR-stage scope line first, re-points blocks edges, closes the original as duplicate, and refuses closed, uncontaminated or field-poisoned items with no writes.",
+    "work_item": "bd-ib-it2d"
+  },
+  {
+    "heading": "## Scenario 323 \u2014 An earlier run's preserved ref never outranks a newer run's published head",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xwwn23 owes it, replacing the closed owner bd-ib-so6fef, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xwwn23"
+  },
+  {
+    "heading": "## Scenario 324 \u2014 A hold recorded only in the dispatch journal reaches needs-attention",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "tests.integration.test_needs_attention_journal_hold_scenario324.test_a_recovery_held_item_reaches_needs_attention_and_is_not_reported_idle",
+    "reason": "Integration-tier acceptance for the hygiene:journal-hold:<subject> composer (livespec_orchestrator_beads_fabro.commands._needs_attention_journal_hold): facts are composed through the real build_attention pass over the real store/client seam against the in-memory FakeBeadsClient. The bound node id is the positive journey \u2014 one fact naming the recovery-held stage and every recorded reason, a shell handoff with no valve, and an idle-factory fact that names the held item's neighbour rather than the held item; sibling tests in the same module cover retirement by a later record, the branch-reclaim hold that still counts as eligible, the seven-day window and the unreadable journal. The remaining gherkin scenarios are covered at the unit tier in tests/livespec_orchestrator_beads_fabro/commands/test_needs_attention_journal_hold.py and test_dispatcher_idle_slot_journal_holds.py.",
+    "work_item": "bd-ib-5xogp4"
+  },
+  {
+    "heading": "## Scenario 325 \u2014 A workflow-declared node timeout stands unless configuration names the node",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: the owning work-item bd-ib-2eyiwy renders a workflow-declared node timeout unless configuration names the node, names the supplying layer on the dispatch record, has the ceiling and the execution allowance read the rendered values, ends a commit settle node's wait 300 seconds before its rendered timeout, and refuses a settle timeout that leaves no wait.",
+    "work_item": "bd-ib-2eyiwy"
+  },
+  {
+    "heading": "## Scenario 326 \u2014 A resumed or seeded tree older than a harness guard passes its own commit hook, and an agent stage's own publication stays refused",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xwwn23 owes it, replacing the closed owner bd-ib-s754le, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xwwn23"
+  },
+  {
+    "heading": "## Scenario 327 \u2014 A fresh ruling routes a released item fresh past its preserved trees",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: the closed bd-ib-xz35zu was regroomed into bd-ib-vw2ccx, bd-ib-kovfqz and bd-ib-og37w4; bd-ib-kovfqz, which makes recovery routing route a released item fresh past its preserved trees, owns the binding. bd-ib-ntqv42 owns the owed test.",
+    "work_item": "bd-ib-ntqv42"
+  },
+  {
+    "heading": "## Scenario 328 \u2014 A factory sandbox turn carries its Driver's PreToolUse guards, trusted from release-verified bytes",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: the owning work-item bd-ib-v75dlb makes the factory prepare step materialize the pinned livespec-driver-codex release into each Codex sandbox turn's per-run CODEX_HOME with its hooks trusted only on a byte match to that release tag, fail the prepare step naming the plugin and hook on a mismatch, and carry the livespec-driver-claude PreToolUse hooks into each Claude sandbox turn, so a forbidden command is blocked in either runtime.",
+    "work_item": "bd-ib-v75dlb"
+  },
+  {
+    "heading": "## Scenario 329 \u2014 A publish_draft push refused for an oversize file or by the pre-push hook is repaired through fix",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "tests.integration.test_workflow_publish_repair_scenario329",
+    "reason": "Integration-tier execution of the shipped publish_draft and refresh_repair script bytes against a real throwaway origin: a GH001 large-file rejection and a pre-push hook refusal each record a repair brief naming the refused head and the oversize paths or failed hook targets with the last 80 lines of hook output and reach fix; a repaired head republishes; the repair counts toward the shared two-round budget and exhausts naming the refused head; protected-branch, non-fast-forward, unreachable-origin and authentication refusals stay fail-closed with their own named cause and no brief.",
+    "work_item": "bd-ib-7owmkq"
+  },
+  {
+    "heading": "## Scenario 330 \u2014 A hold set while a launched drive waits before admission stops the drive",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xwwn23 owes it, replacing the closed owner bd-ib-j6rbdx, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xwwn23"
+  },
+  {
+    "heading": "## Scenario 331 \u2014 The release branch advances only on an operator dispatch that starts a canary",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the owning work-item bd-ib-5psq3e dispatches fast-forward-release-branch.yml against this repository's real release branch and shows, for the release channel, that a published release leaves release unmoved with the job skipped, that a named-build adopt moves one canary clone to a release tag while release and every other clone keep their commit, that the roll-step dispatch of a descendant tag whose canary passed and whose canary-coverage.json covers every changed workflow path fast-forwards release, that a failed canary leaves release on the last rolled build, and that a non-descendant or missing tag fails the run and leaves release unchanged; and, for canary coverage, that a record leaving a changed workflow path uncovered, a record citing a changed node only through a failure-edge traversal, an absent record, and a corrective roll-forward carrying no record each fail the run naming the tag and the uncovered path or missing asset and leave release unchanged. bd-ib-5psq3e owns it.",
+    "work_item": "bd-ib-5psq3e"
+  },
+  {
+    "heading": "## Scenario 332 \u2014 A host Claude judgement's spend journal ends with the closing result event's final usage",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the closed work-item bd-ib-st2sby drives a host model judgement whose candidate is the Claude agent and shows that its spend journal carries the final_usage_line header and ends with a result line holding the closing result event's usage unchanged and the assistant message_ids in order, that a process ended before any result event keeps its last assistant line last, and that a launch reading output only after exit writes the same result line. bd-ib-ntqv42 owns it.",
+    "work_item": "bd-ib-ntqv42"
+  },
+  {
+    "heading": "## Scenario 333 \u2014 A ledger comment or lesson carrying a goal-template opener is neutralized in the goal and does not refuse the dispatch",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the closed work-item bd-ib-cfgtlo renders the goal of a ready item whose fields carry no opener, and shows that an instruction comment longer than 1000 characters carrying a goal-template opening delimiter, and a ratified lesson carrying one, each reach the rendered goal whole with only the opener rewritten to bracket form, that the dispatch passes stage goal-minijinja-preflight, and that neither the ledger comment nor the lessons file changes. bd-ib-ntqv42 owns it.",
+    "work_item": "bd-ib-ntqv42"
+  },
+  {
+    "heading": "## Scenario 334 \u2014 A goal-template opener in an item field is a mechanical filing finding and approve refuses it",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the closed work-item bd-ib-cfgtlo files an item through the capture filing seam whose description carries a goal-template opening delimiter, and shows that filing_display reports a mechanical finding naming the field and the offset of its first delimiter, whose ledger comment carries no opener, that the item rests at pending-approval even under auto admission, that approve refuses naming the field, and that approve routes it onward once the description is edited. bd-ib-ntqv42 owns it.",
+    "work_item": "bd-ib-ntqv42"
+  },
+  {
+    "heading": "## Scenario 335 \u2014 A run whose sandbox was OOM-killed is classified permanent and names the kill and the memory limit",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "tests.integration.test_sandbox_oom_classification_scenario335"
+  },
+  {
+    "heading": "## Scenario 336 \u2014 A sandbox checks a tree with the tooling release that tree pins, and works in the latest clones",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "tests.integration.test_run_from_clones_scenario336"
+  },
+  {
+    "heading": "## Scenario 337 \u2014 A merged rework re-dispatch whose merge wait was handed off is completed by reconciliation, and a parked rework stays unsurveyed",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xwwn23 owes it, replacing the closed owner bd-ib-if5luo, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xwwn23"
+  },
+  {
+    "heading": "## Scenario 338 \u2014 The committed fleet launcher runs under the tenant wrapper, from the origin tip, with paced re-tickets and the configured routing",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the owning work-item bd-ib-4xqmqh adds check-fleet-launch harness cases in which every launch-time command of a target declaring a stub tenant credential_wrapper runs under that wrapper and not the default one, a diverged checkout launches nothing with a checkout-not-at-origin-tip terminal line while a behind checkout is fast-forwarded to origin's default branch and launches, consecutive early exits re-take the same ticket after the three configured delays holding no mutex or in-flight marker, a failed goal-minijinja-preflight stage re-takes no ticket and leaves one ledger comment carrying no goal-template opening delimiter, and the overrides file's lines reach the stub drive as --acp-node arguments with non-empty judge-model host values exported. bd-ib-4xqmqh owns it.",
+    "work_item": "bd-ib-4xqmqh"
+  },
+  {
+    "heading": "## Scenario 339 \u2014 A Definition of Done that permits a TODO coverage row against a shrink-only debt register is a mechanical filing finding",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the owning work-item bd-ib-cm2k55 adds filing-seam cases in which a repository carrying a committed tests/heading-coverage-debt.json reports a (mechanical) finding quoting a Definition of Done bullet that names tests/heading-coverage.json and TODO, records it as a ledger comment, rests the item at pending-approval under auto admission, refuses approve until the bullet is edited, and reports no such finding where the register is absent. bd-ib-cm2k55 owns it.",
+    "work_item": "bd-ib-cm2k55"
+  },
+  {
+    "heading": "## Scenario 340 \u2014 CI's factory-graph gate installs the pinned fabro asset for the runner's architecture",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the owning work-item bd-ib-jjmywv adds cases in which dev-tooling/install-ci-fabro.sh installs the pinned fabro release's x86_64 or aarch64 musl asset after verifying that asset's published sha256 on every install route, and exits non-zero naming any other architecture while installing nothing. bd-ib-jjmywv owns it.",
+    "work_item": "bd-ib-jjmywv"
+  },
+  {
+    "heading": "## Scenario 341 \u2014 proof_capture's git launcher refuses writes to the run's checkout and to network remotes, and lets a scratch repository push to a local bare repository under the temporary directory",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "tests.integration.test_proof_capture_read_only_git_guard.test_proof_capture_scratch_repository_commits_keep_their_hooks_and_the_checkout_stays_read_only",
+    "reason": "Bound after its closed owner bd-ib-7e6uzu landed PR #4944: the test pushes a scratch repository to temporary bare repositories by path and remote name, and refuses protected-checkout, network-URL, outside-temporary and --receive-pack/--exec pushes."
+  },
+  {
+    "heading": "## Scenario 342 \u2014 A run that exhausted its recapture bound is held by recovery routing, never routed fresh or resumed automatically",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the closed work-item bd-ib-p6ammc adds cases in which recovery routing grades an item whose latest journaled dispatch ended at the non_converged terminal with LIVESPEC_RECAPTURE_EXHAUSTED on its cause line, with an open pull request whose every resume precondition passes and with no preserved work at all, and routes it held in both, never fresh, resume or seeded, launching no run. bd-ib-ntqv42 owns it.",
+    "work_item": "bd-ib-ntqv42"
+  },
+  {
+    "heading": "## Scenario 343 \u2014 A recapture-exhausted hold names the preserved implementation and the explicit resume route",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the closed work-item bd-ib-p6ammc adds cases in which the recovery-held record of a recapture-exhausted item names the refusal recapture-exhausted and a detail naming the open pull request and its head, else the needs-human ref and its commit, else no preserved work observed, followed by the explicit resume --item route at proof_capture with a proof rider. bd-ib-ntqv42 owns it.",
+    "work_item": "bd-ib-ntqv42"
+  },
+  {
+    "heading": "## Scenario 344 \u2014 An item classified bug whose asked-for behaviour the spec does not state waits for ratification, and classify-tier re-judges a changed item",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xwwn23 owes it, replacing the closed owner bd-ib-t2rg6x, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xwwn23"
+  },
+  {
+    "heading": "## Scenario: a recorded scratch-branch drill closes through the drill-close action and a master incident is refused",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the owning work-item bd-ib-z7ckf4 adds cases in which the incident authority writer's drill-close action moves a recorded drill (every distinct carrier pr-bound in its latest snapshot, every bound pull request based on an incident-scratch/** branch, no landed or revert commit reachable from master) to incident phase drill-closed with lifecycle state done and no repayment outstanding; refuses a master-based or never-bound item with incident-not-a-recorded-drill and an unreadable forge read with incident-drill-evidence-unavailable, writing nothing; refuses a commit-transition naming a drill-closed successor with incident-drill-close-requires-action; and refuses a recovery request against a drill-closed item with incident-reopen-not-eligible. bd-ib-z7ckf4 owns it.",
+    "work_item": "bd-ib-z7ckf4"
+  },
+  {
+    "heading": "## Scenario: a plan record's release rule applies to the release component that ships its artifact",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "tests.integration.test_plan_release_components_scenario350",
+    "reason": ""
+  },
+  {
+    "heading": "## Scenario: the plan record posting primitive renders a record's artifact paths line",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "An integration-tier test is owed for this heading: bd-ib-xwwn23 owes it, replacing the closed owner bd-ib-sjxs4f, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
+    "work_item": "bd-ib-xwwn23"
+  },
+  {
+    "heading": "## Scenario: a hand commit's passing delegated pre-commit verdict stands in at the pre-push gate",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the owning work-item bd-ib-3k3xh7 adds cases in which this repository's pre-push gate, given recorded delegated pre-commit evidence naming gate Job J and tree T for a clean worktree whose HEAD tree is T, submits no pre-push gate Job and runs no local fall-through aggregate, runs only the check-set members the evidence does not name as passed plus every world-reading and authorization-reading member, and prints J, T, each member it ran and the skipped count; and in which a dirty worktree or a different HEAD tree gates the push as if no evidence existed. bd-ib-3k3xh7 owns it.",
+    "work_item": "bd-ib-3k3xh7"
+  },
+  {
+    "heading": "## Scenario: a ledger comment that quotes specification text carries each goal-template opener in bracket form",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the owning work-item bd-ib-engf4h adds cases in which a governing-heading finding, a Definition-of-Done clause record and a dod_gate refusal comment that quote a specification clause carrying a goal-template opening delimiter are each appended as a ledger comment carrying the quote whole in bracket form, with the clause digest a record carries equal to the digest of the clause as read from the specification, and in which a clause with no opening delimiter is quoted byte-for-byte. bd-ib-engf4h owns it.",
+    "work_item": "bd-ib-engf4h"
+  },
+  {
+    "heading": "## Scenario 349 \u2014 Reconciliation applies the whole-run wall budget to a live run no dispatch still owns",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the scenario tier or above is owed for this heading: the owning work-item bd-ib-ag633q adds cases in which a reconcile-runs pass, given a claim attributed to this host whose factory run is running and whose ownership lock no live process holds, exports, cancels and rests a run past its whole-run wall budget that is not progressing, holds as run-live a run within its budget, a run whose lock a live process holds, a run whose record carries no first-running instant, and a run whose export cannot be read back, applies the same budget to another dispatching repository's claim from the host's periodic pass, and in which a dispatch that stops observing its run names the run, the factory and the hand-off to reconciliation on its outcome record. bd-ib-ag633q owns it.",
+    "work_item": "bd-ib-ag633q"
+  },
+  {
+    "heading": "## Scenario: a plan record that reaches a released component only through imported code is judged by tree identity",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier is owed for this heading: the closed work-item bd-ib-y2s76v adds cases in which, in a repository declaring release components, the posting primitive renders a build imported_components array as the record's imported code line and refuses a malformed value, and for a record whose imported code line names a component the archive gate accepts it when the commit's tree under that component's paths is byte-identical to the named tag's, rejects it naming the first differing path when the trees differ (including a path present on one side only), and makes no comparison for a record carrying no imported code line; release none is still rejected for a component its artifact paths reach. The replay case for a component's own entry point run from the tree is a verifying party's judgement and is not mechanized. bd-ib-ntqv42 owns it.",
+    "work_item": "bd-ib-ntqv42"
+  },
+  {
+    "heading": "## Scenario 359 \u2014 The spec-stated judgement places the stating paragraph in full, reads inherited specification files, and omits an absent one without failing",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the owning work-item bd-ib-lrjdlo adds cases in which the spec-stated judgement, over a specification larger than its prompt character ceiling, places in full a stating paragraph that sits under a heading the item does not name; reads an inherited specification file declared by either of the two closed constraints forms and resolved under the sibling-clones directory; omits and names in the clause provenance a declared inherited file that is absent, completing with a verdict; adds nothing for any other mention of a sibling specification file; and places the same clauses in full on two takings of an unchanged subject and specification text. bd-ib-lrjdlo owns it.",
+    "work_item": "bd-ib-lrjdlo"
+  },
+  {
+    "heading": "## Scenario 363 \u2014 A launcher removes its payload holder on exit or signal, spares a named one, and the next launcher reclaims a dead creator's",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the owning work-item bd-ib-immkx7 adds cases in which a launcher ended by SIGTERM, SIGHUP or SIGINT removes its private payload holder and exits non-zero; a holder a running child names in LIVESPEC_RETAINED_PAYLOAD_ROOT survives the launcher's exit and is reclaimed by a later launcher's sweep once no running process names it; a holder whose recorded creator has exited is swept, including when its pid now belongs to a process with a different start time; a holder whose recorded creator is running and an unrecorded holder modified within the last 24 hours are left; an unrecorded, unnamed holder older than 24 hours is reclaimed; and a holder the sweep cannot remove is logged without refusing or failing the dispatch. bd-ib-immkx7 owns it.",
+    "work_item": "bd-ib-immkx7"
+  },
+  {
+    "heading": "## Scenario 364 \u2014 An item-only head read reports an incident item's current phase and generation and authorizes nothing",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the owning work-item bd-ib-txbv7i adds cases in which the incident authority CLI action read-head, given only a repository and an item id, reports the head's incident phase and generation as read_incident_head selects them in a status verified reply that exits 0, drill-closed included, and authorizes no side effect; reports an item with no incident authority genesis by a status absent reply that exits 0, carries the repository and item id and no phase or generation, and authorizes nothing, rather than refusing; returns the canonical reader's named refusal, never absence and never a phase, for an ambiguous chain, an invalid genesis, a cycle, an identity mismatch or an item mismatch; and refuses incident-authority-unavailable with no phase when the authority store cannot be read, each refusal a status refused reply that exits 78. bd-ib-txbv7i owns it.",
+    "work_item": "bd-ib-txbv7i"
+  },
+  {
+    "heading": "## Scenario 365 \u2014 read-current verifies only the current head's full fenced identity and is the only action that authorizes a side effect",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the owning work-item bd-ib-txbv7i adds cases in which read-current, given the current head's full fenced identity (repository, item id, attempt id, phase, generation, operation id, owner), replies status verified, exits 0 and sets authorizes_current_effects true; naming a superseded generation or a different owner or operation refuses incident-authority-identity-mismatch with status refused, exit 78 and authorizes_current_effects false; a head that moves after selection refuses incident-authority-changed with status refused and exit 78 and authorizes nothing; a read-current invocation with no owner is a usage error that exits 2, prints its usage on stderr and writes no reply to stdout; and read-head and read-history never set authorizes_current_effects true. bd-ib-txbv7i owns it.",
+    "work_item": "bd-ib-txbv7i"
+  },
+  {
+    "heading": "## Scenario 366 \u2014 The factory-graph gate validates only with a client whose release triple is at or after 0.396.0 and names the client version for each graph",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the factory-graph gate's own suite (tests/dev-tooling/checks/test_fabro_graph_validity.py) gains cases in which a client reporting a release triple below 0.396.0 or no parseable version fails the gate with a control finding and validates no graph, and a client at or above the floor validates each committed graph and reports it with that version; the preserved implementation is at needs-human/f45193625cd243e5b39d7921ef8d295e. bd-ib-3lxeqf owns it.",
+    "work_item": "bd-ib-3lxeqf"
+  },
+  {
+    "heading": "## Scenario 367 \u2014 A run whose sandbox is lost mid-stage is resumed onto a re-acquired sandbox, and a run that still ends on a lost sandbox is released rather than classified deterministic",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading: the Dispatcher-side cases (a run ending on a not-found sandbox with an unobservable termination is recorded with a lost-sandbox cause, is not classified deterministic and is released to ready; a second consecutive loss keeps the existing route naming both runs; the termination read uses the instance's own cluster credentials) are owned by bd-ib-xqgeav in this repository, beside tests/integration/test_sandbox_oom_classification_scenario335.py. The engine-side cases (interrupt and resume onto a re-acquired sandbox, the three-resume bound, the control) are owned by bd-ib-gngz5d in the Fabro fork and are proved host-captured.",
+    "work_item": "bd-ib-xqgeav"
+  },
+  {
+    "heading": "## Scenario 368 \u2014 publish_draft publishes a run's work under its authored commit, never under engine checkpoint or merge commits",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading. publish_draft is run in a local git fixture: a run branch carrying fabro(<run>): <stage> checkpoint commits, a merge commit of the default branch and one authored commit is pushed as one folded commit on the merge base, with the janitor-passed tree and the authored commit's full message; an all-authored branch is pushed unchanged; a range with no authored commit, or with more than one authored commit beside non-authored ones, fails closed with LIVESPEC_PUBLISH_DRAFT_HISTORY_SANITIZE_FAILED; a later default-branch advance is neither folded in nor reverted. bd-ib-ffw4q3 owns it.",
+    "work_item": "bd-ib-ffw4q3"
+  },
+  {
+    "heading": "## Scenario 369 \u2014 publish_draft adopts a pull request the forge created behind a failed create call, and only at the pushed head",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "reason": "A real test at the integration tier or above is owed for this heading. publish_draft is run in a local git fixture with a stubbed gh: a creation that exits non-zero while the stubbed forge holds an open pull request at the pushed head is adopted and ends as a successful creation; no pull request at the pushed head after three re-reads at 1, 2 and 4 s fails closed with LIVESPEC_PUBLISH_DRAFT_CREATE_FAILED naming the re-read count; a pull request at another head is never adopted; a zero exit whose output contains 502 makes no re-read. bd-ib-hzul2n owns it.",
+    "work_item": "bd-ib-hzul2n"
+  },
+  {
+    "heading": "## Scenario 370 \u2014 An operator preserve tool removes a run's local copy only once origin holds the commit it pushed",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-yw7yot",
+    "reason": "A test at the integration tier or above is owed: the operator preserve tool's own suite, delivered by bd-ib-yw7yot, driving preserve_runs.sh against a local bare origin."
+  },
+  {
+    "heading": "## Scenario 371 \u2014 An impl dispatch launches its loop inside the host's dispatch memory slice when the host provides one",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "tests.integration.test_impl_dispatch_memory_slice_scenario371.test_a_host_with_the_slice_gets_a_scoped_launch_that_records_its_unit",
+    "reason": "Bound to an integration-tier test, per the heading taxonomy's pyramid-tier requirement: `tests/integration/test_impl_dispatch_memory_slice_scenario371.py` drives the production `run_impl_dispatch` over a stood-in host and runner and a real on-disk dispatch journal, asserting the scoped argv (slice, `OOMPolicy=continue`, the published `MemoryMax`, the loop's own argv after the separator), the `launch` and `scope_unit` keys of the drive result and the `dispatch-launch-scope` journal record. The cgroup placement itself needs a systemd user manager with memory delegation and the slice installed, so it is host-captured on the dev host by bd-ib-szbxu7; the unit-tier cases in `tests/livespec_orchestrator_beads_fabro/commands/test_drive_impl_scope.py` cover each host fact read for real.",
+    "work_item": "bd-ib-szbxu7"
+  },
+  {
+    "heading": "## Scenario 348 \u2014 A seeded recovery dispatch reseeds its seed onto the current default branch, holds on a reseed conflict, and routes a seed carrying no work fresh",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-zzhy5t",
+    "reason": "A test at the integration tier or above is owed by bd-ib-zzhy5t: recovery routing driven against a local bare origin whose default branch (not named master) has advanced past a seed's merge base, covering the moved, conflicting, work-free, work-free-ruled and already-current seed routes."
+  },
+  {
+    "heading": "## Scenario 372 \u2014 A stale seed is re-seeded by diff-apply onto the default branch's tip, and a conflicting or work-free seed publishes nothing",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-5xihdt",
+    "reason": "An integration-tier test is owed by bd-ib-5xihdt: the reseed route driven against a local bare origin whose default branch has advanced past the seed's merge base."
+  },
+  {
+    "heading": "## Scenario 373 \u2014 An incident whose landed commit's master run was red only on another incident's defect enters repayment on the first green descendant run",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-ah5t7i",
+    "reason": "An integration-tier test is owed by bd-ib-ah5t7i: enter-repayment driven against a recorded incident whose landed commit's master run failed only on a job pre-existing on its first parent and attributed to another incident, asserting admission on the first green descendant run with L kept as base, head, input parent and staged tree, and the condition-2 and condition-4 refusals that write nothing."
+  },
+  {
+    "heading": "## Scenario 375 — The factory merge refuses a red head rollup, a protection-less target and a held item on every merge path, and merges a green rollup on a protected target",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-x73d36",
+    "reason": "A real test at the integration tier or above is owed for this heading: the factory's shared merge path driven against a protection-less target whose pull request head rollup is red (refused with target-requires-no-checks and head-rollup-not-green, left open and unmerged, dispatch blocked needs-human with a non-zero exit), a direct merge of an item whose merge-hold label was set after dispatch (refused with merge-hold-active), a green rollup on a protected target (merged), a path-skipped job beside a green rollup (merged), a pending rollup that is armed only once every entry passes, a pending rollup handed off at the merge wait's budget and armed by reconciliation hold 8, and a pending rollup whose running check fails (refused with head-rollup-not-green and never armed). bd-ib-x73d36 owns it."
+  },
+  {
+    "heading": "## Scenario 376 — A numbered-slot dispatcher refuses rather than fall back to the unnumbered Claude credential",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-tvcbmc",
+    "reason": "A real test at the integration tier or above is owed for this heading: the Dispatcher's admission, credential-usability probe, credential-status probe, Worker credential projection and host judgement driven under dispatcher.claude_credential_policy, asserting the no-declared-slot-injected refusal before any claim for absent, empty and undeclared slots with the unnumbered credential present, the mixed node that continues to an uncovered fallback, the floor skip that never touches the unnumbered credential, a downstream consumer's refusal when the admitted slot is gone, the configuration refusal (exit code 3) for a missing or invalid policy, the explicit legacy-independent fallback, and a codex-acp-only item unaffected by the policy. bd-ib-tvcbmc (the R01 implementation) owns it."
+  },
+  {
+    "heading": "## Scenario 377 — A commit run's commit carries an authored subject, and a refusal inside a stopped rebase leaves the rebase in progress and names the forms that pass",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-vpvdn4",
+    "reason": "A test at the integration tier or above is owed: the commit runner's own suite, delivered by bd-ib-vpvdn4, driving a real rebase stopped on a conflict in a local git fixture whose commit-msg hook appends a trailer."
+  },
+  {
+    "heading": "## Scenario 378 — A central-factory-selection dispatcher projects only the centrally selected slot",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-m76gue",
+    "reason": "A real test at the integration tier or above is owed for this heading: the Dispatcher's admission, credential-usability probe, Worker credential projection and host judgement driven under dispatcher.claude_credential_policy selection central-factory-selection with a central factory selection record fixture, asserting that only the named slot is assessed and projected, the no-central-factory-selection skip for a null-profile, stale, absent or undeclared record, that a named slot failing its own headroom never moves the dispatch to another slot, the uncovered fallback continuing, the interactive selection never being read, and local-ranking when selection is absent. bd-ib-m76gue owns it."
   }
 ]

@@ -8,14 +8,11 @@ is that decision, and nothing else: the model call, the ledger record and the
 hold each live in their own sibling, because the decision is the one part of
 this feature that can be stated as a function.
 
-THE RULE IS A CONJUNCTION AND BOTH HALVES MATTER. An item is spec-change tier
-exactly when the classification is `feature` AND the judgement reports its
-asked-for behaviour `partial` or `unstated`. Dropping the classification half
-holds every bug whose fix the spec happens not to state, which is the exemption
-the clause grants outright ("An item classified `bug`, `chore` or
-`non_functional` is never spec-change tier"). Dropping the verdict half holds
-every feature forever, including the implementation follow-ups to changes that
-ratified years ago.
+THE VERDICT DECIDES THE HOLD. An item is spec-change tier exactly when the
+judgement reports its asked-for behaviour `partial` or `unstated`, whatever
+classification the shared classifier returns. A stated bug, chore or
+non-functional item retains its ordinary routing; an unstated one needs the
+same ratified proposal as an unstated feature.
 
 `partial` IS HELD, NOT ONLY `unstated`, and the independent review of this
 plan's scoping required it (research note 005, finding 6: "`partial` needs
@@ -55,6 +52,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from livespec_runtime.spec_stated import ItemClass, SpecStatedVerdict, StatedKind
+
+from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done import (
+    PROOF_MODE_FACTORY_CAPTURED,
+    REASON_PREFIX,
+    declared_proof_mode,
+    definition_of_done_source,
+)
 
 if TYPE_CHECKING:
     from livespec_orchestrator_beads_fabro.types import WorkItem
@@ -98,6 +102,12 @@ SPEC_CHANGE_TIER = "spec-change"
 NO_TIER = "none"
 
 _FIELD_ABSENT = "(none recorded)"
+
+# The two line shapes the Definition of Done grammar keys on, spelled as the
+# section parse spells them so the rendering and the parse agree about which
+# lines are headings and bullets.
+_SUB_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$")
+_BULLET_MARKER = re.compile(r"^\s*-\s+(?=\S)")
 
 # Judging guidance appended to the statement the model reads. A bullet asserting
 # that a repository configures a behaviour a ratified MAY or SHOULD clause
@@ -171,12 +181,17 @@ def asked_for_behaviour(*, item: WorkItem) -> str:
     asks what it ASKS FOR, and a closure reason is an account of what happened
     rather than part of the request. Rendering it would make a closed item's
     post-hoc narrative part of the behaviour a proposal has to cover.
+
+    The description's Definition of Done section is rendered WITHOUT its
+    proof-mode partition (`_without_proof_mode_partition`): proof mode says HOW
+    an assertion is proved and not WHAT the item asks for, so a move between the
+    factory-captured list and a sub-heading must not change the judge's input.
     """
     return "\n\n".join(
         [
             f"Work item {item.id}",
             f"Title: {_recorded(value=item.title)}",
-            f"Description: {_recorded(value=item.description)}",
+            f"Description: {_recorded(value=_without_proof_mode_partition(text=item.description))}",
             f"Acceptance criteria: {_recorded(value=item.acceptance_criteria)}",
         ]
     )
@@ -211,7 +226,7 @@ def decide_spec_change_tier(
     tier — a released item carries no topic, so a stale one cannot be inherited
     into a record that says the item is free.
     """
-    holds = classification == FEATURE_CLASS and verdict.kind in SPEC_CHANGE_KINDS
+    holds = verdict.kind in SPEC_CHANGE_KINDS
     if not holds:
         return SpecChangeTierDecision(
             tier=NO_TIER,
@@ -275,6 +290,103 @@ def proposal_topic_for(*, item: WorkItem) -> str:
     """
     words = _TOPIC_WORD.findall(item.title.casefold())[:_TOPIC_WORD_CAP]
     return "-".join(words) if words else _TOPIC_FALLBACK
+
+
+def _without_proof_mode_partition(*, text: str) -> str:
+    """A description with its Definition of Done section stripped of its partition.
+
+    The partition is exactly three things: a `Host-captured` or `Human-attested`
+    sub-heading line, the `Reason:` line (and its indented wrapping) under such a
+    sub-heading, and the order of the bullets. Those are removed, and every bullet
+    that sat in the default region or under such a sub-heading is carried ONCE, in
+    sorted order, after the lines that preceded the first sub-heading. Everything
+    else is kept as written and in place: the `References:` line, a stray line, any
+    other sub-heading (`### Context`) with whatever sits under it, and a `Reason:`
+    line that does not belong to a proof-mode sub-heading, because each of those is
+    something the judge reads. Blank lines are separators and are not kept. A bullet
+    under a non-proof-mode sub-heading stays under it, sorted there after that
+    sub-heading's other lines, so reordering it is not an edit. Text outside the
+    section is kept verbatim, and a description with no section is returned as it
+    came.
+    """
+    section = definition_of_done_source(description=text)
+    if not section:
+        return text
+    heading, *body = section.splitlines()
+    before: list[str] = []
+    after: list[str] = []
+    bullets: list[str] = []
+    for sub_heading, lines in _sub_heading_segments(body=body):
+        title = _SUB_HEADING.match(sub_heading) if sub_heading else None
+        proof_mode = (
+            title is not None
+            and declared_proof_mode(sub_heading=title.group(1)) != PROOF_MODE_FACTORY_CAPTURED
+        )
+        kept, found = _segment_content(lines=lines, proof_mode=proof_mode)
+        if sub_heading is None or proof_mode:
+            bullets.extend(found)
+        else:
+            kept.extend(f"- {bullet}" for bullet in sorted(found))
+        if sub_heading is None:
+            before = kept
+        else:
+            after.extend([] if proof_mode else [sub_heading.rstrip()])
+            after.extend(kept)
+    rendered = [heading, *before, *(f"- {bullet}" for bullet in sorted(bullets)), *after]
+    return text.replace(section, "\n".join(rendered), 1)
+
+
+def _sub_heading_segments(*, body: list[str]) -> list[tuple[str | None, list[str]]]:
+    """The section body cut at its sub-headings, as (heading line, lines under it).
+
+    The first segment has no heading: it is the default region before any
+    sub-heading.
+    """
+    segments: list[tuple[str | None, list[str]]] = [(None, [])]
+    for raw in body:
+        if _SUB_HEADING.match(raw) is not None:
+            segments.append((raw, []))
+        else:
+            segments[-1][1].append(raw)
+    return segments
+
+
+def _segment_content(*, lines: list[str], proof_mode: bool) -> tuple[list[str], list[str]]:
+    """One segment's kept non-bullet lines and the bullets it holds.
+
+    The caller decides whether the bullets are pooled or sorted in place; a
+    proof-mode segment also loses its `Reason:` line and that line's indented
+    wrapping. Blank lines are separators and are dropped.
+    """
+    kept: list[str] = []
+    bullets: list[str] = []
+    pending: list[str] = []
+    in_reason = False
+    for raw in lines:
+        if not raw.strip():
+            _close_bullet(bullets=bullets, pending=pending)
+            in_reason = False
+        elif _BULLET_MARKER.match(raw) is not None:
+            _close_bullet(bullets=bullets, pending=pending)
+            pending.append(_BULLET_MARKER.sub("", raw, count=1).strip())
+        elif pending and raw[:1].isspace():
+            pending.append(raw.strip())
+        else:
+            _close_bullet(bullets=bullets, pending=pending)
+            if proof_mode and raw.strip().startswith(REASON_PREFIX):
+                in_reason = True
+            elif not (in_reason and raw[:1].isspace()):
+                in_reason = False
+                kept.append(raw.rstrip())
+    _close_bullet(bullets=bullets, pending=pending)
+    return kept, bullets
+
+
+def _close_bullet(*, bullets: list[str], pending: list[str]) -> None:
+    """Finish the open bullet, if any, joining its wrapped lines with a space."""
+    if pending:
+        bullets.append(" ".join(pending))
+        pending.clear()
 
 
 def _recorded(*, value: str | None) -> str:

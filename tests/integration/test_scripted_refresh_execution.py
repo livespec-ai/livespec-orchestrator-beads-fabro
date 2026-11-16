@@ -22,7 +22,8 @@ called out.
 
 WHAT IS SIMULATED, AND WHY EACH SUBSTITUTION IS SAFE.
 
-- `{{ inputs.default_branch }}` and `{{ inputs.sandbox_check_suite }}` are
+- `{{ inputs.default_branch }}`, `{{ inputs.sandbox_check_suite }}` and
+  `{{ inputs.conformance_hook_install }}` are
   substituted here because the pinned ENGINE owns that templating, not this
   repository. The check suite is a per-repository DECLARATION -- an arbitrary
   command the governed repo names -- so standing a controlled script in for it
@@ -69,7 +70,6 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dot_graph import par
 from livespec_orchestrator_beads_fabro.commands._dispatcher_overlay import render_run_config_overlay
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plugin_cache_gate import (
     PLUGIN_GATE_PROGRAM_FILENAME,
-    plugin_cache_gate_prepare_step,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_publication_head import (
     PROOF_HEAD_PROGRAM_FILENAME,
@@ -99,7 +99,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_plugins impo
     SANDBOX_CLAUDE_PLUGINS_ROOT_ENV_VAR,
 )
 
-from tests.prepare_step_support import runnable_script
+from tests.prepare_step_support import plugin_gate_installer_script
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _IMPLEMENT_GRAPH = (
@@ -206,8 +206,10 @@ _RENDERINGS = (
 
 def _bind_engine_tokens(*, script: str, check_suite: str) -> str:
     """Bind the engine's OWN tokens, and nothing else the stage carries."""
-    return script.replace("{{ inputs.default_branch }}", _DEFAULT_BRANCH).replace(
-        "{{ inputs.sandbox_check_suite }}", check_suite
+    return (
+        script.replace("{{ inputs.default_branch }}", _DEFAULT_BRANCH)
+        .replace("{{ inputs.sandbox_check_suite }}", check_suite)
+        .replace("{{ inputs.conformance_hook_install }}", "")
     )
 
 
@@ -379,9 +381,7 @@ def _materialized_plugins_root(*, root: Path) -> Path:
     _ = merge_program.write_text(record_file_merge_program_source(), encoding="utf-8")
     merge_program.chmod(0o700)
     gate_script = root / "install-plugin-gate.sh"
-    _ = gate_script.write_text(
-        runnable_script(step=plugin_cache_gate_prepare_step()), encoding="utf-8"
-    )
+    _ = gate_script.write_text(plugin_gate_installer_script(), encoding="utf-8")
     return plugins_root
 
 
@@ -1381,6 +1381,42 @@ def test_a_remote_moving_after_observation_is_rejected_by_the_lease(tmp_path: Pa
     assert box.state(name=REFRESH_COUNT_STATE_FILENAME) is None
 
 
+def test_a_forge_server_error_retries_the_leased_push_while_origin_is_unchanged(
+    tmp_path: Path,
+) -> None:
+    """A transient forge refusal is retried, rather than misreported as a lease race."""
+    box = _build(root=tmp_path)
+    before = box.remote_head(ref=_BRANCH)
+    attempts = tmp_path / "forge-push-attempts"
+    helper_root = tmp_path / "push-helper"
+    helper = helper_root / "bin" / "push_origin"
+    helper.parent.mkdir(parents=True)
+    _ = helper.write_text(
+        "#!/bin/sh\n"
+        f"printf x >> {attempts}\n"
+        "printf '%s\\n' 'remote: HTTP 502 Bad Gateway' >&2\n"
+        "printf '%s\\n' 'remote: GitHub Request ID: TEST-REQUEST-ID' >&2\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    helper.chmod(0o700)
+    _ = _advance_default(box=box)
+
+    result = _run(
+        box=box,
+        extra_env={"LIVESPEC_SANDBOX_GH_REFRESH_ROOT": str(helper_root)},
+    )
+
+    assert result.returncode == 1, result.stdout
+    assert attempts.read_text(encoding="utf-8") == "xxx"
+    assert "LIVESPEC_PR_REFRESH_FORGE_ERROR" in result.stderr
+    assert "HTTP 502 Bad Gateway" in result.stderr
+    assert "TEST-REQUEST-ID" in result.stderr
+    assert "LIVESPEC_PR_REFRESH_LEASE_FAILED" not in result.stderr
+    assert box.remote_head(ref=_BRANCH) == before
+    assert box.state(name=REFRESH_CHANGED_STATE_FILENAME) is None
+
+
 def test_a_non_numeric_refresh_counter_fails_closed(tmp_path: Path) -> None:
     """A counter nothing can compare cannot bound anything, so it refuses.
 
@@ -1751,10 +1787,13 @@ def test_the_executed_bytes_are_the_committed_bytes(tmp_path: Path) -> None:
     committed = graph.nodes["pr_refresh"]["script"]
     assert "{{ inputs.default_branch }}" in committed
     assert "{{ inputs.sandbox_check_suite }}" in committed
+    assert "{{ inputs.conformance_hook_install }}" in committed
     executed = _refresh_script(check_suite=_PASSING_GATE)
     assert "{{" not in executed
-    assert executed == committed.replace("{{ inputs.default_branch }}", _DEFAULT_BRANCH).replace(
-        "{{ inputs.sandbox_check_suite }}", _PASSING_GATE
+    assert executed == (
+        committed.replace("{{ inputs.default_branch }}", _DEFAULT_BRANCH)
+        .replace("{{ inputs.sandbox_check_suite }}", _PASSING_GATE)
+        .replace("{{ inputs.conformance_hook_install }}", "")
     )
     # And the one program the stage re-enters is the production one, written from
     # its own source rather than restated: a control whose push helper was a
@@ -1795,7 +1834,7 @@ def _generic_terminal_reason() -> str:
     graph = parse_dot_graph(text=_IMPLEMENT_GRAPH.read_text(encoding="utf-8"))
     assert not isinstance(graph, str), graph
     terminal = graph.nodes["needs_human"]["script"]
-    match = re.search(r"reason='([^']+)'", terminal)
+    match = re.search(r"else reason='([^']+)'", terminal)
     assert match is not None, terminal
     return match.group(1)
 

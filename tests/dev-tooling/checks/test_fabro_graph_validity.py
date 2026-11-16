@@ -32,6 +32,10 @@ _BUNDLE = (".claude-plugin", ".fabro", "workflows", "implement-work-item")
 # in sh + awk rather than Python so the spawned child never self-instruments
 # under `pytest --cov`.
 _RULE_FAITHFUL_STUB = """#!/bin/sh
+if [ "$1" = "--version" ]; then
+    echo "fabro 0.408.0-nightly.0 (test)"
+    exit 0
+fi
 awk '
 /^[ \\t]*[A-Za-z_][A-Za-z0-9_]*[ \\t]*->/ {
     total[$1]++
@@ -52,7 +56,35 @@ END {
 """
 
 # A stub that cannot return a hit: it accepts every graph it is handed.
-_BLIND_STUB = "#!/bin/sh\nexit 0\n"
+_BLIND_STUB = (
+    "#!/bin/sh\n"
+    'if [ "$1" = "--version" ]; then\n'
+    '    echo "fabro 0.408.0-nightly.0 (test)"\n'
+    "    exit 0\n"
+    "fi\n"
+    "exit 0\n"
+)
+
+_UNPARSEABLE_VERSION_STUB = (
+    "#!/bin/sh\n"
+    'if [ "$1" = "--version" ]; then\n'
+    '    echo "fabro unknown (test)"\n'
+    "    exit 0\n"
+    "fi\n"
+    "exit 0\n"
+)
+
+
+def _versioned_stub(*, version: str) -> str:
+    """A rule-faithful client whose version command identifies its engine era."""
+    return (
+        "#!/bin/sh\n"
+        'if [ "$1" = "--version" ]; then\n'
+        f'    echo "fabro {version} (test)"\n'
+        "    exit 0\n"
+        "fi\n" + _RULE_FAITHFUL_STUB.split("\n", 1)[1]
+    )
+
 
 _VALID_GRAPH = """digraph Probe {
     start -> a
@@ -122,7 +154,7 @@ def _seed_payload(*, root: Path, graph: str, with_run_config: bool = True) -> Pa
     return directory
 
 
-# A stub that models the UPSTREAM fabro 0.254.0 release CI pins: it cannot parse
+# A stub that models the UPSTREAM Petri-era fabro release CI pins: it cannot parse
 # the fork-only `run.checkpoint.commit_timeout` key (fork PR #552), and refuses
 # before reading the graph. Its refusal never names `all_conditional_edges`, so
 # a mutant handed to it un-normalized fails the matcher control rather than
@@ -148,6 +180,65 @@ def test_this_repositorys_real_graphs_pass_an_engine_that_refuses_fork_only_sett
     found = check.report(repo_root=_REPO_ROOT)
 
     assert found.findings == []
+
+
+def test_a_commit_settling_node_without_wip_capture_is_a_finding(
+    check: ModuleType, tmp_path: Path
+) -> None:
+    """Scenario 317: the graph gate names the exact settling node that omits capture."""
+    graph = """digraph Probe {
+    implement_commit_settle [script=\"echo settle\"]
+    fix_commit_settle [script=\"livespec-capture-wip\"]
+    review_fix_commit_settle [script=\"livespec-capture-wip\"]
+}
+"""
+    _seed_payload(root=tmp_path, graph=graph)
+
+    findings = check.wip_capture_findings(payloads=check.checked_payloads(repo_root=tmp_path))
+
+    assert len(findings) == 1
+    assert "implement_commit_settle" in findings[0]
+    assert "livespec-capture-wip" in findings[0]
+
+
+def test_a_wip_capture_check_ignores_settle_nodes_the_graph_does_not_declare(
+    check: ModuleType, tmp_path: Path
+) -> None:
+    """The WIP helper reports only settle nodes that actually exist in this graph."""
+    graph = """digraph Probe {
+    implement_commit_settle [script=\"livespec-capture-wip\"]
+}
+"""
+    _seed_payload(root=tmp_path, graph=graph)
+
+    findings = check.wip_capture_findings(payloads=check.checked_payloads(repo_root=tmp_path))
+
+    assert findings == []
+
+
+def test_the_wip_capture_check_skips_only_uncheckable_payload_shapes(
+    check: ModuleType, tmp_path: Path
+) -> None:
+    """Non-bundle, missing, malformed, and node-free payloads make no claim."""
+    helper = sys.modules[check.wip_capture_findings.__module__]
+    bundle_where = "/".join(helper.BUNDLE_RELPATH)
+    malformed = tmp_path / "malformed"
+    malformed.mkdir()
+    _ = (malformed / "workflow.fabro").write_text("not a graph", encoding="utf-8")
+    node_free = tmp_path / "node-free"
+    node_free.mkdir()
+    _ = (node_free / "workflow.fabro").write_text("digraph Probe {}", encoding="utf-8")
+
+    findings = check.wip_capture_findings(
+        payloads=[
+            helper.CheckedPayload(where="variant", directory=tmp_path / "variant"),
+            helper.CheckedPayload(where=bundle_where, directory=tmp_path / "missing"),
+            helper.CheckedPayload(where=bundle_where, directory=malformed),
+            helper.CheckedPayload(where=bundle_where, directory=node_free),
+        ]
+    )
+
+    assert findings == []
 
 
 def test_a_fork_only_setting_is_stripped_named_and_never_edited_in_place(
@@ -370,6 +461,50 @@ def test_a_non_executable_path_resolves_to_nothing(
     assert check.resolved_binary(repo_root=tmp_path) is None
 
 
+def test_legacy_clients_are_refused_and_petri_clients_report_their_version_per_graph(
+    check: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The gate must not silently validate a graph with the retired 0.254 client."""
+    root = tmp_path / "repo"
+    _seed_payload(root=root, graph=_VALID_GRAPH)
+    _use_stub(
+        monkeypatch=monkeypatch,
+        root=tmp_path,
+        body=_versioned_stub(version="0.254.0"),
+    )
+
+    legacy = check.report(repo_root=root)
+
+    assert any("0.254.0" in finding and "Petri-era" in finding for finding in legacy.findings)
+
+    _use_stub(
+        monkeypatch=monkeypatch,
+        root=tmp_path,
+        body=_versioned_stub(version="0.408.0-nightly.0"),
+    )
+    monkeypatch.chdir(root)
+
+    assert check.main() == 0
+    captured = capsys.readouterr().err
+    assert "workflow.fabro validated with fabro 0.408.0-nightly.0" in captured
+
+
+def test_an_unparseable_client_version_is_refused_before_graph_validation(
+    check: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "repo"
+    _seed_payload(root=root, graph=_VALID_GRAPH)
+    _use_stub(monkeypatch=monkeypatch, root=tmp_path, body=_UNPARSEABLE_VERSION_STUB)
+
+    findings = check.report(repo_root=root).findings
+
+    assert len(findings) == 1
+    assert "did not report a parseable version" in findings[0]
+
+
 def test_mutant_text_skips_edges_that_cannot_carry_the_control(check: ModuleType) -> None:
     """An attributed edge, a node with no conditional sibling, and a node with two
     fallthroughs are each passed over; the first eligible edge is the one rewritten."""
@@ -403,7 +538,9 @@ def test_main_exits_zero_on_a_clean_repository(
     monkeypatch.chdir(root)
 
     assert check.main() == 0
-    assert capsys.readouterr().err == ""
+    captured = capsys.readouterr().err
+    assert "workflow.fabro validated with fabro 0.408.0-nightly.0" in captured
+    assert '"level": "info"' in captured
 
 
 def test_main_exits_one_and_logs_every_finding(

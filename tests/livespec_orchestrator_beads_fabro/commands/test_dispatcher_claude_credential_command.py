@@ -115,6 +115,7 @@ def test_assess_passes_only_the_present_token_to_the_probe() -> None:
 def test_status_json_reports_probe_bound_and_measured_usage(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", _TEST_TOKEN)
     monkeypatch.setattr(
@@ -123,7 +124,9 @@ def test_status_json_reports_probe_bound_and_measured_usage(
         lambda *, token: _status_for_token(token=token, usable=True),
     )
 
-    exit_code = command.run_claude_cred_status(args=argparse.Namespace(as_json=True))
+    exit_code = command.run_claude_cred_status(
+        args=argparse.Namespace(as_json=True, repo=str(tmp_path))
+    )
 
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
@@ -147,6 +150,7 @@ def test_status_json_reports_probe_bound_and_measured_usage(
 def test_status_human_refuses_an_exhausted_token(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", _TEST_TOKEN)
     monkeypatch.setattr(
@@ -155,7 +159,9 @@ def test_status_human_refuses_an_exhausted_token(
         lambda *, token: _status_for_token(token=token, usable=False),
     )
 
-    exit_code = command.run_claude_cred_status(args=argparse.Namespace(as_json=False))
+    exit_code = command.run_claude_cred_status(
+        args=argparse.Namespace(as_json=False, repo=str(tmp_path))
+    )
 
     assert exit_code == 1
     out = capsys.readouterr().out
@@ -189,7 +195,9 @@ def test_status_probes_the_caam_selected_slot_not_the_unnumbered_token(
     seen: list[str] = []
     monkeypatch.setattr(command, "probe_claude_credential", _recording_probe(seen=seen))
 
-    exit_code = command.run_claude_cred_status(args=argparse.Namespace(as_json=True))
+    exit_code = command.run_claude_cred_status(
+        args=argparse.Namespace(as_json=True, repo=str(tmp_path))
+    )
 
     assert exit_code == 0
     assert seen == [_SLOT_TOKEN]
@@ -228,7 +236,9 @@ def test_status_falls_back_to_the_unnumbered_token_and_says_so_once_on_stderr(
     seen: list[str] = []
     monkeypatch.setattr(command, "probe_claude_credential", _recording_probe(seen=seen))
 
-    exit_code = command.run_claude_cred_status(args=argparse.Namespace(as_json=True))
+    exit_code = command.run_claude_cred_status(
+        args=argparse.Namespace(as_json=True, repo=str(tmp_path))
+    )
 
     assert exit_code == 0
     assert seen == [_TEST_TOKEN]
@@ -257,9 +267,15 @@ def test_status_names_the_env_var_it_actually_probed_in_both_renderings(
     seen: list[str] = []
     monkeypatch.setattr(command, "probe_claude_credential", _recording_probe(seen=seen))
 
-    assert command.run_claude_cred_status(args=argparse.Namespace(as_json=True)) == 0
+    assert (
+        command.run_claude_cred_status(args=argparse.Namespace(as_json=True, repo=str(tmp_path)))
+        == 0
+    )
     payload = json.loads(capsys.readouterr().out)
-    assert command.run_claude_cred_status(args=argparse.Namespace(as_json=False)) == 0
+    assert (
+        command.run_claude_cred_status(args=argparse.Namespace(as_json=False, repo=str(tmp_path)))
+        == 0
+    )
     human = capsys.readouterr().out
 
     assert payload["credential_env"] == _SLOT_ENV
@@ -270,10 +286,11 @@ def test_status_names_the_env_var_it_actually_probed_in_both_renderings(
 def test_dispatcher_routes_claude_status_command(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
 
-    exit_code = dispatcher.main(argv=["claude-cred-status", "--json"])
+    exit_code = dispatcher.main(argv=["claude-cred-status", "--repo", str(tmp_path), "--json"])
 
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 1

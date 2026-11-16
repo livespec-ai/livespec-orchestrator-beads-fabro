@@ -113,7 +113,12 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_record import 
     VERDICT_CAPTURED,
     VERDICT_VERIFIED,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_setup_nodes import (
+    SETUP_FAILURE_NODE,
+    is_setup_node,
+)
 from livespec_orchestrator_beads_fabro.commands.dispatcher import main
+from livespec_orchestrator_beads_fabro.incident_completion import IncidentAcceptanceScope
 from livespec_orchestrator_beads_fabro.store import (
     append_work_item,
     materialize_work_items,
@@ -195,8 +200,12 @@ _CLAUSE_SEPARATOR = "&&"
 _INPUT_REFERENCE = re.compile(r"\{\{\s*inputs\.(?P<name>\w+)\s*\}\}")
 # A bare literal: the only term shape that is neither a context read nor an
 # input reference. Anchored whole, so `context.internal.attempt` and an
-# unresolved `{{ inputs.unknown }}` both fall through to the refusal.
-_LITERAL = re.compile(r"\w+")
+# unresolved `{{ inputs.unknown }}` both fall through to the refusal. A hyphen is
+# part of a literal, as in the split graph's `test-wrong` and `already-satisfied`
+# labels, because the engine's tokenizer (fabro-graphviz `condition.rs`) reads a
+# bare word as everything up to whitespace or an operator character; a dot is
+# not, so a dotted context read still lands on the refusal.
+_LITERAL = re.compile(r"[\w-]+")
 # An edge line and, when it carries one, its attribute block. The source name is
 # `^`-anchored and must be followed directly by the arrow, so a `//` comment line
 # describing an edge cannot match; the case below cross-checks the whole set
@@ -209,12 +218,15 @@ _GRAPH_KEY = re.compile(r'(?m)^graph = "(?P<path>[^"]+)"')
 _ASSERTION_HEADING = re.compile(r"(?m)^## Assertion \d+ — (?P<text>.+)$")
 _SIGNIFICANT_TERM = re.compile(r"[a-z0-9_]{4,}")
 # A generous bound on the reserved workflow's longest honest route. The journey
-# below walks eighteen nodes; anything near this many is a graph that does not
-# terminate, which the drive reports rather than hanging on.
-_STEP_BOUND = 64
+# below walks eighteen stage nodes AFTER the sandbox setup chain -- the committed
+# `run_prepare_<N>` nodes plus every step the Dispatcher materializes into the
+# dispatch's graph (work-item bd-ib-dpsiwz), which is several dozen -- so the bound
+# is sized for that chain too. Anything near it is a graph that does not terminate,
+# which the drive reports rather than hanging on.
+_STEP_BOUND = 192
 
 _PULL_REQUEST_NUMBER = 2538
-_PULL_REQUEST_URL = "https://example.test/thewoolleyman/livespec-orchestrator-beads-fabro/pull/"
+_PULL_REQUEST_URL = "https://example.test/livespec-ai/livespec-orchestrator-beads-fabro/pull/"
 _FIRST_COMMENT_ID = 5940546142
 # The real merge sha of the pull request the committed record payload came from.
 _MERGE_SHA = "77067d88"
@@ -444,6 +456,18 @@ class _Forge:
         return CommandResult(exit_code=0, stdout=_MERGED_DIFF, stderr="")
 
 
+def _is_setup(*, name: str) -> bool:
+    """Whether a node belongs to the sandbox setup chain or the terminal it fails to."""
+    return is_setup_node(name=name) or name == SETUP_FAILURE_NODE
+
+
+def _outside_setup(*, edges: tuple[_Edge, ...]) -> tuple[_Edge, ...]:
+    """The edges touching no setup node."""
+    return tuple(
+        edge for edge in edges if not (_is_setup(name=edge.source) or _is_setup(name=edge.target))
+    )
+
+
 def _edges(*, text: str) -> tuple[_Edge, ...]:
     """Every declared edge, in declaration order, with its condition."""
     return tuple(
@@ -489,6 +513,10 @@ def _compare(*, operator: str, left: str, right: str) -> bool:
 
 
 def _clause_holds(*, clause: str, state: _State, inputs: dict[str, str]) -> bool:
+    # A bare key is Fabro's truthiness test (`condition.rs`): the red and green
+    # catch-all edges read `preferred_label && preferred_label != <label>...`.
+    if clause.strip() == _PREFERRED_LABEL_TERM:
+        return _resolve(term=clause, state=state, inputs=inputs) != ""
     for operator in _OPERATORS:
         left, separator, right = clause.partition(operator)
         if separator == "":
@@ -564,6 +592,24 @@ def _always_succeeded(*, node: str, visit: int) -> tuple[str, str | None]:
     return _SUCCEEDED, None
 
 
+def _reported_outcome(*, node: str, visit: int) -> tuple[str, str | None]:
+    """Return the routing state a successful proof-chain node reports."""
+    if node == _REVIEW:
+        return _SUCCEEDED, (_LABEL_FIX if visit == 1 else _LABEL_APPROVE)
+    if node == _DISPOSITION:
+        return _SUCCEEDED, _LABEL_FIX
+    if node == "implement_completion":
+        return _SUCCEEDED, "complete"
+    if node == _PROOF_VERIFY:
+        return _SUCCEEDED, _LABEL_APPROVE
+    if node in {
+        _PUBLISH_MERGED_RECONCILE_ROUTE,
+        _PR_REFRESH_MERGED_RECONCILE_ROUTE,
+    }:
+        return _FAILED, None
+    return _SUCCEEDED, None
+
+
 def _sandbox(*, forge: _Forge, branch: str) -> Callable[..., tuple[str, str | None]]:
     """What each node of the reserved workflow does to the forge, and what it reports.
 
@@ -599,18 +645,7 @@ def _sandbox(*, forge: _Forge, branch: str) -> Callable[..., tuple[str, str | No
         elif node == _PR:
             forge.mark_ready_and_merge()
         forge.snapshot()
-        if node == _REVIEW:
-            return _SUCCEEDED, (_LABEL_FIX if visit == 1 else _LABEL_APPROVE)
-        if node == _DISPOSITION:
-            return _SUCCEEDED, _LABEL_FIX
-        if node == _PROOF_VERIFY:
-            return _SUCCEEDED, _LABEL_APPROVE
-        if node in {
-            _PUBLISH_MERGED_RECONCILE_ROUTE,
-            _PR_REFRESH_MERGED_RECONCILE_ROUTE,
-        }:
-            return _FAILED, None
-        return _SUCCEEDED, None
+        return _reported_outcome(node=node, visit=visit)
 
     return _act
 
@@ -776,6 +811,7 @@ def _acceptance_pass_over(*, runner: _Forge) -> Callable[..., AcceptancePassResu
         outcome: DispatchOutcome,
         raw_labels: Sequence[str] = (),
         journal_path: Path | None = None,
+        incident: IncidentAcceptanceScope | None = None,
     ) -> AcceptancePassResult:
         return run_acceptance_pass(
             repo=repo,
@@ -784,6 +820,7 @@ def _acceptance_pass_over(*, runner: _Forge) -> Callable[..., AcceptancePassResu
             runner=runner,
             raw_labels=raw_labels,
             journal_path=journal_path,
+            incident=incident,
         )
 
     return _call
@@ -877,28 +914,46 @@ def _assert_drove_the_committed_graph(*, run: _Run) -> None:
     than against the name `exit`, because "the run finished GREEN" is a claim
     about the terminal's kind and a renamed terminal must not pass.
     """
-    assert run.edges == _edges(text=_COMMITTED_GRAPH_TEXT)
+    # The dispatch's graph is the committed one PLUS the setup nodes the Dispatcher
+    # materializes into it (work-item bd-ib-dpsiwz), so the two are compared on
+    # everything that is not setup; the setup chain is graded on its own below.
+    assert _outside_setup(edges=run.edges) == _outside_setup(
+        edges=_edges(text=_COMMITTED_GRAPH_TEXT)
+    )
     graph = parse_workflow_graph(text=_COMMITTED_GRAPH_TEXT)
-    assert tuple((edge.source, edge.target) for edge in run.edges) == graph.edges
+    assert tuple((edge.source, edge.target) for edge in _outside_setup(edges=run.edges)) == tuple(
+        (source, target)
+        for source, target in graph.edges
+        if not (_is_setup(name=source) or _is_setup(name=target))
+    )
+    setup = [name for name in run.visited if _is_setup(name=name)]
+    committed_setup = {name for name in re.findall(r"run_prepare_\d+", _COMMITTED_GRAPH_TEXT)}
+    assert committed_setup
+    assert len(setup) >= len(committed_setup)
+    assert setup == [f"run_prepare_{index}" for index in range(1, len(setup) + 1)]
     assert run.inputs[_CAP_INPUT].isdigit()
     # One reviewer-requested fix round, so `publish_draft` and `proof_capture`
     # are each entered twice — that second entry is what makes the idempotence
     # and append-only claims load-bearing.
-    assert run.visited == [
+    assert [name for name in run.visited if not _is_setup(name=name)] == [
         _START,
         "dod_gate",
         # The post-turn mutation guard (bd-ib-al54tl) sits on `dod_gate`'s
         # fallthrough.
         "dod_gate_mutation_guard",
-        "implement",
-        # The commit-run settle (bd-ib-xj3qqb) precedes the completion gate on
-        # `implement`'s fallthrough.
-        "implement_commit_settle",
-        # Scenario 204's completion gate (v165) sits on `implement`'s own
-        # fallthrough, so every run passes through it on the way to the diff
-        # breaker; a turn that stated its Definition of Done complete is the
-        # only one that proceeds, which is what this green journey is.
+        # Scenario 285's split implement stage: Red writes the failing test and
+        # its command node commits it, then Green implements against the handoff.
+        "red_admission",
+        "red",
+        "commit_red",
+        "green_admission",
+        "green",
+        # Scenario 204's completion gate sits on `green`'s fallthrough, so every
+        # run passes through it before `commit_green`; a turn that stated its
+        # Definition of Done complete is the only one that proceeds, which is
+        # what this green journey is.
         "implement_completion",
+        "commit_green",
         "implementation_diff",
         "janitor_admission",
         "janitor",
@@ -910,6 +965,7 @@ def _assert_drove_the_committed_graph(*, run: _Run) -> None:
         _DISPOSITION,
         "review_fix",
         "review_fix_commit_settle",
+        "review_fix_open_red_route",
         "janitor_admission",
         "janitor",
         _PUBLISH_DRAFT,

@@ -27,10 +27,14 @@ from types import ModuleType
 from typing import Any
 
 import pytest
-import tomli
+from livespec_orchestrator_beads_fabro.commands._dispatcher_graph_adapters import (
+    guarded_adapter_commands,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_harness_shell_policy import (
     harness_settings_merge_program,
 )
+
+from tests.prepare_step_support import plugins_helper
 
 _MODULE_PATH = (
     Path(__file__).resolve().parents[3]
@@ -173,14 +177,10 @@ def test_the_hook_declaration_is_a_pretooluse_bash_hook_that_cannot_block_on_a_m
     assert entry["timeout"] == module.REVIEW_GUARD_HOOK_TIMEOUT_SECONDS
 
 
-def test_the_prepare_step_writes_the_exact_guard_source_into_the_plugins_root() -> None:
+def test_the_helper_fetch_writes_the_exact_guard_source_into_the_plugins_root() -> None:
     module = _guard_module()
-    block = module.review_guard_prepare_steps_block()
-    (step,) = tomli.loads(block)["run"]["prepare"]["steps"]
-    script = str(step["script"])
-    assert module.REVIEW_GUARD_PROGRAM_FILENAME in script
-    assert "<<" not in script
-    assert step["env"] == {"LIVESPEC_PREPARE_PAYLOAD": module.review_guard_program_source()}
+    helper = plugins_helper(path=module.REVIEW_GUARD_PROGRAM_FILENAME)
+    assert helper.compose() == module.review_guard_program_source().encode("utf-8")
 
 
 def test_the_settings_merge_program_installs_the_guard_beside_the_gate() -> None:
@@ -188,3 +188,9 @@ def test_the_settings_merge_program_installs_the_guard_beside_the_gate() -> None
     program = harness_settings_merge_program()
     assert "livespec-run-plugin-gate.py" in program
     assert "livespec-review-guard.py" in program
+
+
+def test_the_review_adapter_gets_the_adapter_independent_read_only_launcher() -> None:
+    """A Codex review inherits the same command boundary as a Claude review."""
+    commands = guarded_adapter_commands(run_inputs=("review_adapter=CODEX_CONFIG='{}' codex-acp",))
+    assert "LIVESPEC_REVIEW_READ_ONLY=1" in commands["review_adapter"]

@@ -27,21 +27,25 @@ deliberate in `SPECIFICATION/contracts.md` section "ACP node timeouts".
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
 __all__: list[str] = [
+    "ARGUMENT_LAYER",
+    "BUILT_IN_DEFAULT_LAYER",
     "DEFAULT_FABRO_TIMEOUT_SECONDS",
     "DEFAULT_NODE_TIMEOUTS",
     "DEFAULT_NODE_TIMEOUT_SECONDS",
     "DEFAULT_STALL_TIMEOUT_SECONDS",
     "REPOSITORY_LAYER",
     "WORKFLOW_DEFAULT_LAYER",
+    "WORKFLOW_LAYER",
     "NodeTimeouts",
     "default_node_timeouts",
     "derive_fabro_timeout_seconds",
     "node_timeouts_from_block",
     "node_timeouts_journal_record",
+    "node_timeouts_with_arguments",
     "positive_int_seconds",
 ]
 
@@ -56,11 +60,16 @@ DEFAULT_STALL_TIMEOUT_SECONDS = 7200
 # can tell a repository override from the built-in default without
 # re-deriving it.
 REPOSITORY_LAYER = "repository"
-WORKFLOW_DEFAULT_LAYER = "default"
+ARGUMENT_LAYER = "argument"
+BUILT_IN_DEFAULT_LAYER = "default"
+WORKFLOW_LAYER = "workflow"
+# Kept as the public spelling used by node-timeout callers: unlike the
+# run-level policies below, a node can inherit a workflow declaration.
+WORKFLOW_DEFAULT_LAYER = WORKFLOW_LAYER
 
 # The graph's worst-case path, expressed as the visit budget each node can
-# actually consume in one run -- read off `workflow.fabro`: `dod_gate` and
-# `implement` carry `max_retries=1` (two attempts each), the janitor fix loop is
+# actually consume in one run -- read off `workflow.fabro`: `dod_gate`, `red`,
+# and `green` carry `max_retries=1` (two attempts each), the janitor fix loop is
 # bounded by the `< 3` visit guard on the janitor's own visit count (three
 # janitor visits, two fix attempts), and the review loop is bounded by the
 # default `review_fix_visit_cap` of four review visits with three
@@ -71,35 +80,37 @@ WORKFLOW_DEFAULT_LAYER = "default"
 # `fabro run` subprocess ceiling comes from, so an omitted node is a node the
 # Dispatcher can kill the CLI out from under.
 #
-# `implementation_diff` after `implement` carries the budget of the retryable
+# `implementation_diff` after `commit_green` carries the budget of the retryable
 # node it guards, because it can be reached once per attempt of it. It is cheap
 # in practice (one `git` call) and budgeting it at the guarded node's count is
 # what keeps the ceiling ABOVE the graph rather than level with an optimistic
 # reading of it.
 #
+# THE SPLIT IMPLEMENT STAGE (Scenario 285; work-item bd-ib-vy75ws). `green` is
+# entered through `green_admission`, which admits three visits, and ONCE MORE by
+# `green_incomplete_route`, which re-enters an incomplete turn one time and fails
+# the second; so `green` has four visits of two attempts each, EIGHT, and
+# `green_incomplete_route` is entered at most TWICE. Every `green` visit that
+# does not declare the Red test wrong passes `implement_completion` once, a
+# failed one passing `green_amendment_route` first, and each completed visit
+# reaches `commit_green` once, so those three are FOUR.
+#
 # `implement_completion` (v165, Scenario 204; work-item bd-ib-ahxcjx) is the
-# OTHER postcondition of that same turn and is budgeted identically for the
-# identical reason: it sits on `implement`'s single fallthrough, so each attempt
-# of the turn can reach it once. It is cheaper still than the diff breaker --
-# one file read -- and this repository declares it DOWNWARD at 600 s in
+# postcondition of the `green` turn and is budgeted at that turn's visit count
+# for the diff breaker's reason: each visit of the turn can reach it once. It is
+# cheaper still than the diff breaker -- one file read -- and this repository
+# declares it DOWNWARD at 600 s in
 # `.livespec.jsonc`, which is the credential floor's own documented remedy
 # applied to work that genuinely takes milliseconds.
 #
-# `implement_hook_route` (v208, Scenario 204; work-item bd-ib-y7372n) sits on
-# `implement_completion`'s failure edge and can send an incomplete turn back to
-# `implement` ONCE, when the commit hook refused what the turn left staged, and
-# (bd-ib-xj3qqb) ONCE MORE without spending that budget when the turn ended while
-# a commit run it started was still running and that run passed. So `implement`
-# is reached by three visits of two attempts each, SIX, and the route, the
-# completion gate, the diff breaker and `implement_commit_settle` once per
-# visit, THREE; `review_fix_commit_settle` follows `review_fix`'s three and
+# The single-node incomplete-turn route and commit-settle node of the pre-split
+# graph (`implement_hook_route`, `implement_commit_settle`) were removed by
+# bd-ib-vvzd3v: the split left no edge entering either, so the engine refused
+# every run. `review_fix_commit_settle` follows `review_fix`'s three visits and
 # `fix_commit_settle` follows `fix`'s two. `janitor_admission` sits ahead of
 # each janitor visit and is likewise billed three times; it has its own
 # engine-side ninth visit only to name the exhausted eight-visit bound and
-# preserve the tree, which is not part of a successful run's longest path. The
-# route runs the repository's pre-commit hook, which can take the better part
-# of its timeout, so it is billed at its full visit count like any node that can
-# spend its ceiling.
+# preserve the tree, which is not part of a successful run's longest path.
 #
 # The three TERMINAL sentinel nodes (`dead_implementer`, `abandon`,
 # `non_converged`) are deliberately absent: each ENDS the run, so they are
@@ -165,10 +176,16 @@ WORKFLOW_DEFAULT_LAYER = "default"
 # the only path out, so nothing re-enters it.
 _WORST_CASE_VISITS: Mapping[str, int] = {
     "dod_gate": 2,
-    "implement": 6,
-    "implement_commit_settle": 3,
-    "implement_completion": 3,
-    "implement_hook_route": 3,
+    "red_admission": 4,
+    "red": 6,
+    "commit_red": 3,
+    "green_admission": 4,
+    "green": 8,
+    "green_amendment_route": 4,
+    "implement_completion": 4,
+    "green_incomplete_route": 2,
+    "commit_green": 4,
+    "test_wrong_reset": 3,
     "implementation_diff": 3,
     "janitor_admission": 3,
     "janitor": 3,
@@ -210,18 +227,26 @@ class NodeTimeouts:
     configured: Mapping[str, int]
     stall_seconds: int
     stall_layer: str
+    configured_layers: Mapping[str, str] = field(default_factory=dict)
+    workflow: Mapping[str, int] = field(default_factory=dict)
 
     def seconds_for(self, *, node: str) -> int:
         """The resolved timeout in seconds for `node`."""
-        return self.configured.get(_configuration_node(node=node), DEFAULT_NODE_TIMEOUT_SECONDS)
+        configured_node = _configuration_node(node=node)
+        if configured_node in self.configured:
+            return self.configured[configured_node]
+        return self.workflow.get(node, DEFAULT_NODE_TIMEOUT_SECONDS)
 
     def layer_for(self, *, node: str) -> str:
         """Which layer supplied `node`'s timeout."""
-        return (
-            REPOSITORY_LAYER
-            if _configuration_node(node=node) in self.configured
-            else WORKFLOW_DEFAULT_LAYER
-        )
+        configured_node = _configuration_node(node=node)
+        if configured_node in self.configured:
+            return self.configured_layers.get(configured_node, REPOSITORY_LAYER)
+        return WORKFLOW_LAYER if node in self.workflow else BUILT_IN_DEFAULT_LAYER
+
+    def with_workflow_defaults(self, *, nodes: Mapping[str, int]) -> NodeTimeouts:
+        """Carry the declared durations the rendered graph makes effective."""
+        return replace(self, workflow=dict(nodes))
 
 
 def default_node_timeouts() -> NodeTimeouts:
@@ -229,7 +254,7 @@ def default_node_timeouts() -> NodeTimeouts:
     return NodeTimeouts(
         configured={},
         stall_seconds=DEFAULT_STALL_TIMEOUT_SECONDS,
-        stall_layer=WORKFLOW_DEFAULT_LAYER,
+        stall_layer=BUILT_IN_DEFAULT_LAYER,
     )
 
 
@@ -267,6 +292,22 @@ def node_timeouts_from_block(*, block: dict[str, Any]) -> NodeTimeouts | str:
     return _with_stall(block=block, configured=configured)
 
 
+def node_timeouts_with_arguments(
+    *, timeouts: NodeTimeouts, arguments: tuple[str, ...]
+) -> NodeTimeouts | str:
+    """Apply the most-specific repeatable ``--node-timeout NODE=SECONDS`` layer."""
+    configured = dict(timeouts.configured)
+    layers = dict(timeouts.configured_layers)
+    for argument in arguments:
+        node, separator, raw_seconds = argument.partition("=")
+        seconds = positive_int_seconds(value=int(raw_seconds)) if raw_seconds.isdigit() else None
+        if not node or separator != "=" or seconds is None:
+            return f"--node-timeout must be NODE=positive-integer-seconds; got {argument!r}"
+        configured[node] = seconds
+        layers[node] = ARGUMENT_LAYER
+    return replace(timeouts, configured=configured, configured_layers=layers)
+
+
 def derive_fabro_timeout_seconds(*, timeouts: NodeTimeouts) -> float:
     """Derive the `fabro run` subprocess ceiling from the resolved graph.
 
@@ -297,7 +338,10 @@ def node_timeouts_journal_record(
     """
     return {
         "node_timeouts": {
-            node: {"seconds": seconds, "layer": timeouts.layer_for(node=node)}
+            node: {
+                "seconds": seconds,
+                "layer": timeouts.layer_for(node=node),
+            }
             for node, seconds in sorted(nodes.items())
         },
         "stall_timeout": {
@@ -314,7 +358,7 @@ def _with_stall(*, block: dict[str, Any], configured: dict[str, int]) -> NodeTim
         return NodeTimeouts(
             configured=configured,
             stall_seconds=DEFAULT_STALL_TIMEOUT_SECONDS,
-            stall_layer=WORKFLOW_DEFAULT_LAYER,
+            stall_layer=BUILT_IN_DEFAULT_LAYER,
         )
     stall_seconds = positive_int_seconds(value=stall_raw)
     if stall_seconds is None:

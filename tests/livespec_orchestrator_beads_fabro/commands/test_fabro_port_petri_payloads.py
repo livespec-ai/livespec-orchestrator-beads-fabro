@@ -157,7 +157,7 @@ _CANDIDATE_PS: list[dict[str, Any]] = [
         "goal": "Work-item: bd-ib-227cbw\nAdapt Fabro parsing to Petri outputs",
         "labels": [],
         "parent_id": None,
-        "repo_origin_url": "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro",
+        "repo_origin_url": "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro",
         "run_id": _CANDIDATE_RUN_ID,
         "source_directory": "/home/cwoolley/src",
         "start_time": "2026-10-08T12:34:14.182000000Z",

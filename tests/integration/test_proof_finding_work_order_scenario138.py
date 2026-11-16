@@ -292,6 +292,10 @@ def test_the_fix_budget_is_shared_across_every_loop_feeding_it() -> None:
     tripwire — a fifth node routing into `fix` would re-open this silently, and
     this is the assertion that notices.
 
+    `fix_commit_settle` is a producer too (work-item `bd-ib-yzrguu`): a fix turn's
+    commit run that settles failed re-enters `fix`, and the loop is counted with
+    two entries of its own rather than taken out of the others' share.
+
     `refresh_repair` is the fourth producer and is excluded from the arithmetic:
     v134's "Refresh-repair accounting" paragraph grants the refresh-repair route
     its own two rounds in addition to what the other entry paths allow, so it
@@ -302,14 +306,24 @@ def test_the_fix_budget_is_shared_across_every_loop_feeding_it() -> None:
         _source_of(edge=edge) for edge in _edges(text=text) if _target_of(edge=edge) == "fix"
     }
 
-    assert producers == {"janitor", _CAPTURE, _VERIFY, "refresh_repair"}
+    assert producers == {
+        "fix_commit_settle",
+        "fix_open_red_route",
+        "janitor_failure_route",
+        "janitor_refresh_route",
+        _CAPTURE,
+        _VERIFY,
+        "refresh_repair",
+    }
     backstop = re.search(r"max_visits=(?P<value>\d+)", _node_body(text=text, node="fix") or "")
     assert backstop is not None
     # AT LEAST two entries per agent-finding producer, not strictly more: the
     # budget IS the bound now rather than a backstop sitting above three separate
     # caps, and it is sized to exactly what those retired caps admitted (plan
     # `fabro-currency` P4), which is two apiece.
-    assert int(backstop.group("value")) >= 2 * len(producers - {"refresh_repair"})
+    assert int(backstop.group("value")) >= 2 * len(
+        producers - {"refresh_repair", "fix_open_red_route"}
+    )
 
 
 def test_the_fix_prompt_reads_the_pull_request_when_the_preamble_carries_none() -> None:
@@ -429,12 +443,14 @@ def test_a_red_janitor_still_reaches_fix_with_its_failure_output() -> None:
     depends on it: compact mode omits agent responses, so a janitor failure would
     arrive stripped of the output step 1 of the prompt tells the stage to read.
     """
-    red = _edge(source="janitor", target="fix")
+    red = _edge(source="janitor", target="janitor_refresh_route")
+    ordinary = _edge(source="janitor_refresh_route", target="fix")
     prompt = _prompt(name="fix.md")
 
     assert _condition_of(edge=red) == "outcome!=succeeded"
     assert _VISIT_COUNT not in red
     assert "preferred_label" not in red
+    assert "condition=" not in ordinary
     assert 'fidelity="summary:high"' in (_node_body(text=_dot(), node="fix") or "")
     assert "janitor failure output" in prompt
     assert "red gate" in prompt

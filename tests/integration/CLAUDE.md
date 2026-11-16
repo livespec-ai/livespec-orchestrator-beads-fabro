@@ -9,6 +9,18 @@ requires for a `scenarios.md` heading binding (integration-tier-or-above, never
 a unit-tier test); its dotted node-id prefix `tests.integration` is in the
 `heading_coverage` check's default allowlist.
 
+- `test_incident_provenance_receipts.py` — binds `SPECIFICATION/scenarios.md`
+  "Scenario: incident provenance exceptions remain exact and repayable"
+  (bd-ib-y7ryj3). Each case drives the factory-provenance merge gate's `main` or
+  the retrospective factory-bypass audit's `main` with operator arguments
+  (`--incident-item`) against the in-memory tenant the `tmp_path` repository
+  configures, with the retained incident chain seeded as the canonical writer
+  records it: a receipt admits only its exact PR, head and landed commits; the
+  audit reports an incident exception with its outstanding normal repayment;
+  verification survives the loss of labels and environment and refuses an
+  unreadable chain rather than passing; a retained repayment carrier is refused
+  the `factory-override` label while the factory App passes.
+
 - `test_fleet_launch_scenario297.py` — binds `SPECIFICATION/scenarios.md`
   Scenario 297 by running the shipped `check-fleet-launch` driver over the
   committed tree. The hermetic harness proves a queued younger ticket begins
@@ -17,14 +29,27 @@ a unit-tier test); its dotted node-id prefix `tests.integration` is in the
   before drive, and drops a failed queued ticket without taking that mutex.
 
 - `test_merge_poll_budget_exhausted_scenario220.py` — binds
-  `SPECIFICATION/scenarios.md` "Scenario 220": an exhausted merge-poll budget
-  re-reads the pull request, proceeds on MERGED and otherwise rests the item at
-  `blocked / needs-human` with the cause `merge-poll-budget-exhausted`. It runs the
-  production `run_dispatch` and `post_run_dispositions` against the in-memory
-  tenant, standing in only the subprocess seam and the Fabro launcher. Its
-  MERGED-at-the-final-read case and its conflicting-pull-request case are the
-  controls for the resting case: a build that rested every exhausted wait fails the
-  first, and one that rested none fails the second.
+  `SPECIFICATION/scenarios.md` "Scenario 220" for the merge wait itself: an
+  exhausted merge-poll budget re-reads the pull request, proceeds on MERGED, hands
+  an armed pull request with no failed required check off (the item stays `active`,
+  the dispatch exits 0, one journal row and one ledger comment are left), and
+  otherwise rests the item at `blocked / needs-human` with the cause
+  `merge-poll-budget-exhausted`. It runs the production `run_dispatch` and
+  `post_run_dispositions` against the in-memory tenant, standing in only the
+  subprocess seam and the Fabro launcher. Its MERGED-at-the-final-read case, its
+  unarmed-pull-request case and its conflicting-pull-request case are the controls
+  for the handoff: a build that handed off every exhausted wait fails the second
+  and third, and one that handed off none fails the first handoff case.
+- `test_merge_wait_handoff_lifecycle_scenario220.py` — binds the other half of the
+  same Scenario: the dispatch that hands the pull request off, and the stranded-claim
+  pass that completes the item. It runs the production engine, post-run disposition
+  and `survey_stranded_claims` over ONE real dispatch journal. The claim is surveyed
+  first while the pull request is open and passing and must be HELD with the item
+  untouched; it is then surveyed again after the forge reports the pull request
+  merged (reconciled, no resolve-blocked, no resume), with a failed required check
+  (rested as a failed check) and closed without merging (rested with the exhausted
+  cause). Only the subprocess seam, the launcher and the `reconcile-merged` valve's
+  own janitor run are stood in.
 - `test_regroom_state_machine_scenario9.py` — binds
   `SPECIFICATION/scenarios.md` "Scenario 9 — needs-regroom state and
   transitions": the three transitions of the `livespec_orchestrator_beads_fabro.regroom`
@@ -1036,6 +1061,21 @@ a unit-tier test); its dotted node-id prefix `tests.integration` is in the
   janitor that called every non-pass reading a lost verdict would satisfy all
   three of them.
 
+- `test_workflow_janitor_sibling_reclone.py` — binds work-item `bd-ib-rzkhqv`
+  against `SPECIFICATION/contracts.md` "A sandbox runs its tools from pinned clones
+  and works in the latest clones": when the janitor refreshes the run onto the
+  default branch, the same step re-clones every sibling under
+  `LIVESPEC_SIBLING_CLONES_ROOT` at its default-branch tip as of the refresh. The
+  shipped `janitor` node bytes (taken through `parse_dot_graph`) are executed by
+  `sh` against real throwaway origins reached through `file://` URLs, since a plain
+  path makes git ignore `--depth`. The positive case releases a commit on the
+  sibling AFTER its run-start clone, so "at the new tip" cannot hold by default. An
+  unreachable sibling and a clone that fails after a reachable probe each keep
+  their previous clone and are named with the run-start step's reason (the latter
+  through a `git` shim failing only `clone`, with no scratch directory left); the
+  neighbouring sibling is still re-taken. The control is a janitor whose fetch of
+  the default branch fails: it never refreshes and must leave the clones alone.
+
 - `test_pre_push_deletion_only_scenario188.py` — binds
   `SPECIFICATION/scenarios.md` Scenario 188 and `constraints.md` §"Pre-push
   gate refinements": a push whose every ref update is a deletion (an all-zero
@@ -1464,8 +1504,24 @@ a unit-tier test); its dotted node-id prefix `tests.integration` is in the
   identity survives untouched — which is what leaves that question with the
   relay authority that owns it.
 
-- `test_sandbox_history_preparation.py` — the FIRST `[[run.prepare.steps]]` entry
-  of the shipped implement-work-item run config, EXECUTED under `/bin/sh` against
+- `test_sandbox_setup_nodes_scenario32.py` — binds the setup-node scenarios of
+  `SPECIFICATION/scenarios.md` Scenario 32 (work-item `bd-ib-dpsiwz`): neither
+  committed run config declares a prepare table, each committed graph's setup is a
+  numbered `run_prepare_<N>` chain entered from `start` and left into the first
+  stage, and a failed step ends the run. The graph is read through the shared
+  parser. Two properties an editor must not weaken. Every setup node is asserted to
+  carry BOTH a conditional failed edge to `setup_failed` and exactly ONE
+  unconditional edge, because a command node that exits non-zero otherwise follows
+  its unconditional edge and the run succeeds, while the engine rejects a node whose
+  every edge is conditional; the walk case follows only the failed outcome from each
+  node and requires it to end at the terminal without entering the first stage,
+  with the all-succeeded walk as its control. And the terminal's OWN script is
+  executed by `sh` in a throwaway repository whose branch carries engine-shaped
+  `fabro(<run>): <node> (<status>)` checkpoints, because the step it names is read
+  off that chain.
+
+- `test_sandbox_history_preparation.py` — the FIRST setup node (`run_prepare_1`)
+  of the shipped implement-work-item graph, EXECUTED under `/bin/sh` against
   real complete and shallow clones (work-item bd-ib-ukht2p). It executes rather
   than matching the command line because the assertion is what the step does to a
   clone, and a conditional that inspects the wrong thing — or swallows a failure
@@ -1685,6 +1741,36 @@ a unit-tier test); its dotted node-id prefix `tests.integration` is in the
   "the wall treats the citation as stated" is a claim about what it does NOT
   refuse.
 
+- `test_commit_settle_restores_flattened_merge_2deww4.py` — binds
+  `SPECIFICATION/scenarios.md` Scenario 179 and work-item `bd-ib-2deww4`: a fix or
+  review_fix turn can end with its runner commit of an in-progress merge still
+  running, and the engine's per-node checkpoint then commits the merged index as a
+  TWO-parent commit that removes `MERGE_HEAD`. The committed settle node scripts and
+  the runner's exact source run in a real git fixture whose pre-commit hook holds the
+  runner commit open while that checkpoint is made. The restore step must move HEAD
+  back with the merge in progress on the merged-in commit; the held commit then passes
+  as a merge of the starting head and the merged-in commit, or fails to leave no merge
+  and the starting head's tree. The checkpoint is built with `commit-tree` and the
+  state files removed by hand, because a real `git commit` would run the very hook the
+  case is holding open.
+
+- `test_commit_settle_stopped_rebase_hmed6n.py` — binds
+  `SPECIFICATION/scenarios.md` Scenario 176 and work-item `bd-ib-hmed6n`, the
+  sibling of the two settle modules above: a PASSED commit run mid-rebase whose
+  `git rebase --continue` stops on a LATER conflicting pick used to journal only
+  that the continue "did not complete" and return success, so the graph routed the
+  passed settle to the janitor, which failed on the leftover `rebase-merge`
+  directory and looped to its visit limit. The committed `fix_commit_settle` script
+  and the runner's exact source run in a real git fixture whose branch has three
+  picks, the first and third conflicting. The settle must exit non-zero with a
+  `failed` live-commit brief naming the stopped pick and every conflicted path,
+  leave the rebase open at that pick with the settled commit an ancestor of HEAD,
+  and let the NEXT settle (after a resolution commit) finish the rebase. A rebase or
+  merge abort that git refuses is driven with a `git` shim on `PATH`, because no
+  fixture state makes a real abort fail; the journal line must carry git's own
+  output. The merge case does NOT assert the merge stays open: the flattened-merge
+  undo that follows a failed run resets the tree regardless.
+
 - `test_needs_human_node_timeout_cut_scenario192.py` — binds
   `SPECIFICATION/scenarios.md` Scenario 192 and the `contracts.md` paragraph "A
   commit run outlives a node-timeout cut" (work-item `bd-ib-ptnxyg`). The committed
@@ -1776,7 +1862,71 @@ a unit-tier test); its dotted node-id prefix `tests.integration` is in the
   local report second. Arrival in Honeycomb itself is declared host-captured on
   the work item and is not asserted here.
 
+- `test_needs_attention_journal_hold_scenario324.py` — binds
+  `SPECIFICATION/scenarios.md` Scenario 324 and the "Journal-recorded holds"
+  clause of `SPECIFICATION/contracts.md`, through the real `build_attention`
+  composition over the in-memory tenant. Every case seeds the SAME otherwise-idle
+  repository (two ready, admission-eligible items) so the hold is the only
+  variable, which is what lets the idle-factory fact be read as evidence: a row
+  naming the held item's NEIGHBOUR shows the hold removed one item from the count,
+  and a row naming the held item itself (the branch-reclaim hold) shows that hold
+  removed none. The retired-hold case is the control for the first, and the
+  unreadable-journal case asserts the unobservable fact beside the ABSENT
+  idle-factory row rather than beside an empty one.
+
+- `test_run_from_clones_scenario336.py` — binds `SPECIFICATION/scenarios.md`
+  Scenario 336 and the "A sandbox runs its tools from pinned clones and works in
+  the latest clones" paragraph of `contracts.md` (work-item `bd-ib-lupzxt`). The
+  Dispatcher-materialized program that takes each run-from clone is EXECUTED
+  in-process against local bare repositories standing in for the forge and a
+  project directory holding real JSONC, so the pinned release, the shallow clone,
+  the re-clone after a changed pin, the newest-release-tag fallback (numeric order,
+  pre-releases excluded) and the three failure arms are observed rather than
+  matched. Two limits are stated in the module itself: whether a write by the
+  run's agent is REFUSED depends on the capabilities the sandbox image grants uid
+  0 (measured: CAP_DAC_OVERRIDE present, CAP_LINUX_IMMUTABLE and CAP_SYS_ADMIN
+  absent), so the host-captured proof owns that assertion and this file asserts
+  only that the program strips write bits, asks for the immutable flag and reports
+  honestly which of its two markers is true. The graph case asserts all three nodes
+  that check a refreshed tree (`janitor`, `publish_draft`, `pr_refresh`) re-run the
+  program before the declared suite.
+
+- `test_impl_dispatch_memory_slice_scenario371.py` — binds
+  `SPECIFICATION/scenarios.md` Scenario 371 and the host-dispatch-memory-slice
+  clause of `SPECIFICATION/contracts.md` (work-item `bd-ib-szbxu7`): the
+  production `run_impl_dispatch` over a stood-in host and runner and a real
+  on-disk dispatch journal. The argv is read off the runner seam rather than the
+  result, because "same argv as before" is a claim about what was executed. The
+  real cgroup placement needs a systemd user manager with memory delegation and
+  the slice installed, so it is host-captured on the dev host, not asserted here.
+
 Coverage rules: 100% line + branch on every covered module, as everywhere in
 this repo. Build state through the public store/client seam (or a small
 read-only stub for shapes the fake's public surface never produces); never read
 or write a live tenant DB.
+
+- `test_workflow_janitor_refresh_repair_exhaustion_scenario176.py` — binds the
+  janitor arm of `SPECIFICATION/scenarios.md` Scenario 176's round bound
+  (work-item `bd-ib-64n5ct`): a janitor whose pre-aggregate refresh conflicts, or
+  whose refresh commit the hook refuses with no conflicted path, after two
+  recorded repair rounds restores its pre-refresh head, prints
+  `LIVESPEC_REFRESH_REPAIR_EXHAUSTED`, writes the exhausted marker and the
+  needs-human reason instead of a brief, and `janitor_refresh_route` sends it to
+  `needs_human`. The shipped `janitor` and `janitor_refresh_route` bytes run in a
+  real clone; the budget-remaining case is the control that a round with budget
+  left still writes a brief and routes to `refresh_repair`. The live-run
+  assertion (the run ends at `needs_human`, not `workflow_error`) is host-captured.
+
+- `test_workflow_publish_repair_scenario329.py` — binds
+  `SPECIFICATION/scenarios.md` Scenario 329 and the GH001 case of Scenario 224
+  (work-item `bd-ib-7owmkq`). The shipped `publish_draft` and `refresh_repair`
+  script bytes are taken through `parse_dot_graph` and run by `bash` against a
+  real bare origin whose `pre-receive` hook plays GitHub's file-size and
+  branch-protection refusals. A GH001 rejection and a pre-push hook refusal each
+  leave a brief naming the refused head and the oversize paths or failed targets
+  with the last 80 lines of hook output, and the classifier reads it onward to
+  `fix`; a repaired head then publishes; a third round fails closed as
+  `refresh-repair-exhausted` at the refused head. The protected-branch,
+  non-fast-forward, unreachable-origin and authentication refusals are the
+  controls: each leaves no brief and a needs-human reason naming its own cause,
+  because a stage that repaired every refusal would pass the first cases alone.

@@ -31,7 +31,6 @@ from typing import Protocol
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_commit_runner_program import (
     COMMIT_RUNNER_PROGRAM_FILENAME,
-    commit_runner_prepare_steps_block,
     commit_runner_program_path_expansion,
     commit_runner_program_source,
 )
@@ -45,7 +44,6 @@ __all__: list[str] = [
     "CommitProcess",
     "CommitRunResult",
     "DetachedCommitRunner",
-    "commit_runner_prepare_steps_block",
     "commit_runner_program_path_expansion",
     "commit_runner_program_source",
     "failed_targets",
@@ -54,6 +52,7 @@ __all__: list[str] = [
 
 RUNNING_STATE = "running"
 NO_VERDICT_STATE = "no-verdict"
+
 
 # The gate aggregate's own list of failed recipes: `Failed targets (1):` followed
 # by `  - check-types` lines. The list ends at the first line that is not one.

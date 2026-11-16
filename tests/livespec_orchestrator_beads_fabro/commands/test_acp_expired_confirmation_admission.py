@@ -127,7 +127,7 @@ def _reader() -> _Reader:
         "run_id": _RUN_ID,
         "status": {"kind": "succeeded"},
         "goal": "Work-item: bd-peer-1\n",
-        "repo_origin_url": "https://github.com/thewoolleyman/livespec-console-beads-fabro",
+        "repo_origin_url": "https://github.com/livespec-ai/livespec-console-beads-fabro",
         "labels": {
             "livespec.repository": "livespec-console-beads-fabro",
             "livespec.acp.implement.availability": "codex",
@@ -204,7 +204,7 @@ def _clearance_reader() -> _Reader:
         "run_id": _CLEARANCE_RUN_ID,
         "status": {"kind": "succeeded"},
         "goal": "Clear the codex availability domain hold\n",
-        "repo_origin_url": "https://github.com/thewoolleyman/livespec-console-beads-fabro",
+        "repo_origin_url": "https://github.com/livespec-ai/livespec-console-beads-fabro",
         "labels": {
             "livespec.repository": "livespec-console-beads-fabro",
             _records().CLEARANCE_LABEL_KEY: _records().CLEARANCE_LABEL_VALUE,

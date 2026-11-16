@@ -1,0 +1,121 @@
+#!/bin/sh
+# The proof_capture Git boundary.
+set -u
+
+refuse() {
+ echo "LIVESPEC_PROOF_CAPTURE_READ_ONLY: proof_capture is read-only on the repository tree; git commit and git push are refused before repository hooks run. End this turn with preferred_label=fix when a code change is needed." >&2
+ exit 1
+}
+
+common_dir_of() {
+ resolved=$(/usr/bin/git "$@" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0
+ (cd "$resolved" 2>/dev/null && pwd -P) || true
+}
+
+# Git resolves a relative remote path from the work tree top, wherever it started.
+base_of() {
+ base=$(/usr/bin/git "$@" rev-parse --show-toplevel 2>/dev/null)
+ [ -n "$base" ] || base=$(/usr/bin/git "$@" rev-parse --absolute-git-dir 2>/dev/null)
+ printf %s "$base"
+}
+
+# Resolve a configured push URL with the same global options as the push itself.
+remote_url_of() {
+ /usr/bin/git "$@" remote get-url --push "$remote"
+}
+
+# Run a function with the global options before the subcommand.
+leading() {
+ function_name=$1
+ shift
+ count=$# index=0
+ while [ "$index" -lt "$count" ]; do
+  argument=$1
+  shift
+  [ "$index" -lt "$before" ] && set -- "$@" "$argument"
+  index=$((index + 1))
+ done
+ "$function_name" "$@"
+}
+
+protected_target() {
+ checkout="${LIVESPEC_PROOF_CAPTURE_PROTECTED_CHECKOUT:-}"
+ [ -n "$checkout" ] || return 1
+ protected=$(unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_NAMESPACE; common_dir_of -C "$checkout")
+ target=$(leading common_dir_of "$@")
+ [ -n "$protected" ] && [ -n "$target" ] && [ "$target" != "$protected" ]
+}
+
+drop_private_hooks_path() {
+ if [ "${GIT_CONFIG_COUNT:-}" = 1 ] && [ "${GIT_CONFIG_KEY_0:-}" = core.hooksPath ]; then
+  case "${GIT_CONFIG_VALUE_0:-}" in */proof-capture-hooks) unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 ;; esac
+ fi
+}
+
+sub="" opts=1 value=0 before=0
+for argument in "$@"; do
+ if [ "$opts" -eq 0 ]; then
+  sub=$argument
+  break
+ fi
+ if [ "$value" -eq 1 ]; then
+  value=0
+  before=$((before + 1))
+  continue
+ fi
+ case "$argument" in
+  --) opts=0 ;;
+  -c|-C|--config-env|--git-dir|--work-tree|--namespace|--super-prefix|--exec-path) value=1 ;;
+  -*) ;;
+  *) sub=$argument; break ;;
+ esac
+ before=$((before + 1))
+done
+
+case "$sub" in
+ push)
+  protected_target "$@" || refuse
+  remote="" index=0
+  for argument in "$@"; do
+   index=$((index + 1))
+   [ "$index" -gt "$((before + 1))" ] || continue
+   case "$argument" in
+    --r*|--e*) refuse ;;
+    -*) ;;
+    *) [ -n "$remote" ] || remote=$argument ;;
+   esac
+  done
+  [ -n "$remote" ] || refuse
+  base=$(leading base_of "$@")
+  [ -n "$base" ] || refuse
+  url=$remote
+  case "$remote" in
+   /*|./*|../*) ;;
+   *)
+    # A remote name resolves through Git; a word naming none is a relative path.
+    if ! url=$(leading remote_url_of "$@" 2>/dev/null); then
+     [ "$(/usr/bin/git -C "$base" ls-remote --get-url "$remote" 2>/dev/null)" = "$remote" ] || refuse
+     url=$remote
+    fi
+    ;;
+  esac
+  case "$url" in
+   /*|./*|../*) ;;
+   *:*) refuse ;;
+  esac
+  case "$url" in /*) ;; *) url=$base/$url ;; esac
+  root=$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P) || refuse
+  path=$(cd "$url" 2>/dev/null && pwd -P) || refuse
+  case "$path" in "$root"/*) ;; *) refuse ;; esac
+  [ "$(/usr/bin/git -C "$path" rev-parse --is-bare-repository 2>/dev/null)" = true ] || refuse
+  common=$(common_dir_of -C "$path")
+  [ -n "$common" ] && [ "$common" != "$protected" ] || refuse
+  drop_private_hooks_path
+  ;;
+ commit)
+  protected_target "$@" || refuse
+  drop_private_hooks_path
+  ;;
+esac
+
+exec /usr/bin/git "$@"

@@ -22,12 +22,11 @@ model call each; recording is a write that can never be taken back, because
 beads comments are append-only. Putting the reuse read anywhere but first spends
 two model calls per item per pass on items nothing about has changed.
 
-THE CLASSIFICATION RUNS BEFORE THE JUDGEMENT, and the saving is the point rather
-than a nicety: three of the four classes are exempt outright ("An item
-classified `bug`, `chore` or `non_functional` is never spec-change tier"), so a
-`bug` never pays for the judgement at all — and the judgement is the expensive
-call, because its prompt carries the condensed ratified tree while the
-classification's carries one item's title and description.
+THE CLASSIFICATION RUNS BEFORE THE JUDGEMENT, so the resulting record names
+both halves of the decision in the order the shared component defines them.
+Every implement-kind item takes the behaviour judgement: an unstated or partial
+behaviour is held whatever class the classifier returns, while a stated bug,
+chore or non-functional item records the same free tier as a stated feature.
 
 A JUDGEMENT THAT CANNOT RUN RECORDS THAT IT DID NOT, AND ROUTES AS BEFORE. The
 clause is explicit: "When the classification cannot run (no eligible model, a
@@ -63,7 +62,10 @@ from livespec_runtime import spec_stated
 from returns.pipeline import is_successful
 
 from livespec_orchestrator_beads_fabro._store_comments import append_work_item_comment
-from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_gate import (
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement import (
+    CAUSE_UNPARSEABLE_VERDICT,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_comments import (
     item_comment_bodies,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import ShellCommandRunner
@@ -76,12 +78,10 @@ from livespec_orchestrator_beads_fabro.commands._dod_governing_heading import (
 from livespec_orchestrator_beads_fabro.commands._drift_run_judge import drift_judge
 from livespec_orchestrator_beads_fabro.commands._spec_change_tier import (
     CONFIGURATION_RUBRIC,
-    FEATURE_CLASS,
     SPEC_DIRNAME,
     asked_for_behaviour,
     behaviour_digest,
     decide_spec_change_tier,
-    exempt_decision,
 )
 from livespec_orchestrator_beads_fabro.commands._spec_change_tier_outcome import (
     SpecChangeTierOutcome,
@@ -197,16 +197,17 @@ def classify_spec_change_tier(
     if standing is not None:
         return standing
     judge_runner = runner or ShellCommandRunner()
+    classification_model = drift_judge(
+        project_root=repo,
+        runner=judge_runner,
+        reply="item_class",
+        caller=_CALLER,
+    )
     classification = spec_stated.classify(
         title=item.title,
         description=item.description,
         item_type=item.type,
-        run_model=drift_judge(
-            project_root=repo,
-            runner=judge_runner,
-            reply="item_class",
-            caller=_CALLER,
-        ),
+        run_model=classification_model,
     )
     if not is_successful(classification):
         return did_not_run_outcome(
@@ -214,19 +215,15 @@ def classify_spec_change_tier(
             stage=stage,
             spec_version=spec_version,
             digest=digest,
-            cause=CAUSE_CLASSIFICATION_UNREADABLE,
+            cause=(
+                CAUSE_CLASSIFICATION_UNREADABLE
+                if classification_model.cause in ("", CAUSE_UNPARSEABLE_VERDICT)
+                else classification_model.cause
+            ),
             comments=comments,
             append=append,
         )
     item_class = classification.unwrap()
-    if item_class != FEATURE_CLASS:
-        return recorded_outcome(
-            item=item,
-            stage=stage,
-            decision=exempt_decision(classification=item_class),
-            context=TierRecordContext(spec_version=spec_version, digest=digest),
-            append=append,
-        )
     verdict = judge_within_ceiling(
         spec_tree=snapshot.files,
         statement=statement,

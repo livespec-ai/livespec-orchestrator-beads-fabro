@@ -117,6 +117,46 @@ def test_confirm_pr_arms_auto_merge_when_needed(tmp_path: Path) -> None:
     ]
 
 
+def test_confirm_pr_rearms_without_delete_branch_when_a_merge_queue_refuses_it(
+    tmp_path: Path,
+) -> None:
+    """bd-ib-hnj3td: the host pr-arm fallback arms a merge-queue repository's pull request."""
+    refusal = "X Cannot use `-d` or `--delete-branch` when merge queue enabled"
+    runner = Runner(
+        queue=[
+            _ok(stdout=_pr_json(armed=False)),
+            _err(stderr=refusal),
+            _ok(),
+            _ok(stdout=_pr_json()),
+        ]
+    )
+    journal = Journal()
+
+    view = confirm_pr(plan=_plan(repo=tmp_path), runner=runner, journal=journal, hold="unheld")
+
+    assert view is not None
+    assert view.auto_merge_armed is True
+    assert "--delete-branch" in runner.calls[1][0]
+    assert runner.calls[2][0] == [
+        token for token in runner.calls[1][0] if token != "--delete-branch"
+    ]
+    assert [record["stage"] for record in journal.records] == [
+        "pr-view",
+        "pr-arm-fallback",
+        "pr-arm-fallback",
+        "pr-view",
+    ]
+
+
+def test_confirm_pr_does_not_retry_an_arm_refused_for_another_cause(tmp_path: Path) -> None:
+    runner = Runner(queue=[_ok(stdout=_pr_json(armed=False)), _err(), _ok(stdout=_pr_json())])
+
+    _ = confirm_pr(plan=_plan(repo=tmp_path), runner=runner, journal=Journal(), hold="unheld")
+
+    assert len(runner.calls) == 3
+    assert runner.calls[2][0][:3] == ["gh", "pr", "view"]
+
+
 def test_await_merge_updates_behind_branch_then_returns_merged(tmp_path: Path) -> None:
     runner = Runner(
         queue=[
@@ -150,7 +190,7 @@ _REAL_CI_GREEN_FAILURE: dict[str, object] = {
     "__typename": "CheckRun",
     "completedAt": "2026-10-29T05:10:30Z",
     "conclusion": "FAILURE",
-    "detailsUrl": "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/actions/runs/40821372772/job/123275870309",
+    "detailsUrl": "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/actions/runs/40821372772/job/123275870309",
     "name": "ci-green",
     "startedAt": "2026-10-29T05:10:28Z",
     "status": "COMPLETED",
@@ -160,7 +200,7 @@ _REAL_COVERAGE_FAILURE: dict[str, object] = {
     "__typename": "CheckRun",
     "completedAt": "2026-10-29T05:10:08Z",
     "conclusion": "FAILURE",
-    "detailsUrl": "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/actions/runs/40821372772/job/123274367716",
+    "detailsUrl": "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/actions/runs/40821372772/job/123274367716",
     "name": "check-per-file-coverage (root)",
     "startedAt": "2026-10-29T05:05:44Z",
     "status": "COMPLETED",
@@ -170,7 +210,7 @@ _REAL_LINT_SUCCESS: dict[str, object] = {
     "__typename": "CheckRun",
     "completedAt": "2026-10-29T05:06:08Z",
     "conclusion": "SUCCESS",
-    "detailsUrl": "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/actions/runs/40821372772/job/123274367818",
+    "detailsUrl": "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/actions/runs/40821372772/job/123274367818",
     "name": "check-lint (root)",
     "startedAt": "2026-10-29T05:05:48Z",
     "status": "COMPLETED",
@@ -215,6 +255,56 @@ def test_await_merge_fails_fast_when_ci_green_failed_and_rollup_has_no_required_
     assert "required check failed terminally: ci-green" in outcome.detail
     assert "resolve-blocked:x-1:ready" in outcome.detail
     assert "resume --item x-1" in outcome.detail
+
+
+def test_await_merge_reruns_a_teardown_only_required_workflow(tmp_path: Path) -> None:
+    failure = {
+        **_REAL_CI_GREEN_FAILURE,
+        "detailsUrl": "https://github.com/acme/repo/actions/runs/42/job/12",
+    }
+    runner = Runner(
+        queue=[
+            _ok(stdout=_pr_json(merge_state="BLOCKED", checks=[failure])),
+            _ok(stdout=_required_checks_graphql(required=["ci-green"])),
+            _ok(
+                stdout=json.dumps(
+                    {
+                        "jobs": [
+                            {
+                                "databaseId": 12,
+                                "name": "ci-green",
+                                "conclusion": "failure",
+                                "steps": [
+                                    {"name": "Run checks", "conclusion": "success"},
+                                    {"name": "Post Checkout", "conclusion": "failure"},
+                                ],
+                            }
+                        ]
+                    }
+                )
+            ),
+            _ok(stdout="Executing the custom container implementation failed"),
+            _ok(stdout=""),
+            _ok(),
+            _ok(stdout=_pr_json(state="MERGED", sha="cafe06")),
+        ]
+    )
+    journal = Journal()
+
+    merged = await_merge(
+        outcome_type=DispatchOutcome,
+        plan=_plan(repo=tmp_path),
+        runner=runner,
+        journal=journal,
+        sleep=lambda _: None,
+        poll=PollPolicy(attempts=2, interval_seconds=0.5),
+    )
+
+    assert not isinstance(merged, DispatchOutcome)
+    assert merged is not None
+    assert merged.merge_sha == "cafe06"
+    assert ["gh", "run", "rerun", "42", "--failed"] in [call[0] for call in runner.calls]
+    assert any(record["stage"] == "merge-poll-failed-jobs-rerun" for record in journal.records)
 
 
 def test_await_merge_reads_required_checks_from_the_forge_not_the_rollup(
@@ -372,6 +462,8 @@ def test_post_merge_runs_janitor_in_fresh_checkout(tmp_path: Path) -> None:
         "LIVESPEC_CORE_PLUGIN_ROOT": str(tmp_path / "janitor-co-livespec-core" / ".claude-plugin"),
         "LIVESPEC_FABRO_FACTORY": None,
         "LIVESPEC_INVOKER": None,
+        "EXPEDITED_INCIDENT_RESPONSE": None,
+        "EXPEDITED_INCIDENT_RESPONSE_REVERT": None,
     }
 
 

@@ -357,7 +357,11 @@ def test_the_committed_payload_references_every_integration_input(
     assert referenced == rules.SCHEMA_PROJECTABLE_INPUTS
     assert referenced == check.rendered_input_names(repo_root=_REPO_ROOT)
     positions = {occurrence.position for occurrence in occurrences if occurrence.name in referenced}
-    assert positions >= {"script", scan.PREPARE_STEP_POSITION, scan.PROMPT_BODY_POSITION}
+    # The setup steps are graph command nodes, so their tokens sit in a node `script`
+    # (work-item bd-ib-dpsiwz); the committed run config carries no prepare step, and
+    # so no token in a prepare-step position.
+    assert positions >= {"script", scan.PROMPT_BODY_POSITION}
+    assert scan.PREPARE_STEP_POSITION not in positions
 
 
 def test_only_a_prepare_step_script_renders_in_the_run_config(
@@ -467,12 +471,18 @@ def test_the_four_input_families_are_disjoint_and_cover_what_the_payload_declare
         == rules.POLICY_INPUT_NAMES
     )
     assert frozenset({"workflow_kind"}) == rules.VARIANT_KIND_INPUT_NAMES
-    assert rules.classified_input_names() == (
+    assert (
+        frozenset({"implement_mechanical_targets", "implement_mechanical_reentries"})
+        == rules.MECHANICAL_REENTRY_INPUT_NAMES
+    )
+    others = (
         rules.SCHEMA_PROJECTABLE_INPUTS
         | rules.ADAPTER_INPUT_NAMES
         | rules.POLICY_INPUT_NAMES
         | rules.VARIANT_KIND_INPUT_NAMES
     )
+    assert frozenset() == rules.MECHANICAL_REENTRY_INPUT_NAMES & others
+    assert rules.classified_input_names() == others | rules.MECHANICAL_REENTRY_INPUT_NAMES
     assert rules.scoping_findings(declared={}) == []
 
 
@@ -695,20 +705,19 @@ def test_discovery_control_fails_when_the_graph_scan_finds_no_adapter_token(
 ) -> None:
     payload = _seed_repo(repo_root=tmp_path, check=check)
     graph = payload / "workflow.fabro"
+    # The split implement stage's `red` and `green` nodes both carry the token,
+    # and the control asks whether the scan finds it ANYWHERE, so every
+    # occurrence is removed and the control must name both nodes.
     _ = graph.write_text(
-        graph.read_text(encoding="utf-8").replace("{{ inputs.implement_adapter }}", "acp", 1),
+        graph.read_text(encoding="utf-8").replace("{{ inputs.implement_adapter }}", "acp"),
         encoding="utf-8",
     )
 
     assert "inputs.implement_adapter" not in graph.read_text(encoding="utf-8")
     failures = check.control_failures(repo_root=tmp_path)
-    assert [failure for failure in failures if "node implement" in failure]
+    assert [failure for failure in failures if failure.endswith("for node red")]
+    assert [failure for failure in failures if failure.endswith("for node green")]
     assert not [failure for failure in failures if "matcher" in failure]
-
-
-# ---------------------------------------------------------------------------
-# Every REGISTERED variant is checked, and every finding names its directory.
-# ---------------------------------------------------------------------------
 
 
 def test_the_shared_payload_enumeration_module_is_installed() -> None:

@@ -42,9 +42,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_candidate_attempt import (
-    CandidateAttempt,
     candidate_record_lines,
-    unavailable_record_lines,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_clause_record import (
     clauses_from,
@@ -63,13 +61,11 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_governing_record
     governing_record_lines,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement import (
-    JUDGEMENT_UNAVAILABLE,
     DodJudgement,
     first_remedy,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_input_record import (
     BOUND_ENDED_CANDIDATE_FIELD,
-    bound_ended_lines,
     input_usage_lines,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_markers import (
@@ -81,10 +77,16 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_spec_identity im
     SpecIdentity,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_spec_identity_record import (
+    recorded_spec_identity,
     spec_identity_lines,
 )
 from livespec_orchestrator_beads_fabro.commands._dod_governing_heading import (
     GoverningHeadingVerdict,
+)
+from livespec_orchestrator_beads_fabro.commands._dod_unavailable_record import (
+    STAGE_PRE_ADMISSION,
+    STAGE_PRE_DISPATCH,
+    did_not_run_comment,
 )
 from livespec_orchestrator_beads_fabro.commands._spec_tree_condensation import CondensedClause
 
@@ -102,13 +104,6 @@ __all__: list[str] = [
     "reusable_verdict",
     "verdict_comment",
 ]
-
-# The two call sites the clause names, as self-describing values rather than
-# numbered positions: the record says WHERE the judgement was taken, which is
-# what tells an operator reading the item whether a dispatch or an admission
-# produced it.
-STAGE_PRE_ADMISSION = "pre-admission"
-STAGE_PRE_DISPATCH = "pre-dispatch"
 
 _WORK_ITEM_FIELD = "work-item"
 _STAGE_FIELD = "stage"
@@ -287,43 +282,12 @@ def recorded_governing_heading(*, comments: Sequence[str]) -> GoverningHeadingVe
     return None
 
 
-def did_not_run_comment(  # noqa: PLR0913 - each argument is one field of the record it writes.
+def reusable_verdict(
     *,
-    item_id: str,
-    stage: str,
+    comments: Sequence[str],
     digest: str,
     rubric_digest: str,
-    cause: str,
-    bound_ended_candidates: Sequence[str] = (),
-    attempts: Sequence[CandidateAttempt] = (),
-) -> str:
-    """The ledger comment recording that the judgement did not run, why, and who ran.
-
-    It names each candidate the chain ran and the one whose failure ended it, and
-    each candidate the input bound ended, because an exhausted chain and a chain
-    that never ran a candidate send an operator to opposite places and the cause
-    alone does not say which this was.
-    """
-    return "\n".join(
-        (
-            UNAVAILABLE_COMMENT_MARKER,
-            "",
-            f"The {stage} Definition-of-Done judgement did not run for this item.",
-            "",
-            f"{_WORK_ITEM_FIELD}{_FIELD_SEPARATOR}{item_id}",
-            f"{_STAGE_FIELD}{_FIELD_SEPARATOR}{stage}",
-            f"{_OUTCOME_FIELD}{_FIELD_SEPARATOR}{JUDGEMENT_UNAVAILABLE}",
-            f"{_DIGEST_FIELD}{_FIELD_SEPARATOR}{digest}",
-            f"{_RUBRIC_DIGEST_FIELD}{_FIELD_SEPARATOR}{rubric_digest}",
-            f"{_CAUSE_FIELD}{_FIELD_SEPARATOR}{cause}",
-            *bound_ended_lines(candidates=bound_ended_candidates),
-            *unavailable_record_lines(attempts=attempts),
-        )
-    )
-
-
-def reusable_verdict(
-    *, comments: Sequence[str], digest: str, rubric_digest: str
+    spec_identity: SpecIdentity | None = None,
 ) -> RecordedJudgement | None:
     """The EARLIEST TAKEN verdict whose two digests both equal these.
 
@@ -363,6 +327,13 @@ def reusable_verdict(
         if recorded is None or recorded_rubric is None or outcome is None:
             continue
         if (recorded, recorded_rubric) != (digest, rubric_digest):
+            continue
+        recorded_identity = recorded_spec_identity(comments=(body,))
+        if spec_identity is not None and (
+            recorded_identity is None
+            or (recorded_identity.form, recorded_identity.value)
+            != (spec_identity.form, spec_identity.value)
+        ):
             continue
         return RecordedJudgement(
             outcome=outcome,

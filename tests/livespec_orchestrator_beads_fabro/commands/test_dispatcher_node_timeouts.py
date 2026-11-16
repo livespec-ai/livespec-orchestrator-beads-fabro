@@ -27,6 +27,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_graph_render import 
 )
 from livespec_orchestrator_beads_fabro.commands._node_timeouts import (
     DEFAULT_FABRO_TIMEOUT_SECONDS,
+    WORKFLOW_DEFAULT_LAYER,
     NodeTimeouts,
     default_node_timeouts,
     derive_fabro_timeout_seconds,
@@ -74,20 +75,44 @@ def _rendered_timeouts(*, text: str) -> list[str]:
     return [match.group("value") for match in _TIMEOUT_ATTR_RE.finditer(text)]
 
 
-def test_unconfigured_target_resolves_every_node_to_1800_seconds(tmp_path: Path) -> None:
-    """A dispatch target with no node_timeouts table renders 1800s everywhere."""
+def test_unconfigured_target_keeps_workflow_declarations(tmp_path: Path) -> None:
+    """A dispatch target with no table preserves each workflow timeout."""
     timeouts = resolve_node_timeouts(cwd=tmp_path)
     assert isinstance(timeouts, NodeTimeouts)
     rendered = render_workflow_graph(committed_text=_GRAPH, timeouts=timeouts)
     assert not isinstance(rendered, str)
-    assert _rendered_timeouts(text=rendered.text) == ["1800s", "1800s"]
+    assert _rendered_timeouts(text=rendered.text) == ["14400s", "3600s"]
     assert 'stall_timeout="7200s"' in rendered.text
-    assert rendered.node_seconds == {"implement": 1800, "janitor": 1800}
+    assert rendered.node_seconds == {"implement": 14400, "janitor": 3600}
     assert timeouts.layer_for(node="implement") == "default"
 
 
-def test_configured_node_keeps_its_value_and_others_take_the_default(tmp_path: Path) -> None:
-    """A configured implement timeout wins; every other node stays at 1800s."""
+def test_a_workflow_declared_timeout_supplies_the_render_and_dispatch_record() -> None:
+    """Scenario 325: an unconfigured node keeps its workflow declaration."""
+    graph = (
+        "digraph ImplementWorkItem {\n"
+        "    graph [\n"
+        '        stall_timeout="7200s"\n'
+        "    ]\n"
+        "    fix_commit_settle [\n"
+        '        timeout="3900s"\n'
+        "    ]\n"
+        "}\n"
+    )
+
+    rendered = render_workflow_graph(committed_text=graph, timeouts=default_node_timeouts())
+
+    assert not isinstance(rendered, str)
+    assert rendered.node_seconds == {"fix_commit_settle": 3900}
+    record = node_timeouts_journal_record(timeouts=rendered.timeouts, nodes=rendered.node_seconds)
+    assert record["node_timeouts"]["fix_commit_settle"] == {
+        "seconds": 3900,
+        "layer": WORKFLOW_DEFAULT_LAYER,
+    }
+
+
+def test_configured_node_keeps_its_value_and_others_keep_their_declaration(tmp_path: Path) -> None:
+    """A configured implement timeout wins; janitor keeps its workflow value."""
     _write_dispatcher_config(
         cwd=tmp_path,
         dispatcher={"node_timeouts": {"implement": 7200}, "stall_timeout_seconds": 9000},
@@ -96,11 +121,11 @@ def test_configured_node_keeps_its_value_and_others_take_the_default(tmp_path: P
     assert isinstance(timeouts, NodeTimeouts)
     rendered = render_workflow_graph(committed_text=_GRAPH, timeouts=timeouts)
     assert not isinstance(rendered, str)
-    assert rendered.node_seconds == {"implement": 7200, "janitor": 1800}
+    assert rendered.node_seconds == {"implement": 7200, "janitor": 3600}
     assert 'timeout="7200s"' in rendered.text
     assert 'stall_timeout="9000s"' in rendered.text
     assert timeouts.layer_for(node="implement") == "repository"
-    assert timeouts.layer_for(node="janitor") == "default"
+    assert rendered.timeouts.layer_for(node="janitor") == WORKFLOW_DEFAULT_LAYER
     assert timeouts.stall_layer == "repository"
 
 
@@ -134,8 +159,8 @@ def test_committed_graph_renders_every_declared_timeout(tmp_path: Path) -> None:
         committed_text=committed_text, timeouts=default_node_timeouts()
     )
     assert not isinstance(rendered, str)
-    assert set(_rendered_timeouts(text=rendered.text)) == {"1800s"}
-    assert "implement" in rendered.node_seconds
+    assert set(_rendered_timeouts(text=rendered.text)) == {"1800s", "3900s", "7200s"}
+    assert "red" in rendered.node_seconds
     assert 'stall_timeout="7200s"' in rendered.text
 
 
@@ -177,10 +202,11 @@ def test_subprocess_ceiling_follows_the_resolved_graph() -> None:
         stall_seconds=7200,
         stall_layer="default",
     )
-    # `implement` carries six worst-case attempts (three visits since the
-    # commit-run settle re-entry, two attempts each), so the ceiling grows by six
-    # times the increase over the 1800-second default.
-    assert derive_fabro_timeout_seconds(timeouts=longer) == default_ceiling + 6 * (14400 - 1800)
+    # The `implement` key sets both ACP nodes of the split stage. Red carries six
+    # worst-case attempts (three admissions, two attempts each) and Green eight
+    # (three admissions plus the one incomplete-turn re-entry, two attempts
+    # each), so the ceiling grows by fourteen times the increase.
+    assert derive_fabro_timeout_seconds(timeouts=longer) == default_ceiling + 14 * (14400 - 1800)
 
 
 def test_ceiling_never_falls_below_the_stall_watchdog() -> None:

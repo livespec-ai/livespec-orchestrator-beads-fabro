@@ -16,6 +16,7 @@ import os
 import sys
 import time
 from collections.abc import Callable, Mapping
+from functools import partial
 from pathlib import Path
 from typing import cast
 
@@ -31,10 +32,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_codex_routing import
     codex_routing_for_dispatch,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_env import (
-    check_credential_env,
-)
-from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_selector import (
-    select_factory_credential,
+    checked_credential_env,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_git_author import GitAuthor
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import (
@@ -74,6 +72,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_secret_channel impor
     VaultSecretSink,
     resolve_secret_channel,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_setup_materialize import (
+    SetupRefusal,
+    overlay_with_setup_nodes,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_sibling_clones import (
     fetch_fleet_manifest_text,
     resolve_sibling_clones,
@@ -83,6 +85,7 @@ from livespec_orchestrator_beads_fabro.commands._factory_github_app import (
     NO_FACTORY_GITHUB_APP,
     FactoryGithubApp,
 )
+from livespec_orchestrator_beads_fabro.commands._node_timeouts import NodeTimeouts
 from livespec_orchestrator_beads_fabro.effects import AttemptFailure, attempt
 
 __all__: list[str] = [
@@ -105,6 +108,7 @@ def materialize_overlay(  # noqa: PLR0911, PLR0913 — kw-only overlay materiali
     git_author: GitAuthor,
     review_fix_visit_cap: int,
     graph_override: Path | None = None,
+    node_timeout_arguments: tuple[str, ...] = (),
     prepare_inputs: Mapping[str, str] | None = None,
     proof_rendering: str = "",
     adapter_inputs: frozenset[str] = frozenset(),
@@ -114,6 +118,10 @@ def materialize_overlay(  # noqa: PLR0911, PLR0913 — kw-only overlay materiali
     # that holds none, which projects neither and leaves the stage's own
     # absent-title and absent-body sentinels to report the shortfall.
     publication_metadata: PublicationMetadata | None = None,
+    # The Definition-of-Done judgement subject only the `dod_gate` node grades,
+    # rendered by the caller that holds the work-item and delivered as a file
+    # rather than through the goal every ACP node carries (bd-ib-tzvtgc).
+    dod_gate_subject: str | None = None,
     # The `factory_captured` assertions the sandbox's per-assertion Proof of Done
     # grade reads a record's verdicts for, already rendered as an env line by the
     # caller that holds the work-item. Empty for a direct caller, which the grade
@@ -152,6 +160,12 @@ def materialize_overlay(  # noqa: PLR0911, PLR0913 — kw-only overlay materiali
     # resolve-once reason the integration contract gives; False is the posture a
     # caller that wires nothing rendered before the step existed (bd-ib-tlmq3m).
     provision_worktree_pack: bool = False,
+    # The node timeouts this dispatch's payload graph was rendered with. The setup
+    # nodes are added to that graph AFTER it is rendered, so they take their
+    # durations from the same resolution rather than from a literal; None is the
+    # fully-defaulted resolution, which is what a caller that wires nothing
+    # rendered the graph with.
+    node_timeouts: NodeTimeouts | None = None,
 ) -> str | None:
     """Write the uncommitted mode-600 run-config overlay.
 
@@ -171,12 +185,14 @@ def materialize_overlay(  # noqa: PLR0911, PLR0913 — kw-only overlay materiali
     reaches a log, journal, or argv; the overlay file is deleted when
     the run returns.
 
-    The overlay ALSO provisions the sandbox sibling clones: one depth-1
-    prepare-step clone per fleet member (minus the dispatch target,
+    The overlay ALSO provisions the sandbox sibling clones: one full-history
+    prepare-step work clone per fleet member (minus the dispatch target,
     keyed by the `--repo` basename) plus the non-secret
     `LIVESPEC_SIBLING_CLONES_ROOT` env key, so cross-repo checks under
     `just check` resolve family siblings inside the sandbox the same
-    way livespec CI provisions them.
+    way livespec CI provisions them. It provisions the RUN-FROM clone of
+    livespec core beside them, a shallow read-only clone at the release the
+    governed tree pins that `LIVESPEC_CORE_PLUGIN_ROOT` points into.
 
     It projects the in-sandbox Claude-Code OTel env (29f.3): the
     `cc_otel_overlay_env` dict carrying the correlation triple
@@ -223,9 +239,12 @@ def materialize_overlay(  # noqa: PLR0911, PLR0913 — kw-only overlay materiali
     channel = resolve_secret_channel(block=dispatcher_block(cwd=repo), factory=factory_name)
     if isinstance(channel, SecretChannelRefusal):
         return channel.message
-    env_error = check_credential_env(repo=repo)
-    if env_error is not None:
-        return env_error
+    # ONE selection under the declared Claude credential policy serves the check
+    # and the projection below; a policy refusal or a gone admitted slot refuses
+    # here, before anything is minted, rather than projecting another credential.
+    checked = checked_credential_env(repo=repo)
+    if isinstance(checked, str):
+        return checked
     github_token = attempt(action=token, exceptions=(GithubAppAuthError,))
     if isinstance(github_token, AttemptFailure):
         exc = cast("GithubAppAuthError", github_token.error)
@@ -280,6 +299,7 @@ def materialize_overlay(  # noqa: PLR0911, PLR0913 — kw-only overlay materiali
         sandbox_otel_endpoint=sandbox_otel_endpoint,
         work_item_id=work_item_id,
         dispatch_id=dispatch_id,
+        node_timeout_arguments=node_timeout_arguments,
     )
     if isinstance(codex_leg, str):
         return codex_leg
@@ -287,11 +307,6 @@ def materialize_overlay(  # noqa: PLR0911, PLR0913 — kw-only overlay materiali
         work_item_id=work_item_id,
         dispatch_id=dispatch_id,
         endpoint=sandbox_otel_endpoint,
-    )
-    credential_choice = select_factory_credential(
-        environ=os.environ,
-        home=Path.home(),
-        warn=lambda message: sys.stderr.write(f"livespec-dispatch: {message}\n"),
     )
     # Minted LAST among the steps that can still refuse, so a refusal above this
     # line never leaves a live provider credential behind. The scope is the
@@ -309,7 +324,7 @@ def materialize_overlay(  # noqa: PLR0911, PLR0913 — kw-only overlay materiali
     rendered = render_run_config_overlay(
         committed_text=committed.read_text(encoding="utf-8"),
         workflow_dir=committed.parent.resolve(),
-        token=os.environ[credential_choice.env_name],
+        token=os.environ[checked.env_name],
         github_token=github_token,
         siblings=siblings,
         otel_env=otel_env,
@@ -352,6 +367,7 @@ def materialize_overlay(  # noqa: PLR0911, PLR0913 — kw-only overlay materiali
         # The rendered title and body, forwarded rather than derived here: the
         # derivation reads a work-item and this function is handed only an id.
         publication_metadata=publication_metadata,
+        dod_gate_subject=dod_gate_subject,
         # The resolved integration contract's values, substituted into the
         # committed run config's `{{ inputs.* }}` prepare commands because the
         # pinned engine does not render that site. Forwarded rather than
@@ -402,6 +418,24 @@ def materialize_overlay(  # noqa: PLR0911, PLR0913 — kw-only overlay materiali
             f"workflow config {committed} is not materializable: it must carry "
             '[workflow] graph = "..." and [run.environment] id = "..."'
         )
+    # The prepare steps leave the written config and become `run_prepare_<N>`
+    # command nodes of this dispatch's own graph, because upstream Fabro refuses
+    # `run.prepare`. A dispatch with no per-dispatch graph has nowhere to put them
+    # and keeps them in the config, exactly as it always rendered.
+    if isinstance(
+        setup := overlay_with_setup_nodes(
+            rendered=rendered,
+            graph=graph_override,
+            timeouts=node_timeouts,
+            prepare_inputs=prepare_inputs,
+            release=partial(
+                revoke_proof_credentials, repo=repo, scope=dispatch_id, runner=lease_runner
+            ),
+        ),
+        SetupRefusal,
+    ):
+        return setup.message
+    rendered = setup
     write_refusal = write_routed_overlay(
         overlay=overlay,
         rendered=rendered,

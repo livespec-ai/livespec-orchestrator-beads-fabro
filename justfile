@@ -386,9 +386,13 @@ check:
         check-check-tools
         check-ci-gate-parity
         check-ci-matrix-completeness
+        check-ci-single-container-image
         check-claude-md-coverage
+        check-codex-hook-reconcilable
         check-comment-line-anchors
         check-commit-pairs-source-and-test
+        check-delegated-gate-check-suite
+        check-delegated-job-authority-skip
         check-file-lloc
         check-fleet-marketplace-relative-sources
         check-global-writes
@@ -403,6 +407,7 @@ check:
         check-master-ci-green
         check-match-keyword-only
         check-newtype-domain-primitives
+        check-no-ambient-environment-loops
         check-no-direct-destructive-cli
         check-no-direct-tool-invocation
         check-no-except-outside-io
@@ -429,6 +434,7 @@ check:
         check-red-green-replay
         check-required-role-keys-declared
         check-rop-pipeline-shape
+        check-rule-26-keep-out
         check-self-hosted-routing
         check-self-hosted-uv-lane
         check-shell-quality
@@ -470,8 +476,25 @@ check:
         check-fresh-clone-setup
         check-doctor-static
         check-acp-preflight-config
+        check-materialized-workflow-toml-size
     )
     LIVESPEC_AGGREGATE_TARGETS
+    # `check-targets.txt` is this aggregate's incident gate inventory: the same
+    # members, in the same order, each with the `incident-timing` class that
+    # livespec-dev-tooling's expedited incident hooks read. The shared checks
+    # (`check-aggregate-completeness` among them) read that file in place of
+    # the array above whenever it exists, so the two MUST NOT drift: refuse to
+    # run when they differ, as livespec-dev-tooling's own aggregate does.
+    if ! aggregate_members="$(bash dev-tooling/aggregate-targets.sh)"; then
+        echo "ERROR: cannot read this aggregate's targets" >&2
+        exit 1
+    fi
+    inventory_members="$(sed -E 's/[[:space:]]*#.*$//; s/^[[:space:]]+//; s/[[:space:]]+$//' check-targets.txt | grep -v '^$')"
+    if [[ "$inventory_members" != "$aggregate_members" ]]; then
+        echo "ERROR: check-targets.txt does not list exactly this aggregate's targets, in order" >&2
+        diff <(printf '%s\n' "$aggregate_members") <(printf '%s\n' "$inventory_members") >&2
+        exit 1
+    fi
     # `SKIP_TARGETS` is the fleet's recognised skip contract, the one livespec's
     # `check` recipe reads too. The delegated gate client exports the members
     # that read authority held outside the tree into it, so the gate Job leaves
@@ -896,7 +919,8 @@ check-fabro-port-seam:
 # `install-ci-fabro` — CI's metadata batch runs this before
 # `check-fabro-graph-validity`, which it runs with
 # LIVESPEC_FABRO_GRAPH_VALIDATION=fail_when_fabro_absent. It installs the pinned,
-# sha256-verified upstream fabro v0.254.0 musl release; the script records why
+# sha256-verified upstream Petri-era fabro v0.408.0-nightly.0 musl release; the
+# script records why
 # upstream and not the factory's fork build.
 install-ci-fabro:
     bash dev-tooling/install-ci-fabro.sh
@@ -929,6 +953,28 @@ check-doctor-static:
 # Not a canonical livespec-dev-tooling slug, so it is wired in the private block.
 check-acp-preflight-config:
     uv run python dev-tooling/checks/acp_preflight_config.py
+
+# `check-materialized-workflow-toml-size` — SPECIFICATION/contracts.md
+# §"Self-contained plugin dispatch" and Scenario 279. Renders THIS repository's
+# dispatch packages (reserved workflow and registered variants) the way a dispatch
+# does, for a representative item and a worst-case Definition-of-Done subject, and
+# fails when a package file passes 471,859 bytes, the package passes 1,887,436
+# bytes (both 90 percent of Fabro's caps) or holds more than 460 files. Reads
+# nothing outside this checkout, so it runs in the delegated cluster gate too.
+# Not a canonical livespec-dev-tooling slug, so it is wired in the private block
+# (bd-ib-p5e32s).
+check-materialized-workflow-toml-size:
+    uv run python dev-tooling/checks/materialized_workflow_toml_size.py
+
+# `check-fleet-materialized-workflow-toml-size` — the same measurement for EVERY
+# member of the `fleet` array in livespec's `.livespec-fleet-manifest.jsonc`, each
+# rendered from its clone's `origin/master` tree (never its working tree), with
+# this checkout standing in for this repository. A member with no clone FAILS,
+# naming it. Deliberately NOT in the `check:` aggregate: the delegated cluster
+# gate's pod carries no sibling clones, so it runs host-local from lefthook's
+# pre-push.
+check-fleet-materialized-workflow-toml-size:
+    uv run python dev-tooling/checks/materialized_workflow_toml_size.py --fleet
 
 # ---------------------------------------------------------------
 # Canonical structural checks (shared from livespec-dev-tooling).
@@ -1119,6 +1165,23 @@ check-pbt-coverage-pure-modules:
 check-per-file-coverage:
     dev-tooling/just-check-per-file-coverage.sh
 
+# bd-ib-m26pql: ONE shard of the per-file coverage suite, for CI's parallel
+# coverage jobs. It records coverage data under .coverage-shards/ and judges
+# nothing; check-per-file-coverage combines every shard (when
+# LIVESPEC_COVERAGE_SHARDS_DIR names that directory) and runs the unchanged
+# per-file verifier. Deliberately NOT a `check-` slug and not in the `check`
+# aggregate: locally, check-per-file-coverage runs the whole suite itself.
+[positional-arguments]
+coverage-shard shard_index shard_count:
+    dev-tooling/just-coverage-shard.sh "$@"
+
+# bd-ib-eq5ics: regenerate dev-tooling/coverage-shard-durations.tsv, the
+# committed per-test-file duration table coverage-shard balances the shards
+# with, from one timed run of the whole suite. Commit the result. Not a
+# `check-` slug and not in the `check` aggregate: it is a maintainer action.
+coverage-shard-durations:
+    dev-tooling/just-coverage-shard-durations.sh
+
 # Shared baseline Verifier: validates this repo's harness-conformance
 # declaration against the plugin-resolution invariant. Shipped by
 # livespec-dev-tooling (>=v0.21.0); with `harnesses` declared in
@@ -1154,6 +1217,9 @@ check-red-green-replay *args:
 
 check-rop-pipeline-shape:
     uv run python -m livespec_dev_tooling.checks.rop_pipeline_shape
+
+check-rule-26-keep-out:
+    uv run python -m livespec_dev_tooling.checks.rule_26_keep_out
 
 check-skill-invocation-paths:
     uv run python -m livespec_dev_tooling.checks.skill_invocation_paths
@@ -1393,3 +1459,18 @@ check-marketplace-ref-release-only:
 
 check-plan-no-live-handoff-file:
     uv run python -m livespec_dev_tooling.checks.plan_no_live_handoff_file
+
+check-codex-hook-reconcilable:
+    uv run python -m livespec_dev_tooling.checks.codex_hook_reconcilable
+
+check-delegated-gate-check-suite:
+    uv run python -m livespec_dev_tooling.checks.delegated_gate_check_suite
+
+check-delegated-job-authority-skip:
+    uv run python -m livespec_dev_tooling.checks.delegated_job_authority_skip
+
+check-ci-single-container-image:
+    uv run python -m livespec_dev_tooling.checks.ci_single_container_image
+
+check-no-ambient-environment-loops:
+    uv run python -m livespec_dev_tooling.checks.no_ambient_environment_loops

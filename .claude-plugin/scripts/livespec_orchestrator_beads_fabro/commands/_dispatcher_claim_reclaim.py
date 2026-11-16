@@ -13,18 +13,28 @@ is written under the invoking `--repo` path and N checkouts otherwise admitted
 up to N x `wip_cap` independently (bd-ib-snyquw.6). The widening only ever ADDS
 lock-backed rows, so neither guarantee below moves: a green-terminal row is
 still reclaimed and uncounted, and an unreadable journal still counts MORE.
+
+A live lock alone is not a held run slot (bd-ib-rtzhfc). A dispatcher keeps
+its lock through the post-run legs that follow its factory run, so a row
+whose current dispatch has a STAMPED run that the stamp's factory no longer
+lists as live is exposed as `ended_run_active_ids` and does not count against
+`wip_cap`. `_dispatcher_claim_live_runs.RunSlotBoard` answers that question and
+carries the reasoning; both of its fallbacks keep the row counted.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_claim_live_runs import RunSlotBoard
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dispatch_lock import (
     live_dispatch_lock,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import JournalFile
+from livespec_orchestrator_beads_fabro.commands._dispatcher_pass_snapshot import snapshot_records
 from livespec_orchestrator_beads_fabro.commands._dispatcher_tenant_checkouts import (
     tenant_checkouts,
 )
@@ -62,6 +72,7 @@ class ActiveClaimAccounting:
     green_terminal_active_ids: tuple[str, ...]
     journal_unreadable_active_ids: tuple[str, ...]
     rework_pending_active_ids: tuple[str, ...] = ()
+    ended_run_active_ids: tuple[str, ...] = ()
     actionable_holds: tuple[ActiveClaimHold, ...] = field(default=(), compare=False)
 
 
@@ -111,12 +122,18 @@ def _claimed_active_accounting(
     green_terminal_active_ids: list[str] = []
     journal_unreadable_active_ids: list[str] = []
     rework_pending_active_ids: list[str] = []
+    ended_run_active_ids: list[str] = []
     actionable_holds: list[ActiveClaimHold] = []
+    slots = RunSlotBoard(repo=repo, journal=journal)
     for item in items:
         if item.status != "active":
             continue
         if _claim_held_live_in_tenant(checkouts=checkouts, work_item_id=item.id):
-            live_lock_active_ids.append(item.id)
+            (
+                live_lock_active_ids
+                if slots.holds_run_slot(work_item_id=item.id)
+                else ended_run_active_ids
+            ).append(item.id)
             continue
         if item.rework_pending:
             # A marked, lock-less `active` row is a SANCTIONED park awaiting its
@@ -157,6 +174,7 @@ def _claimed_active_accounting(
         green_terminal_active_ids=tuple(green_terminal_active_ids),
         journal_unreadable_active_ids=tuple(journal_unreadable_active_ids),
         rework_pending_active_ids=tuple(rework_pending_active_ids),
+        ended_run_active_ids=tuple(ended_run_active_ids),
         actionable_holds=tuple(actionable_holds),
     )
 
@@ -186,23 +204,30 @@ def _green_terminal_after_latest_admit(*, history: _TerminalHistory | None) -> b
 
 
 def _terminal_histories(*, journal: JournalFile) -> dict[str, _TerminalHistory] | None:
-    lines = _journal_lines(path=journal.path)
-    if lines is None:
+    records = _journal_records(path=journal.path)
+    if records is None:
         return None
     histories: dict[str, _TerminalHistory] = {}
-    for index, line in enumerate(lines):
-        record = _journal_record(line=line)
+    for index, record in enumerate(records):
         if record is None:
             continue
         _record_history(histories=histories, index=index, record=record)
     return histories
 
 
-def _journal_lines(*, path: Path) -> tuple[str, ...] | None:
+def _journal_records(*, path: Path) -> Iterable[dict[str, object] | None] | None:
+    """The journal's records in order, from the pass snapshot when one is live.
+
+    The snapshot is the pass's one parsed copy of the file, shared and read-only; a
+    snapshot-less read parses its own, and `None` means the file could not be read.
+    """
+    snapshot = snapshot_records(journal_path=path)
+    if snapshot is not None:
+        return snapshot
     read = attempt(action=lambda: path.read_text(encoding="utf-8"), exceptions=(OSError,))
     if isinstance(read, AttemptFailure):
         return None
-    return tuple(line for line in read.splitlines() if line)
+    return (_journal_record(line=line) for line in read.splitlines() if line)
 
 
 def _journal_record(*, line: str) -> dict[str, object] | None:

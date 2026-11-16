@@ -31,6 +31,13 @@ instead.
   prompt carrying both the record title and the post call), with a control
   asserting it reached the two publishers known today.
 
+- `test_record_header_stamp_is_a_clock_reading.py` — bd-ib-yvmtrm: the
+  `proof_verify` and `review` prompts take their record header's UTC time from
+  `date -u` inside the command that writes the header, as `proof_capture`
+  already does, and forbid a time the agent estimated or composed. Without it
+  the agent wrote a made-up time, mostly ending `:00Z`, that was often later
+  than its own comment.
+
 - `test_proof_record_observation_scope_discipline.py` — bd-ib-v4exlm: both proof
   stages write the `Working directory: .` line ahead of their numbered steps,
   and only when every step ran from the repository root; `proof_verify` also
@@ -73,17 +80,18 @@ instead.
   caller: a HEAD-anchored step passes capture and surfaces one stage later as
   a `not_reproduced` verdict against a correct implementation.
 
-- `test_review_proof_record_currency.py` — bd-ib-qnokup: the review prompt
-  judges a captured record's currency by comparing TREES — a record is CURRENT
-  when the tree of the commit it names equals the tree of the head under review
-  — and it forbids the timestamp, sha-equality and commit-order readings
-  outright, carries the moving-HEAD reason in the rule, keeps an absent record
-  and an absent head declaration blocking, and routes its finding through this
-  graph's `fix` label. A prompt test because the judgement is made by the
-  `review` agent out of this prose and is rendered by no Python caller: a
-  reviewer comparing timestamps emits a well-formed blocking finding, the run
-  re-enters capture, and the defect surfaces only as a run that spends its whole
-  firing budget rejecting correct records (measured 2026-10-20 on runs
+- `test_review_proof_record_currency.py` — bd-ib-24xzzf: the review prompt
+  judges a captured record's currency by comparing TREES at the published
+  pull-request head that proof capture recorded — never at the sandbox's engine
+  checkpoint, whose tree can contain prepare-step residue — and it forbids the
+  timestamp, sha-equality and commit-order readings outright, carries the
+  moving-HEAD reason in the rule, keeps an absent record and an absent head
+  declaration blocking, and routes its finding through this graph's `fix`
+  label. A prompt test because the judgement is made by the `review` agent out
+  of this prose and is rendered by no Python caller: a reviewer comparing a
+  checkpoint emits a well-formed blocking finding, the run re-enters capture,
+  and the defect surfaces only as a run that spends its whole firing budget
+  rejecting correct records (measured 2026-10-20 on runs
   `01M5CE38SZJW` and `01M5CDH2FZSE`). The needles are scoped to the currency
   SECTION, since the prompt says `[BLOCKING]` a dozen times for a dozen
   unrelated conditions and separately tells the capture prompt where to read its
@@ -108,6 +116,14 @@ instead.
   satisfy a whole-file probe over a bullet that scoped nothing. The
   OUTPUT-IS-NOT-SOURCE clause and the round trip it pairs with stay bound in
   `tests/integration/test_proof_finding_work_order_scenario138.py`.
+
+- `test_dod_gate_subject_file.py` — bd-ib-tzvtgc: the goal no longer carries the
+  Definition-of-Done judgement subject (Fabro injects the goal into every ACP
+  node, and only `dod_gate` grades the subject), so the gate prompt is the only
+  thing that sends the node to the file the Dispatcher materializes it in. The
+  path needle is IMPORTED from `_dispatcher_dod_gate_subject`, so a path changed
+  on one side fails here instead of leaving the node reading nothing; a sibling
+  case keeps the host-call heading the rubric still grades.
 
 - `test_dod_gate_nested_heading_scope.py` — bd-ib-uwhvdv: check 4 of the
   Definition-of-Done gate prompt reads a referenced heading as its WHOLE
@@ -162,29 +178,26 @@ instead.
   fault. The mechanism that reads the field is
   `tests/integration/test_implement_completion_field_scenario204.py`.
 
-- `test_fix_check_suite_once_per_tree_scenario199.py` — bd-ib-k6dwyv, and the
-  registry binding for `SPECIFICATION/scenarios.md` Scenario 199: the fix-stage
-  prompt counts a commit whose repository pre-commit hook ran the FULL check
-  suite green on the exact committed tree as that turn's run of the suite, and
-  directs no second run on that same tree — while a changed tree and a partial
-  hook run, such as a Red commit on the hook's fast path, both still owe a full
-  run before the turn ends, and the refresh-repair steps are governed
-  identically on the tree the repair produced. A prompt test because the
-  obligation is discharged by the agent out of this prose and is rendered by no
-  Python caller: nothing host-side can observe whether a turn chose to run the
-  suite twice, and the engine reports the resulting timeout as an ordinary node
-  failure. The bound node id is the DIRECTIVE-SITE enumeration, not a case
-  reading the new section: the defect was never a missing paragraph — each site
-  that directs a run said to re-run it until green with no exemption, so a rule
-  stated in a section the directive never references leaves the directive
-  saying the thing that cost run 01M56YAEWMS8 its turn. That case collects
-  every list item carrying the check-suite workflow input and requires the rule
-  AT each of them, so a third directive added later without it fails; its count
-  control asserts the enumeration reached both known sites, because a splitter
-  that matched nothing would otherwise report clean. Items are split at the
-  list MARKER rather than at blank lines, since the refresh-repair steps are
-  adjacent lines and a blank-line split would let a qualifier on step 1 satisfy
-  an assertion about step 2.
+- `test_fix_check_suite_once_per_tree_scenario199.py` — bd-ib-z5yzyq, and the
+  registry binding for `SPECIFICATION/scenarios.md` Scenario 199 ("A fix turn
+  grades each tree once, through its commit hook"): the fix-stage prompt makes
+  the commit hook the turn's only grading of a tree and directs no run of the
+  full check suite beyond it. Its section states five things as sentences that
+  must be PRESENT: no full suite while `HEAD` and the working tree are unchanged
+  from the tree the janitor failed on; a failed target is reproduced through the
+  failing tests its own output names, never through the aggregate containing
+  them; a tool call that returned without an exit status is still running and has
+  produced no verdict; no full suite while another one the turn started is live;
+  and a tree changed after the last passing hook run, or whose only commit took
+  the hook's Red fast path, is committed through the hook to a passing result.
+  The measured run was 01M6V7SGBQXFK2V8JHDMTKK0Z2 (three concurrent full suites
+  on an unchanged tree, the turn cut at 3600 seconds). One structural absence is
+  asserted, that no LIST ITEM names the check-suite workflow input, and its
+  control is the count of items pointing at the rule, so a splitter that matched
+  nothing fails. Items are split at the list MARKER rather than at blank lines,
+  since the refresh-repair steps are adjacent lines. Its dispatched counterpart,
+  on the prompt after payload materialization, is
+  `tests/livespec_orchestrator_beads_fabro/commands/test_dispatcher_payload_fix_prompt.py`.
 
 - `test_commit_hook_outlasts_a_tool_call.py` — bd-ib-aaxsta: the implement and
   fix prompts carry ONE wording of the four commit-hook directions — how long
@@ -208,6 +221,23 @@ instead.
   the run's job, not the agent's — so bd-ib-sufca7, which owns that clause and
   Scenario 179's registry binding, can ship the runner without contradicting
   this prose.
+
+- `test_proof_check_aggregate_serialization.py` — bd-ib-oldlnx: the
+  proof-capture prompt limits the sandbox to one repository check aggregate
+  and explicitly rejects both a trailing `&` inside one tool call and parallel
+  tool calls; proof-verify applies the same ceiling while replaying a record
+  whose steps started several aggregates. The prompt paths are derived from
+  the proof ACP nodes in the workflow graph, with a control that fails if the
+  graph no longer resolves exactly the two proof-stage prompts.
+
+- `test_fix_publish_repair_brief.py` — bd-ib-7owmkq: the fix prompt carries its
+  own section for a repair brief naming `stage: publish_draft` with a refused
+  head: removing each GH001-named path from every run commit origin does not
+  already hold (never one it does), repairing a pre-push hook's failed targets,
+  redoing Red-Green for a rewritten commit instead of hand-editing its trailers,
+  and the unchanged no-bypass rules. A prompt test because the removal is done by
+  the `fix` agent out of this prose; the stage that records the brief is bound in
+  `tests/integration/test_workflow_publish_repair_scenario329.py`.
 
 Conventions:
 

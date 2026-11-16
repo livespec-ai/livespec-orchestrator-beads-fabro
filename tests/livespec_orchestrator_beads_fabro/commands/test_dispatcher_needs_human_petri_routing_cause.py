@@ -102,6 +102,8 @@ _INNERMOST_CAUSE = "script exited with status 1"
 # The shape the Petri-era engine IS measured writing for a failed step:
 # one `message` inside `outcome.status.failure`, with no chain beside it.
 _FAILURE_MESSAGE = "the agent process exited before the protocol completed"
+_REFRESH_FAILURE = "LIVESPEC_PR_REFRESH_ORIGIN_UNOBSERVABLE: origin could not be fetched"
+_REFRESH_REPAIR_ABSENT = "LIVESPEC_REFRESH_REPAIR_ABSENT: refresh repair brief was absent"
 
 # The terminal's own failed step, which can never be the cause: it is a
 # dead-end script that exits 1 by design on every run that reaches it.
@@ -118,6 +120,39 @@ _STDERR = (
 def _stage(*, handler: str, state: str) -> dict[str, Any]:
     """One entry of the Petri `stages` map, with the four keys it carries."""
     return {"handler": handler, "state": state, "output": None, "response": None}
+
+
+def _failed_stage(*, output: str | None, completion_reason: str | None = None) -> dict[str, Any]:
+    """One failed agent stage, optionally with its timeout completion reason."""
+    stage = _stage(handler="agent", state="failed")
+    stage["output"] = output
+    if completion_reason is not None:
+        stage["completion"] = {"failure_reason": completion_reason}
+    return stage
+
+
+def _ordered_petri_inspect(*, stages: dict[str, Any], execution: list[str]) -> list[object]:
+    """A terminal record whose map order conflicts with its execution order."""
+    return [
+        {
+            "run_id": _RUN,
+            "status": {"kind": "failed", "reason": "workflow_error"},
+            "stages": stages,
+            "checkpoint": {
+                "current_node": "needs_human",
+                "git_commit_sha": "9bcd4faa2e3c4d5f6071829304a5b6c7d8e9f012",
+                "timestamp": "2026-11-04T00:00:00.000000000Z",
+            },
+            "conclusion": {
+                "stages": execution,
+                "status": "failed",
+                "failure": {
+                    "reason": "workflow_error",
+                    "detail": {"message": _TERMINAL_MESSAGE, "category": "deterministic"},
+                },
+            },
+        }
+    ]
 
 
 def _petri_inspect() -> list[object]:
@@ -223,7 +258,7 @@ def _plan(*, tmp_path: Path) -> DispatchPlan:
         janitor=None,
         janitor_checkout=tmp_path / ".janitor",
         janitor_core_checkout=tmp_path / ".janitor" / ".livespec-core",
-        janitor_core_repo_url="https://github.com/thewoolleyman/livespec.git",
+        janitor_core_repo_url="https://github.com/livespec-ai/livespec.git",
         janitor_core_ref="master",
         review_fix_visit_cap=3,
         merge_on_review_cap_outcome="succeeded",
@@ -231,7 +266,11 @@ def _plan(*, tmp_path: Path) -> DispatchPlan:
 
 
 def _outcome(
-    *, tmp_path: Path, inspect_payload: list[object], events_payload: list[object] | None
+    *,
+    tmp_path: Path,
+    inspect_payload: list[object],
+    events_payload: list[object] | None,
+    stderr: str = _STDERR,
 ) -> DispatchOutcome:
     """The terminal outcome, with both payloads read by the production parsers."""
     outcome = fabro_run_terminal_outcome(
@@ -246,7 +285,7 @@ def _outcome(
             events_payload=events_payload,
         ),
         exit_code=1,
-        stderr=_STDERR,
+        stderr=stderr,
     )
     assert outcome is not None
     return outcome
@@ -306,6 +345,158 @@ def test_the_measured_petri_failure_message_is_named_as_the_cause(
     assert outcome.fabro_failure_cause == _FAILURE_MESSAGE
     assert f"innermost cause: {_FAILURE_MESSAGE}" in outcome.detail
     assert f"innermost cause: {_FAILURE_MESSAGE}" in needs_human_cause_body(outcome=outcome)
+
+
+def test_a_briefless_refresh_repair_reports_the_refresh_stages_own_cause(
+    tmp_path: Path,
+) -> None:
+    """The absent-brief classifier cannot displace the failed refresh cause."""
+    refresh_stage = "pr_refresh@1"
+    refresh_repair_stage = "refresh_repair@1"
+    inspect_payload = _petri_inspect()
+    record = inspect_payload[0]
+    assert isinstance(record, dict)
+    stages = record["stages"]
+    assert isinstance(stages, dict)
+    del stages[_ROUTING_STAGE]
+    stages[refresh_stage] = _stage(handler="script", state="failed")
+    stages[refresh_repair_stage] = _stage(handler="script", state="failed")
+
+    outcome = _outcome(
+        tmp_path=tmp_path,
+        inspect_payload=inspect_payload,
+        events_payload=[
+            _step_finished(
+                stream_seq=11,
+                node=refresh_stage,
+                status={"failure": {"message": _REFRESH_FAILURE}},
+            ),
+            _step_finished(
+                stream_seq=12,
+                node=refresh_repair_stage,
+                status={"failure": {"message": _REFRESH_REPAIR_ABSENT}},
+            ),
+        ],
+    )
+    record_body = needs_human_cause_body(outcome=outcome)
+
+    assert outcome.needs_human_stages == (refresh_stage,)
+    assert outcome.fabro_failure_cause == _REFRESH_FAILURE
+    assert f"failed stage: {refresh_stage}" in record_body
+    assert f"innermost cause: {_REFRESH_FAILURE}" in record_body
+    assert _REFRESH_REPAIR_ABSENT not in record_body
+
+
+def test_petri_conclusion_order_selects_fix_after_a_blob_output_predecessor(
+    tmp_path: Path,
+) -> None:
+    """A map sorted `fix`, `pr` must not send attribution back to the blob."""
+    cause = "per-file coverage failed after the refresh"
+    outcome = _outcome(
+        tmp_path=tmp_path,
+        inspect_payload=_ordered_petri_inspect(
+            stages={
+                "fix@2": _failed_stage(
+                    output=f'{{"outcome": "failed", "failure_reason": "{cause}"}}'
+                ),
+                "pr_refresh@1": _failed_stage(output="blob://sha256/04f3"),
+                _TERMINAL_STAGE: _stage(handler="script", state="failed"),
+            },
+            execution=["pr_refresh@1", "refresh_repair@1", "fix@2", _TERMINAL_STAGE],
+        ),
+        events_payload=None,
+    )
+
+    body = needs_human_cause_body(outcome=outcome)
+
+    assert outcome.needs_human_stages == ("pr_refresh@1", "fix@2")
+    assert "failed stage: pr_refresh@1, fix@2" in body
+    assert f"innermost cause: {cause}" in body
+    assert "innermost cause: ABSENT" not in body
+
+
+def test_petri_conclusion_order_selects_fix_after_a_rebase_conflict(
+    tmp_path: Path,
+) -> None:
+    """A map sorted `fix`, `publish` must not blame the repaired conflict."""
+    cause = "check-heading-coverage-debt-register refused the commit"
+    outcome = _outcome(
+        tmp_path=tmp_path,
+        inspect_payload=_ordered_petri_inspect(
+            stages={
+                "fix@1": _failed_stage(
+                    output=f'{{"outcome": "failed", "failure_reason": "{cause}"}}'
+                ),
+                "publish_draft@1": _failed_stage(output="rebase conflict"),
+                _TERMINAL_STAGE: _stage(handler="script", state="failed"),
+            },
+            execution=["publish_draft@1", "refresh_repair@1", "fix@1", _TERMINAL_STAGE],
+        ),
+        events_payload=None,
+    )
+
+    body = needs_human_cause_body(outcome=outcome)
+
+    assert outcome.needs_human_stages == ("publish_draft@1", "fix@1")
+    assert "failed stage: publish_draft@1, fix@1" in body
+    assert f"innermost cause: {cause}" in body
+    assert "innermost cause: rebase conflict" not in body
+
+
+def test_a_timed_out_petri_stage_surfaces_its_own_completion_reason(tmp_path: Path) -> None:
+    """A stage with no output still records the timeout that ended its turn."""
+    cause = "review_fix@1 timed out after 7200 seconds"
+    outcome = _outcome(
+        tmp_path=tmp_path,
+        inspect_payload=_ordered_petri_inspect(
+            stages={
+                "review_fix@1": _failed_stage(output=None, completion_reason=cause),
+                _TERMINAL_STAGE: _stage(handler="script", state="failed"),
+            },
+            execution=["review_fix@1", _TERMINAL_STAGE],
+        ),
+        events_payload=None,
+    )
+
+    body = needs_human_cause_body(outcome=outcome)
+
+    assert "failed stage: review_fix@1" in body
+    assert f"innermost cause: {cause}" in body
+
+
+def test_a_designed_refresh_failure_is_not_the_cause_after_a_successful_needs_human_route(
+    tmp_path: Path,
+) -> None:
+    """The route-stage reason outranks a non-zero refresh that the run outlived."""
+    designed_route = "LIVESPEC_PR_REFRESH_HEAD_CHANGED: fresh proof is required"
+    route_reason = (
+        "LIVESPEC_REVIEW_FIX_OPEN_RED_VISIT_BOUND_EXHAUSTED: the Green amend was not written"
+    )
+    stderr = (
+        f"{NEEDS_HUMAN_MARKER}_PRESERVED: refs/heads/needs-human/{_RUN}\n"
+        f"{NEEDS_HUMAN_MARKER}: {route_reason}; run terminated, work preserved by reference, "
+        "decision routed to the ledger (blocked / needs-human)\n"
+    )
+    outcome = _outcome(
+        tmp_path=tmp_path,
+        inspect_payload=_ordered_petri_inspect(
+            stages={
+                "pr_refresh_head@1": _failed_stage(output=designed_route),
+                "review_fix_open_red_route@3": _stage(handler="script", state="succeeded"),
+                _TERMINAL_STAGE: _stage(handler="script", state="failed"),
+            },
+            execution=["pr_refresh_head@1", "review_fix_open_red_route@3", _TERMINAL_STAGE],
+        ),
+        events_payload=None,
+        stderr=stderr,
+    )
+
+    body = needs_human_cause_body(outcome=outcome)
+
+    assert outcome.needs_human_kind == "agent-request"
+    assert outcome.needs_human_stages == ()
+    assert designed_route not in body
+    assert f"terminal reason: {route_reason}" in body
 
 
 def test_a_succeeded_step_on_the_routing_node_is_not_read_as_its_failure(

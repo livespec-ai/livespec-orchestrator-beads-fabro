@@ -89,13 +89,14 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_plugin_cache_gate im
     plugin_gate_session_hook_declaration,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_prepare_payload import (
-    PAYLOAD_ENV_VAR,
     PrepareStep,
-    payload_guard_command,
     render_prepare_step,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_review_guard import (
     review_guard_hook_declaration,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_plugins import (
+    sandbox_plugins_root_expansion,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_worktree_exclude import (
     worktree_exclude_script,
@@ -103,6 +104,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_worktree_exc
 
 __all__: list[str] = [
     "HARNESS_SETTINGS_MARKER",
+    "HARNESS_SETTINGS_MERGE_PROGRAM_FILENAME",
     "SANDBOX_HARNESS_SETTINGS_PATH_EXPRESSION",
     "SANDBOX_HARNESS_SETTINGS_RELATIVE_PATH",
     "harness_settings_merge_program",
@@ -167,6 +169,9 @@ SANDBOX_HARNESS_SETTINGS_PATH_EXPRESSION = (
 # attributable to this projection rather than to whichever of the several
 # materialized steps happened to be running.
 HARNESS_SETTINGS_MARKER = "livespec-sandbox-harness-settings"
+# Where the merge program lands below the sandbox plugins root. The helper-fetch
+# setup step writes it (`_dispatcher_helper_registry`); the settings step runs it.
+HARNESS_SETTINGS_MERGE_PROGRAM_FILENAME = "livespec-harness-settings-merge.py"
 
 _ENV_PLACEHOLDER = "LIVESPEC_HARNESS_SETTINGS_ENV_DECLARATION"
 _HOOKS_PLACEHOLDER = "LIVESPEC_HARNESS_SETTINGS_HOOKS_DECLARATION"
@@ -332,7 +337,9 @@ def harness_settings_prepare_steps_block() -> str:
     a JSON document the sandbox may already carry and preserving its other keys
     is the whole difference between this and an overwrite. `python3` is already a
     hard dependency of this prepare chain -- the plugin-cache gate executes under
-    it -- so this adds no new one.
+    it -- so this adds no new one. The merge program is a helper program, written
+    below the plugins root by the helper-fetch setup step from the installed
+    build's own commit (`_dispatcher_helper_registry`); this step only runs it.
     """
     exclude = worktree_exclude_script(
         paths=(SANDBOX_HARNESS_SETTINGS_PATH_EXPRESSION,),
@@ -349,10 +356,10 @@ def harness_settings_prepare_steps_block() -> str:
         "fi\n"
         f'settings="$toplevel/{SANDBOX_HARNESS_SETTINGS_RELATIVE_PATH}"\n'
         'mkdir -p "$(dirname "$settings")"\n'
-        f"{payload_guard_command()}\n"
-        f'printf %s "${PAYLOAD_ENV_VAR}" | python3 - "$settings"'
+        f'python3 "{sandbox_plugins_root_expansion()}/{HARNESS_SETTINGS_MERGE_PROGRAM_FILENAME}"'
+        ' "$settings"'
     )
-    step = PrepareStep(script=script, env={PAYLOAD_ENV_VAR: harness_settings_merge_program()})
+    step = PrepareStep(script=script)
     lines = [
         "",
         "# --- Dispatcher-materialized harness settings: the sandbox agent loads",

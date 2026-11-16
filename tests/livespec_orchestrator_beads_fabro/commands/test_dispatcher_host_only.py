@@ -267,6 +267,84 @@ def test_is_host_only_item_false_for_cite_only_workflow_mention() -> None:
     assert is_host_only_item(item=item) is False
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        "factory-safe, touches no root .github/workflows/.",
+        (
+            "Scope is scripts/just/ and tests/ only, with NO .github/workflows/ edit, "
+            "so it is factory-eligible."
+        ),
+    ],
+)
+def test_is_host_only_item_false_for_live_inline_scope_fences(line: str) -> None:
+    assert is_host_only_item(item=_item(description=line)) is False
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Does NOT touch `.github/workflows/`.",
+        "This item never edits .github/workflows/ci.yml.",
+        "This item doesn't modify .github/workflows/ci.yml.",
+        "The item does not change .github/workflows/ci.yml.",
+        "It makes no changes to .github/workflows/ci.yml.",
+        "It works without editing .github/workflows/ci.yml.",
+        "Does not touch .github/workflows/ and will not edit .github/workflows/ci.yml.",
+        "This item ships no files under .github/workflows/; it changes one Python module.",
+    ],
+)
+def test_is_host_only_item_false_for_negated_workflow_scope_declaration(line: str) -> None:
+    assert is_host_only_item(item=_item(description=line)) is False
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Edits .github/workflows/ci.yml.",
+        "Updates `.github/workflows/ci.yml` for the new gate.",
+        "Do not forget to update .github/workflows/ci.yml.",
+        "Does NOT touch .github/workflows/ci.yml; edits .github/workflows/release.yml.",
+        "Never edits .github/workflows/ci.yml but also updates .github/workflows/release.yml.",
+        ".github/workflows/ci.yml should not be updated twice, yet it changes.",
+    ],
+)
+def test_is_host_only_item_true_for_unnegated_workflow_edit(line: str) -> None:
+    item = _item(description=line)
+    assert is_host_only_item(item=item) is True
+    assert "factory-safety refusal" in host_only_refusal_detail(item_id=item.id)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Scope has no root .github/workflows/ edit; this item updates .github/workflows/ci.yml.",
+        "Scope has no root .github/workflows/ edit and this item updates .github/workflows/ci.yml.",
+        "With NO .github/workflows/ edit, we still rewrite .github/workflows/release.yml.",
+    ],
+)
+def test_is_host_only_item_true_when_a_fence_precedes_a_separate_positive_edit(line: str) -> None:
+    item = _item(description=line)
+    assert is_host_only_item(item=item) is True
+    assert "factory-safety refusal" in host_only_refusal_detail(item_id=item.id)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "This item ships no files under .github/workflows/, but updates .github/workflows/ci.yml.",
+        "Ships no files in .github/workflows/ and also rewrites .github/workflows/release.yml.",
+        "No files under .github/workflows/ are touched, yet this item edits .github/workflows/ci.yml.",
+    ],
+)
+def test_is_host_only_item_true_when_a_files_fence_shares_a_line_with_a_positive_edit(
+    line: str,
+) -> None:
+    item = _item(description=line)
+    assert is_host_only_item(item=item) is True
+    assert "factory-safety refusal" in host_only_refusal_detail(item_id=item.id)
+
+
 def test_host_only_refusal_detail_is_actionable() -> None:
     detail = host_only_refusal_detail(item_id="livespec-impl-beads-uvd")
     assert "livespec-impl-beads-uvd" in detail
@@ -278,6 +356,15 @@ def test_host_only_refusal_detail_is_actionable() -> None:
     assert "sub-agent" in detail or "host-route" in detail
     assert "set-workflow-scope-override:<id>:citation-only" in detail
     assert "ships no files under .github/workflows/" in detail
+
+
+def test_host_only_refusal_detail_explains_unrecognised_negation_remedy() -> None:
+    item = _item(description="This item has no plans to update .github/workflows/ci.yml.")
+
+    assert is_host_only_item(item=item) is True
+    detail = host_only_refusal_detail(item_id=item.id)
+    assert "unrecognised negation" in detail
+    assert "set-workflow-scope-override:<id>:citation-only" in detail
 
 
 def test_host_only_refusal_clears_stale_signal_for_intrinsic_host_only(
@@ -402,6 +489,88 @@ def test_dispatch_journals_host_only_refusal(
         if json.loads(line)["stage"] == "outcome"
     )
     assert outcome_record["outcome"]["stage"] == "host-only-refused"
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        _item(factory_safety="mutates-host-machinery"),
+        _item(
+            description=(
+                "Update `.github/workflows/ci.yml` for the new gate.\n"
+                "\n"
+                "## Definition of Done\n"
+                "\n"
+                "- The dispatched slice lands its change.\n"
+                "\n"
+                "References: ## Effective acceptance criteria\n"
+            )
+        ),
+    ],
+)
+def test_handpicked_loop_refuses_host_only_item_with_one_exit_five_line(
+    capsys: pytest.CaptureFixture[str],
+    item: WorkItem,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, workflow = _repo_with_workflow(tmp_path=tmp_path)
+    append_work_item(path=_config(), item=item)
+    recording = _RecordingRunDispatch()
+    monkeypatch.setattr(_dispatcher_loop, "run_dispatch", recording)
+
+    exit_code = main(
+        argv=[
+            "loop",
+            "--repo",
+            str(repo),
+            "--item",
+            item.id,
+            "--budget",
+            "1",
+            "--workflow",
+            str(workflow),
+        ]
+    )
+
+    assert exit_code == 5
+    assert capsys.readouterr().err.splitlines() == [
+        f"REFUSED: work-item {item.id} is host-only; no claim was taken and no factory run was created."
+    ]
+    assert recording.calls == []
+    assert _stored()[item.id].status == "ready"
+
+
+@pytest.mark.parametrize(
+    ("item", "expected_reason"),
+    [
+        (_item(), None),
+        (_item(factory_safety="mutates-host-machinery"), "factory_safety"),
+        (
+            _item(description="Update `.github/workflows/ci.yml` for the new gate."),
+            "workflow declaration",
+        ),
+    ],
+)
+def test_host_only_command_reports_the_shared_factory_safety_routing_verdict(
+    capsys: pytest.CaptureFixture[str],
+    item: WorkItem,
+    expected_reason: str | None,
+    tmp_path: Path,
+) -> None:
+    repo, _workflow = _repo_with_workflow(tmp_path=tmp_path)
+    append_work_item(path=_config(), item=item)
+
+    exit_code = main(argv=["host-only", "--repo", str(repo), "--item", item.id, "--json"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["work_item_id"] == item.id
+    assert payload["host_only"] is (expected_reason is not None)
+    if expected_reason is None:
+        assert "reason" not in payload
+    else:
+        assert payload["reason"] == expected_reason
 
 
 def test_dispatch_does_not_refuse_ordinary_item(

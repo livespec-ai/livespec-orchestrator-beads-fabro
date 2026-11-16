@@ -79,7 +79,7 @@ def test_real_post_merge_janitor_provisions_livespec_core(
     git_config = tmp_path / "gitconfig"
     git_config.write_text(
         f'[url "file://{core_remote}"]\n'
-        "    insteadOf = https://github.com/thewoolleyman/livespec.git\n",
+        "    insteadOf = https://github.com/livespec-ai/livespec.git\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("PATH", f"{tool_bin}{os.pathsep}{os.environ['PATH']}")
@@ -220,7 +220,7 @@ def _configure_full_dispatch_env(
     git_config = tmp_path / "gitconfig"
     git_config.write_text(
         f'[url "file://{core_remote}"]\n'
-        "    insteadOf = https://github.com/thewoolleyman/livespec.git\n",
+        "    insteadOf = https://github.com/livespec-ai/livespec.git\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("PATH", f"{tool_bin}{os.pathsep}{os.environ['PATH']}")

@@ -66,6 +66,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_publication_state im
     PUBLISH_HEAD_STATE_FILENAME,
     REFRESH_COUNT_STATE_FILENAME,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_record_file_merge import (
+    RECORD_FILE_MERGE_PROGRAM_FILENAME,
+    record_file_merge_program_source,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_record_file_regeneration import (
     RECORD_FILE_PROGRAM_FILENAME,
     record_file_program_source,
@@ -350,12 +354,14 @@ def _refuse_every_push(*, world: _World) -> None:
     hook.chmod(0o755)
 
 
-def _publish_draft_script(*, check_suite: str) -> str:
+def _publish_draft_script(*, check_suite: str, conformance_hook_install: str = "") -> str:
     graph = parse_dot_graph(text=_graph_text())
     assert not isinstance(graph, str), graph
     script: str = graph.nodes["publish_draft"]["script"]
-    return script.replace("{{ inputs.default_branch }}", _DEFAULT_BRANCH).replace(
-        "{{ inputs.sandbox_check_suite }}", check_suite
+    return (
+        script.replace("{{ inputs.default_branch }}", _DEFAULT_BRANCH)
+        .replace("{{ inputs.sandbox_check_suite }}", check_suite)
+        .replace("{{ inputs.conformance_hook_install }}", conformance_hook_install)
     )
 
 
@@ -698,6 +704,99 @@ def _clean_refresh_world(*, root: Path) -> tuple[_World, str, str]:
     return world, janitor_head, advanced
 
 
+def test_a_clean_draft_refresh_reinstalls_the_refreshed_tree_s_conformance_hooks(
+    tmp_path: Path,
+) -> None:
+    """A hook installed from the dispatch base cannot publish a newer hook body.
+
+    The run begins before the default branch adds its canonical hook body, so its
+    first install writes hooks expecting the old body. After the clean rebase,
+    that pre-push hook rejects the new canonical body unless ``publish_draft``
+    invokes the resolved installer again. The other two hooks are checked as
+    well: janitor and later commit paths must receive the same refreshed body,
+    even though only pre-push participates in this publication attempt.
+    """
+    world = _world(root=tmp_path)
+    _ = _commit(
+        cwd=world.clone,
+        path="feature.txt",
+        text="this run's change\n",
+        subject="feat: change the run",
+    )
+    installer = tmp_path / "install-conformance-hooks"
+    trace = tmp_path / "conformance-hook-installs"
+    _ = installer.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' install >> {shlex.quote(str(trace))}\n"
+        "expected=old\n"
+        "if test -f canonical-hook-body; then expected=$(cat canonical-hook-body); fi\n"
+        "for hook in pre-commit pre-push commit-msg; do\n"
+        "    printf '%s\\n' '#!/bin/sh' \\\n"
+        "        'actual=$(cat canonical-hook-body)' \\\n"
+        '        "test \\"\\$actual\\" = \\"$expected\\"" \\\n'
+        "        'status=$?' \\\n"
+        '        \'if test "$status" -ne 0; then printf "body_mismatch\\\\n" >&2; fi\' \\\n'
+        '        \'exit "$status"\' > ".git/hooks/$hook"\n'
+        '    chmod 755 ".git/hooks/$hook"\n'
+        "done\n",
+        encoding="utf-8",
+    )
+    installer.chmod(0o755)
+    _ = subprocess.run(
+        [str(installer)],
+        cwd=world.clone,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_fixture_env(),
+    )
+    advanced = _advance_default(
+        world=world,
+        path="canonical-hook-body",
+        text="new canonical hook body\n",
+    )
+    forge_bin = tmp_path / "forge-bin"
+    forge_bin.mkdir()
+    forge = forge_bin / "gh"
+    _ = forge.write_text("\n".join(_GH_DOUBLE_LINES), encoding="utf-8")
+    forge.chmod(0o755)
+    plugins = tmp_path / "plugins"
+    plugins.mkdir()
+    _ = (plugins / RECORD_FILE_PROGRAM_FILENAME).write_text(
+        record_file_program_source(), encoding="utf-8"
+    )
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            _publish_draft_script(
+                check_suite="true", conformance_hook_install=shlex.quote(str(installer))
+            ),
+        ],
+        cwd=world.clone,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **_fixture_env(),
+            "PATH": f"{forge_bin}:/usr/local/bin:/usr/bin:/bin",
+            "HOME": str(world.clone.parent / "home"),
+            "LIVESPEC_PUBLISH_BRANCH": _BRANCH,
+            SANDBOX_CLAUDE_PLUGINS_ROOT_ENV_VAR: str(plugins),
+            "LIVESPEC_SANDBOX_GH_REFRESH_ROOT": str(world.clone.parent / "no-gh-refresh"),
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert world.remote_head(ref=_BRANCH) == world.head()
+    assert world.head() != advanced
+    assert trace.read_text(encoding="utf-8") == "install\ninstall\n"
+    for hook in ("pre-commit", "pre-push", "commit-msg"):
+        body = (world.clone / ".git" / "hooks" / hook).read_text(encoding="utf-8")
+        assert 'test "$actual" = "new canonical hook body"' in body
+
+
 def test_a_refreshed_head_the_gate_rejects_is_restored_and_repaired(tmp_path: Path) -> None:
     """A clean refresh whose gate refuses is repaired, not parked.
 
@@ -968,12 +1067,14 @@ def _node_attribute(*, node: str, attribute: str) -> str:
     return value
 
 
-def _pr_refresh_script(*, check_suite: str) -> str:
+def _pr_refresh_script(*, check_suite: str, conformance_hook_install: str = "") -> str:
     graph = parse_dot_graph(text=_graph_text())
     assert not isinstance(graph, str), graph
     script: str = graph.nodes["pr_refresh"]["script"]
-    return script.replace("{{ inputs.default_branch }}", _DEFAULT_BRANCH).replace(
-        "{{ inputs.sandbox_check_suite }}", check_suite
+    return (
+        script.replace("{{ inputs.default_branch }}", _DEFAULT_BRANCH)
+        .replace("{{ inputs.sandbox_check_suite }}", check_suite)
+        .replace("{{ inputs.conformance_hook_install }}", conformance_hook_install)
     )
 
 
@@ -997,6 +1098,95 @@ def _published_run(*, root: Path) -> tuple[_World, str, str]:
     _ = (world.state_dir() / PUBLISH_HEAD_STATE_FILENAME).write_text(published, encoding="utf-8")
     advanced = _advance_default(world=world, path=_SHARED_FILE, text="a conflicting default edit\n")
     return world, published, advanced
+
+
+def _refuse_pr_refresh_commit(*, world: _World) -> None:
+    """Make the rebase's own commit hook refuse with a target summary.
+
+    The pr_refresh stage must classify this positively from the hook's output.
+    A non-zero rebase with no conflicted path alone is deliberately
+    insufficient: an identity or signing failure still fails closed rather than
+    entering the repair loop.
+    """
+    hook = world.clone / ".git" / "hooks" / "prepare-commit-msg"
+    lines = [
+        "#!/bin/sh",
+    ]
+    lines.extend(f"printf 'hook-line-{number}\n' >&2" for number in range(1, 101))
+    lines.extend(
+        (
+            "printf 'error: hook-own-error-line\n' >&2",
+            "printf 'Failed targets (2):\n' >&2",
+            "printf '  - check-format\n' >&2",
+            "printf '  - check-types\n' >&2",
+            "exit 1",
+            "",
+        )
+    )
+    _ = hook.write_text("\n".join(lines), encoding="utf-8")
+    hook.chmod(0o755)
+
+
+def _hook_refused_pr_refresh_world(*, root: Path) -> tuple[_World, str, str]:
+    """Build a published run whose clean rebase will reach its commit hook."""
+    world = _world(root=root)
+    published = _commit(
+        cwd=world.clone,
+        path=_SHARED_FILE,
+        text="this run's edit\n",
+        subject="feat: edit the shared file",
+    )
+    _ = _git("push", "--quiet", "origin", f"HEAD:refs/heads/{_BRANCH}", cwd=world.clone)
+    world.state_dir().mkdir(parents=True, exist_ok=True)
+    _ = (world.state_dir() / PUBLISH_HEAD_STATE_FILENAME).write_text(published, encoding="utf-8")
+    advanced = _advance_default(world=world, path=_OWNED_FILE, text="the default's own file\n")
+    _refuse_pr_refresh_commit(world=world)
+    return world, published, advanced
+
+
+def test_a_hook_refused_pr_refresh_restores_and_records_the_hook_only_tail(tmp_path: Path) -> None:
+    """A clean hook refusal takes the same repair route as a refresh conflict."""
+    world, published, advanced = _hook_refused_pr_refresh_world(root=tmp_path)
+
+    result = subprocess.run(
+        ["bash", "-c", _pr_refresh_script(check_suite="true")],
+        cwd=world.clone,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            "PATH": f"{_unarmed_forge_bin(world=world)}:/usr/local/bin:/usr/bin:/bin",
+            "HOME": str(world.clone.parent / "home"),
+            "LIVESPEC_PUBLISH_BRANCH": _BRANCH,
+            "LIVESPEC_SANDBOX_GH_REFRESH_ROOT": str(world.clone.parent / "no-gh-refresh"),
+        },
+    )
+    assert result.returncode != 0, result.stdout
+    assert "LIVESPEC_REFRESH_REPAIR" in result.stderr, result.stderr
+    fields = _brief_fields(world=world)
+    assert world.head() == published
+    assert not (world.clone / ".git" / "rebase-merge").exists()
+    assert not (world.clone / ".git" / "rebase-apply").exists()
+    assert fields.get("stage") == "pr_refresh"
+    assert fields.get("pre-refresh-head") == published
+    assert fields.get("refresh-target") == advanced
+    assert fields.get("failed-hook-targets") == "check-format check-types"
+    brief = world.state(name=_BRIEF_FILENAME)
+    assert brief is not None
+    hook_tail = brief.split("hook-output-last-80-lines:\n", maxsplit=1)[1].splitlines()
+    assert hook_tail[0] == "hook-line-25"
+    assert hook_tail[-1] == "  - check-types"
+    assert len(hook_tail) == 80
+    assert "hook-line-100" in hook_tail
+    assert "error: hook-own-error-line" in hook_tail
+    assert "hook-line-24" not in hook_tail
+    assert "hook-line-1" not in hook_tail
+    assert world.state(name=_REPAIR_COUNT_FILENAME) == "1\n"
+    assert world.state(name=REFRESH_COUNT_STATE_FILENAME) == "1\n"
+
+    classifier = _run_refresh_repair(world=world)
+    assert classifier.returncode == 0, classifier.stderr
+    assert "LIVESPEC_REFRESH_REPAIR_PENDING" in classifier.stderr
 
 
 def test_a_conflicted_pr_refresh_restores_its_published_head_and_counts_a_refresh(
@@ -1138,9 +1328,11 @@ def test_a_repair_round_is_budgeted_apart_from_the_review_fix_rounds() -> None:
     The accounting paragraph says both halves and each needs its own instrument.
     `fix.max_visits` must ACCOMMODATE the two repair rounds in addition to what
     its other entry paths already allow, so the value is asserted as exactly two
-    apiece for the three agent-finding producers PLUS two -- an inequality would
-    be satisfied by a budget widened by any amount, including one that re-opened
-    the starvation the two-apiece sizing closed.
+    apiece for the three agent-finding producers PLUS two. The
+    `janitor_failure_route` only classifies the ordinary janitor failure and
+    therefore adds no allocation. An inequality would be satisfied by a budget
+    widened by any amount, including one that re-opened the starvation the
+    two-apiece sizing closed.
 
     And a refresh-repair round must consume no review-fix round. That is read as
     a REACHABILITY claim rather than from the two budgets alone: `review_fix` and
@@ -1158,7 +1350,10 @@ def test_a_repair_round_is_budgeted_apart_from_the_review_fix_rounds() -> None:
     }
 
     assert _REPAIR_NODE in producers
-    assert budgets["fix"] == 2 * len(producers - {_REPAIR_NODE}) + 2
+    assert (
+        budgets["fix"]
+        == 2 * len(producers - {_REPAIR_NODE, "janitor_failure_route", "fix_open_red_route"}) + 2
+    )
     assert budgets["disposition"] == 3
     assert budgets["review_fix"] == 3
     assert {destination for destination, _ in edges[_REPAIR_NODE]}.isdisjoint(
@@ -1658,3 +1853,122 @@ def test_the_fix_node_instructions_forbid_the_fix_turn_from_rewriting_any_ref() 
 
     assert "and rewrite no ref at all" in prose
     assert "rewrite no ref other than" not in prose
+
+
+_JANITOR_BRIEF = "LIVESPEC_REFRESH_REPAIR_BRIEF\nstage: janitor\n"
+
+
+def _run_janitor(*, repaired: _Repaired) -> subprocess.CompletedProcess[str]:
+    """The shipped `janitor` bytes, entered in the repaired world with a passing suite."""
+    graph = parse_dot_graph(text=_graph_text())
+    assert not isinstance(graph, str), graph
+    script: str = graph.nodes["janitor"]["script"]
+    plugins = repaired.plugins_root
+    gate = plugins / "livespec-run-plugin-gate.py"
+    _ = gate.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    gate.chmod(0o755)
+    _ = (plugins / RECORD_FILE_MERGE_PROGRAM_FILENAME).write_text(
+        record_file_merge_program_source(), encoding="utf-8"
+    )
+    return subprocess.run(
+        [
+            "sh",
+            "-c",
+            script.replace("{{ inputs.default_branch }}", _DEFAULT_BRANCH)
+            .replace("{{ inputs.sandbox_check_suite }}", "true")
+            .replace("{{ inputs.conformance_hook_install }}", "")
+            .replace(r"\"", '"'),
+        ],
+        cwd=repaired.world.clone,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            "PATH": f"{repaired.forge_bin}:/usr/local/bin:/usr/bin:/bin",
+            "HOME": str(repaired.world.clone.parent / "home"),
+            "LIVESPEC_PUBLISH_BRANCH": _BRANCH,
+            SANDBOX_CLAUDE_PLUGINS_ROOT_ENV_VAR: str(plugins),
+        },
+    )
+
+
+def _janitor_stage_repaired_run(*, root: Path) -> _Repaired:
+    """A repaired run whose repair brief was the JANITOR's, as the janitor leaves it.
+
+    The fix turn's integration is the same one the pr_refresh world performs;
+    only the brief it was entered with differs, and it is the brief the shipped
+    janitor visit that follows the fix then removes on entry.
+    """
+    repaired = _repaired_run(root=root, push_program=True)
+    state = repaired.world.state_dir()
+    _ = (state / _BRIEF_FILENAME).write_text(_JANITOR_BRIEF, encoding="utf-8")
+    _ = (state / _REPAIR_COUNT_FILENAME).write_text("1\n", encoding="utf-8")
+    return repaired
+
+
+def test_a_janitor_stage_repair_round_republishes_over_this_run_s_own_published_head(
+    tmp_path: Path,
+) -> None:
+    """The measured loss on bd-ib-ohlkz7: the janitor eats its own brief, publish_draft still knows.
+
+    The janitor visit that follows the fix turn removes the janitor-stage brief
+    on entry, so `publish_draft` cannot learn from the brief that it follows a
+    refresh-repair round. The marker the janitor leaves instead is CONSUMED by
+    the republishing visit: a second visit in the same run, reaching origin's
+    own recorded head again with a rewritten branch, must refuse.
+    """
+    repaired = _janitor_stage_repaired_run(root=tmp_path)
+    world = repaired.world
+
+    janitor = _run_janitor(repaired=repaired)
+    assert janitor.returncode == 0, janitor.stderr
+    assert world.state(name=_BRIEF_FILENAME) is None
+
+    result = _run_repaired_publish_draft(repaired=repaired)
+
+    assert result.returncode == 0, result.stderr
+    assert "LIVESPEC_PUBLISH_DRAFT_REPAIR_REPUBLISH" in result.stderr
+    assert world.remote_head(ref=_BRANCH) == repaired.repaired_head
+    assert world.state(name=PUBLISH_HEAD_STATE_FILENAME) == f"{repaired.repaired_head}\n"
+
+    _ = _git(
+        "commit", "--quiet", "--amend", "-m", "feat: rewritten after publication", cwd=world.clone
+    )
+    rewritten = world.head()
+    assert rewritten != repaired.repaired_head
+
+    again = _run_repaired_publish_draft(repaired=repaired)
+
+    assert again.returncode != 0, again.stdout
+    assert "LIVESPEC_PUBLISH_DRAFT_PUSH_FAILED" in again.stderr
+    assert "LIVESPEC_PUBLISH_DRAFT_REPAIR_REPUBLISH" not in again.stderr
+    assert world.remote_head(ref=_BRANCH) == repaired.repaired_head
+
+
+def test_a_review_fix_visit_after_an_earlier_janitor_repair_round_refuses_a_divergent_tip(
+    tmp_path: Path,
+) -> None:
+    """The cumulative repair count must not mark a later review-fix visit as a repair visit.
+
+    The run is in the state after an earlier janitor-stage repair round: the
+    repair count is above zero and a janitor visit has already removed that
+    round's brief. A later janitor visit, reached through a review-fix round,
+    enters with no brief at all, and the publish_draft visit that follows it
+    follows no refresh-repair round.
+    """
+    repaired = _janitor_stage_repaired_run(root=tmp_path)
+    world = repaired.world
+
+    first = _run_janitor(repaired=repaired)
+    assert first.returncode == 0, first.stderr
+    later = _run_janitor(repaired=repaired)
+    assert later.returncode == 0, later.stderr
+    assert world.state(name=_REPAIR_COUNT_FILENAME) == "1\n"
+
+    result = _run_repaired_publish_draft(repaired=repaired)
+
+    assert result.returncode != 0, result.stdout
+    assert "LIVESPEC_PUBLISH_DRAFT_PUSH_FAILED" in result.stderr
+    assert "LIVESPEC_PUBLISH_DRAFT_REPAIR_REPUBLISH" not in result.stderr
+    assert world.remote_head(ref=_BRANCH) == repaired.published_head
+    assert world.head() == repaired.repaired_head

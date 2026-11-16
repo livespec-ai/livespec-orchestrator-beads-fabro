@@ -45,7 +45,7 @@
 # env, and redacts long opaque token-shaped runs in any captured output.
 #
 # Required env, normally supplied by the dispatch TARGET's credential_wrapper
-# (the fleet's is /data/projects/1password-env-wrapper/with-livespec-env.sh;
+# (the fleet's is /usr/local/bin/with-livespec-env.sh;
 # an adopter target injects its own App env via its own wrapper — fail-closed,
 # no fleet fallback):
 #
@@ -130,7 +130,7 @@ Options:
   --poll-attempts N    Dispatcher PR-merge poll attempts. Default: 80.
 
 Required env, normally supplied by the dispatch TARGET's credential_wrapper
-(fleet targets: /data/projects/1password-env-wrapper/with-livespec-env.sh;
+(fleet targets: /usr/local/bin/with-livespec-env.sh;
 adopter targets inject their own GitHub App env — fail-closed, no fleet
 fallback):
 
@@ -224,7 +224,7 @@ stage_and_build_image() {
   [ -x "$HOST_FABRO_BIN" ] || fail "fabro binary not found at $HOST_FABRO_BIN"
   cp "$HOST_FABRO_BIN" "$HERE/fabro"
   chmod +x "$HERE/fabro"
-  "$HERE/fabro" version | head -1
+  "$HERE/fabro" version | sed -n '1p'
   # Stage the plugin scripts tree (mint-app-token CLI + package + vendored
   # runtime) into the build context; the Dockerfile bakes it at
   # /opt/livespec-orchestrator/scripts for the entrypoint's github provisioning.

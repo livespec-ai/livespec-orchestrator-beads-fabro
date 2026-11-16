@@ -70,9 +70,9 @@ filer who read the display finds the same sentence on the item.
 
 WHY THE GRADE IS SKIPPED WHEN THE CONNECTION DESCRIPTOR CARRIES NO `repo_root`.
 Both halves of the wall are graded against the governed spec tree, which lives
-in the repository: with no repository there is no tree, and an empty heading set
-is the absence of evidence rather than evidence that a reference is wrong (the
-reasoning `_dispatcher_definition_of_done_findings` records for the same read).
+in the repository: with no repository there is no tree to read `origin/master`
+from (the revision `_dispatcher_definition_of_done_findings` resolves References
+against), and so nothing to grade.
 The one verdict where that absence could matter is the `ready` approval, and
 that branch already raises `TypeError` on it, so nothing can reach `ready`
 ungraded.
@@ -108,6 +108,7 @@ from returns.unsafe import unsafe_perform_io
 
 from livespec_orchestrator_beads_fabro._beads_client import (
     EDGE_PARENT_CHILD,
+    BeadsClient,
     make_beads_client,
 )
 from livespec_orchestrator_beads_fabro._intake_factory_size_gate import (
@@ -142,11 +143,20 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_valves import (
     DEFAULT_ADMISSION_POLICY,
     effective_admission_policy,
 )
+from livespec_orchestrator_beads_fabro.commands._intake_valve_claim_writes import (
+    WRITER_INTAKE,
+    ClaimWrite,
+    ClaimWriteRefused,
+    resting_at,
+)
 from livespec_orchestrator_beads_fabro.commands._spec_change_tier_record import STAGE_FILING
 from livespec_orchestrator_beads_fabro.commands._spec_change_tier_wall import (
     classify_and_hold,
 )
 from livespec_orchestrator_beads_fabro.errors import WorkItemNotFoundError
+from livespec_orchestrator_beads_fabro.factory_safety import (
+    out_of_enum_factory_safety_finding,
+)
 from livespec_orchestrator_beads_fabro.store import (
     INTAKE_TRIAGED_LABEL,
     append_work_item,
@@ -272,7 +282,7 @@ def apply_intake_dor(
     path: StoreConfig,
     item_id: str,
     checklist: DefinitionOfReadyChecklist,
-) -> IOResult[Verdict, WorkItemNotFoundError | PolicySettingUnreadable]:
+) -> IOResult[Verdict, WorkItemNotFoundError | PolicySettingUnreadable | ClaimWriteRefused]:
     """Evaluate the checklist and route a filed item into its lifecycle state.
 
     An item the store does not hold is an EXPECTED failure and rides the
@@ -283,7 +293,9 @@ def apply_intake_dor(
 
     The Definition-of-Done findings are graded BEFORE the auto-admission step,
     because a mechanical one is what that step has to stop on, and they are
-    recorded on the item afterwards whatever the verdict was.
+    recorded on the item afterwards whatever the verdict was. A routing write
+    the claim-token protocol refuses (`_write_route`) rides the failure track
+    and records no finding.
     """
     client = make_beads_client(config=path)
     if not client.exists(issue_id=item_id):
@@ -299,6 +311,7 @@ def apply_intake_dor(
     verdict = evaluate(checklist=checklist)
     status = _routed_status(verdict=verdict, has_dependencies=bool(item.depends_on))
     findings = filing_findings(item=item, repo_root=path.repo_root)
+    factory_safety_finding = out_of_enum_factory_safety_finding(value=item.factory_safety)
     if status == _PENDING_APPROVAL_STATUS and not item.depends_on:
         repo_root = path.repo_root
         if repo_root is None:
@@ -359,6 +372,7 @@ def apply_intake_dor(
         if (
             policy == _AUTO_ADMISSION
             and not findings.withholds_ready
+            and factory_safety_finding is None
             and spec_change is None
             and not judge_item_definition_of_done(
                 item=item, repo=repo_root, path=path, stage=STAGE_PRE_ADMISSION
@@ -366,24 +380,16 @@ def apply_intake_dor(
         ):
             status = _READY_STATUS
 
-    # The triage marker is stamped for EVERY verdict, not just the routed-on
-    # ones: it records that the gate SAW this item, which is the only thing
-    # that distinguishes a deliberately-parked `backlog` epic from an item
-    # filed through a door the gate never guarded (see `_store_intake_triage`).
-    add_labels = [INTAKE_TRIAGED_LABEL]
-    if status == _BLOCKED_STATUS:
-        add_labels.append(_BLOCKED_REASON_LABEL)
-    remove_labels = list(_RETIRED_INTAKE_LABELS)
-    if status != _BLOCKED_STATUS:
-        remove_labels.append(_BLOCKED_REASON_LABEL)
-    client.update_issue(
-        issue_id=item_id,
-        status=status,
-        add_labels=add_labels,
-        remove_labels=remove_labels,
-    )
+    refused = _write_route(client=client, path=path, item=item, status=status)
+    if refused is not None:
+        return IOFailure(refused)
     for body in findings.comment_bodies():
         client.add_comment(issue_id=item_id, body=body)
+    _record_factory_safety_finding(
+        client=client,
+        item_id=item_id,
+        finding=factory_safety_finding,
+    )
     return IOSuccess(status)
 
 
@@ -394,7 +400,7 @@ def file_captured_work_item(
     checklist: DefinitionOfReadyChecklist,
     size_justification: object = None,
     plan_parent_id: str | None = None,
-) -> IOResult[Verdict, WorkItemNotFoundError | PolicySettingUnreadable]:
+) -> IOResult[Verdict, WorkItemNotFoundError | PolicySettingUnreadable | ClaimWriteRefused]:
     """Validate configuration, file one capture, then route it through intake.
 
     Configuration is resolved before the first ledger mutation.  The raw
@@ -428,3 +434,54 @@ def _routed_status(*, verdict: Verdict, has_dependencies: bool) -> Verdict:
     if has_dependencies and verdict == _PENDING_APPROVAL_STATUS:
         return _PENDING_APPROVAL_STATUS
     return verdict
+
+
+def _write_route(
+    *, client: BeadsClient, path: StoreConfig, item: WorkItem, status: Verdict
+) -> ClaimWriteRefused | None:
+    """Write the routed status with its labels; `None` when the write landed.
+
+    A claim-changing write (`SPECIFICATION/contracts.md`, "Claim tokens"): one
+    write either way, and once `dispatcher.claim_tokens` is true it is sent
+    only after the item's current token is won, and only while the item still
+    rests at the status intake read it at. A route that does not win has
+    written nothing, so it is a failure value naming the protocol's outcome
+    and not a status the item never reached.
+    """
+    # The triage marker is stamped for EVERY verdict, not just the routed-on
+    # ones: it records that the gate SAW this item, which is the only thing
+    # that distinguishes a deliberately-parked `backlog` epic from an item
+    # filed through a door the gate never guarded (see `_store_intake_triage`).
+    add_labels = [INTAKE_TRIAGED_LABEL]
+    if status == _BLOCKED_STATUS:
+        add_labels.append(_BLOCKED_REASON_LABEL)
+    remove_labels = list(_RETIRED_INTAKE_LABELS)
+    if status != _BLOCKED_STATUS:
+        remove_labels.append(_BLOCKED_REASON_LABEL)
+    route = ClaimWrite(
+        path=path,
+        item_id=item.id,
+        writer=WRITER_INTAKE,
+        intent=f"route:{status}",
+        still_as_decided=resting_at(status=item.status),
+    )
+    refusal = route.write_raw(
+        unguarded=lambda: client.update_issue(
+            issue_id=item.id, status=status, add_labels=add_labels, remove_labels=remove_labels
+        ),
+        status=status,
+        add_labels=add_labels,
+        remove_labels=remove_labels,
+    )
+    return None if refusal is None else route.refused(outcome=refusal)
+
+
+def _record_factory_safety_finding(
+    *, client: BeadsClient, item_id: str, finding: str | None
+) -> None:
+    """Persist the legacy-label finding beside the intake verdict when present."""
+    if finding is not None:
+        client.add_comment(
+            issue_id=item_id,
+            body=f"definition-of-done finding (mechanical): {finding}",
+        )

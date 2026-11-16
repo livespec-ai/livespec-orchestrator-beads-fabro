@@ -10,20 +10,30 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 
-from livespec_runtime.cross_repo.types import CrossRepoManifest, RefStatus
-from livespec_runtime.work_items.lifecycle import is_item_ready, ready_sort_key
+from livespec_runtime.work_items.lifecycle import ready_sort_key
 
 from livespec_orchestrator_beads_fabro.commands import _dispatcher_self_update as selfup
 from livespec_orchestrator_beads_fabro.commands._cross_repo import load_manifest
 from livespec_orchestrator_beads_fabro.commands._dispatcher_acceptance_result import (
     outcome_after_acceptance,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_already_satisfied import (
+    ALREADY_SATISFIED_STAGE,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_already_satisfied_rest import (
+    rest_already_satisfied,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_base_advance_record import (
     record_base_advanced_after_arming,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_base_advance_record_file_resume import (
+    release_overtaken_record_file_item,
+    resume_overtaken_record_files,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_calibration_emit import (
     emit_calibration,
@@ -39,11 +49,16 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
     MERGE_HELD_STAGE,
     DispatchOutcome,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_groom_door import groom_door_claimed
 from livespec_orchestrator_beads_fabro.commands._dispatcher_groom_park import record_groom_draft
 from livespec_orchestrator_beads_fabro.commands._dispatcher_invoker import invoker_from_args
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import JournalFile, utc_now_iso
 from livespec_orchestrator_beads_fabro.commands._dispatcher_ledger_close import load_items
+from livespec_orchestrator_beads_fabro.commands._dispatcher_lifecycle_writes import (
+    write_blocked_state_and_reconcile,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_merge_wait_handoff_record import (
+    record_merge_wait_handed_off,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_needs_human_cause import (
     record_needs_human_cause,
 )
@@ -71,8 +86,12 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_terminal_preservatio
 from livespec_orchestrator_beads_fabro.commands._dispatcher_terminal_routing import (
     dispose_terminal_routing,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_wip_capture_receipt import (
+    record_wip_capture_receipt,
+)
 from livespec_orchestrator_beads_fabro.commands._ready_aging_order import ready_aging_order
 from livespec_orchestrator_beads_fabro.commands._sibling_status_lookup import (
+    is_dispatch_candidate,
     make_sibling_status_lookup,
 )
 from livespec_orchestrator_beads_fabro.io import write_stderr
@@ -84,6 +103,7 @@ __all__: list[str] = [
     "livespec_config_text",
     "post_run_dispositions",
     "prepare",
+    "ready_item_ids",
     "ready_items",
     "run_id",
 ]
@@ -125,7 +145,7 @@ def prepare(
     return load_items(repo=repo), journal
 
 
-def ready_items(*, items: list[WorkItem], repo: Path) -> list[WorkItem]:
+def _dispatch_candidates(*, items: list[WorkItem], repo: Path) -> list[WorkItem]:
     index = {item.id: item for item in items}
     manifest = load_manifest(project_root=repo)
     # Build the cross-tenant sibling resolver ONCE per readiness pass and thread
@@ -134,7 +154,7 @@ def ready_items(*, items: list[WorkItem], repo: Path) -> list[WorkItem]:
     # (qiqz6b Part B). Lazy + memoized: it reads nothing unless an item actually
     # carries a sibling dependency.
     sibling_status_lookup = make_sibling_status_lookup(project_root=repo)
-    ready = [
+    return [
         item
         for item in items
         if is_dispatch_candidate(
@@ -145,6 +165,21 @@ def ready_items(*, items: list[WorkItem], repo: Path) -> list[WorkItem]:
             repo=repo,
         )
     ]
+
+
+def ready_item_ids(*, items: list[WorkItem], repo: Path) -> frozenset[str]:
+    """The ids `ready_items` returns, taken WITHOUT its ordering.
+
+    For a caller that asks set membership and discards the order. The ordering is
+    not free: its ready-age key reads the whole ledger for the ready-dwell instants,
+    so a membership question paid a whole-ledger dump and a parse for a sequence it
+    never looked at.
+    """
+    return frozenset(item.id for item in _dispatch_candidates(items=items, repo=repo))
+
+
+def ready_items(*, items: list[WorkItem], repo: Path) -> list[WorkItem]:
+    ready = _dispatch_candidates(items=items, repo=repo)
     # Compose the single canonical ranking authority so the Dispatcher's drain
     # order never diverges from what `next` advertises (i3jiny): the fractional
     # rank stays the sole primary key, with the equal-rank ready-age tiebreak
@@ -163,58 +198,6 @@ def ready_items(*, items: list[WorkItem], repo: Path) -> list[WorkItem]:
     )
 
 
-def is_dispatch_candidate(
-    *,
-    item: WorkItem,
-    index: dict[str, WorkItem],
-    manifest: CrossRepoManifest,
-    sibling_status_lookup: Callable[[str, str], RefStatus] | None = None,
-    repo: Path | None = None,
-) -> bool:
-    """Whether this row is one the Dispatcher may launch on this pass.
-
-    Three members, and the third is the narrow one: a `ready` row, a
-    `pending-approval` row whose dependencies are clear, and an `active` row
-    the GROOM DOOR itself claimed and pinned. The door opens `backlog ->
-    active` under a claim and a groom-variant pin and then returns, so without
-    the third arm the row it prepared is one no launch path can pick up — it
-    is not `ready`, so this predicate refused it, and the `--item` preflight
-    that consumes this predicate read the door's own claim as somebody else's
-    in-flight dispatch. `groom_door_claimed` owns that recognition, and it is
-    scoped to the door's own claim: an ordinary `active` row is unaffected, so
-    this is NOT a widening to `active` work in general. The status test that
-    scopes it stays INSIDE that predicate rather than being restated as a guard
-    here, so ONE module answers "is this the door's claim?" end to end.
-
-    `repo` is the target repository the claim and pin are read against; it
-    defaults, like `sibling_status_lookup`, to the working directory.
-    """
-    effective_repo = repo if repo is not None else Path.cwd()
-    effective_sibling_status_lookup = (
-        sibling_status_lookup
-        if sibling_status_lookup is not None
-        else make_sibling_status_lookup(project_root=effective_repo)
-    )
-    if is_item_ready(
-        item=item,
-        index=index,
-        manifest=manifest,
-        sibling_status_lookup=effective_sibling_status_lookup,
-    ):
-        return True
-    if groom_door_claimed(repo=effective_repo, item=item):
-        return True
-    if item.status != "pending-approval":
-        return False
-    ready_projection = replace(item, status="ready")
-    return is_item_ready(
-        item=ready_projection,
-        index=index,
-        manifest=manifest,
-        sibling_status_lookup=effective_sibling_status_lookup,
-    )
-
-
 def post_run_dispositions(  # noqa: PLR0913 — kw-only post-run stage; each field is an independent caller input.
     *,
     args: argparse.Namespace,
@@ -225,6 +208,7 @@ def post_run_dispositions(  # noqa: PLR0913 — kw-only post-run stage; each fie
     wall_clock_seconds: float,
     dispatch_context_size: int,
     token_supplier: Callable[[], str],
+    resume: Callable[..., DispatchOutcome] | None = None,
 ) -> DispatchOutcome:
     """Run the machine-path dispositions after a dispatch reaches its terminal.
 
@@ -248,7 +232,9 @@ def post_run_dispositions(  # noqa: PLR0913 — kw-only post-run stage; each fie
     # item into `acceptance` would accept unmerged work, and the item leaving
     # `active` would retract the attention row that keeps the hold visible; the
     # hold is released by a person, and the merge and this valve follow then.
-    if outcome.status == "green" and outcome.stage != MERGE_HELD_STAGE and args.close_on_merge:
+    if outcome.status == "green" and outcome.stage == ALREADY_SATISFIED_STAGE:
+        outcome = rest_already_satisfied(repo=repo, outcome=outcome, journal=journal)
+    elif outcome.status == "green" and outcome.stage != MERGE_HELD_STAGE and args.close_on_merge:
         outcome = outcome_after_acceptance(
             outcome=outcome,
             disposition=complete_and_accept(
@@ -258,6 +244,20 @@ def post_run_dispositions(  # noqa: PLR0913 — kw-only post-run stage; each fie
                 journal=journal,
             ),
         )
+    # An armed pull request the default branch overtook only in declared record
+    # files is journaled, resolved to `ready` and resumed in this invocation, so
+    # it never rests at needs-human and the steps below belong to the resumed
+    # dispatch, which runs them for its own terminal.
+    if resume is not None:
+        resumed = resume_overtaken_record_files(
+            outcome=outcome,
+            config_text=livespec_config_text(repo=repo),
+            journal=journal,
+            resolve_ready=partial(_release_for_resume, repo=repo, outcome=outcome, journal=journal),
+            resume=resume,
+        )
+        if resumed is not None:
+            return resumed
     record_provider_exhaustion_if_observed(
         outcome=outcome,
         journal=journal,
@@ -303,6 +303,11 @@ def post_run_dispositions(  # noqa: PLR0913 — kw-only post-run stage; each fie
     # is fail-soft — so the order decides only which account survives a partial
     # failure. A no-op for every outcome that is not this ending.
     record_base_advanced_after_arming(repo=repo, item=item, outcome=outcome, journal=journal)
+    # A handed-off merge wait leaves the item `active` under its claim, so there is
+    # no lifecycle write for this record to precede; it is the durable account of
+    # why the item is still active and no run is left. A no-op for every other
+    # outcome.
+    record_merge_wait_handed_off(repo=repo, item=item, outcome=outcome, journal=journal)
     if not groom_cut_filed:
         escalate_needs_human_block(repo=repo, item=item, outcome=outcome, journal=journal)
         # AFTER the escalation, because the escalation owns the lifecycle write
@@ -330,4 +335,41 @@ def post_run_dispositions(  # noqa: PLR0913 — kw-only post-run stage; each fie
         dispatch_context_size=dispatch_context_size,
         token_supplier=token_supplier,
     )
+    # LAST, so the forge read and ledger write sit behind every state change.
+    _record_wip_capture_receipt(args=args, repo=repo, item=item, outcome=outcome, journal=journal)
     return outcome
+
+
+def _record_wip_capture_receipt(
+    *,
+    args: argparse.Namespace,
+    repo: Path,
+    item: WorkItem,
+    outcome: DispatchOutcome,
+    journal: JournalFile,
+) -> None:
+    """Leave the recovery pointer for every ending that did not merge its pull request."""
+    if outcome.merge_sha is not None or outcome.fabro_run_id is None:
+        return
+    target = getattr(args, "fabro_factory_target", None)
+    factory = getattr(target, "name", None)
+    record_wip_capture_receipt(
+        repo=repo,
+        work_item_id=item.id,
+        run_id=outcome.fabro_run_id,
+        factory=factory if isinstance(factory, str) and factory else "an unread factory",
+        journal=journal,
+    )
+
+
+def _release_for_resume(
+    *, repo: Path, work_item_id: str, outcome: DispatchOutcome, journal: JournalFile
+) -> None:
+    """Journal the ended run's terminal, then resolve the item to `ready`."""
+    release_overtaken_record_file_item(
+        repo=repo,
+        work_item_id=work_item_id,
+        outcome=outcome,
+        journal=journal,
+        write_blocked_state=write_blocked_state_and_reconcile,
+    )

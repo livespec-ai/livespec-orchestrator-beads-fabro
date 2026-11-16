@@ -55,9 +55,16 @@ from livespec_orchestrator_beads_fabro.commands._node_timeouts import (
 )
 
 _BUNDLE = Path(".claude-plugin/.fabro/workflows/implement-work-item")
+# The split implement stage's ACP nodes, which share the `implement` layer key.
+_IMPLEMENT_STAGE_NODES = frozenset({"red", "green"})
 _VARIANT = Path(".fabro/workflows/groom-work-item")
 _PUBLISH = "publish_draft"
 _CAPTURE = "proof_capture"
+# The groom variant's reserved nodes are entered only through one edge from `start`
+# guarded by a context key the graph never sets: Petri's validator walks edges
+# without reading conditions and refuses an unreachable node, and the guard keeps
+# every run off the node (bd-ib-ttrjvj).
+_NEVER_ENTERED = 'condition="context.livespec_groom_reserved_entry=never"'
 _CAPTURE_ADAPTER_INPUT = "proof_capture_adapter"
 _ACP_BACKEND = 'backend="acp"'
 # A DOT node declaration: a name at the start of a line followed by its attribute
@@ -408,13 +415,21 @@ def test_the_registered_variant_declares_the_capture_node_and_leaves_it_unreache
     # through COMMAND stages and declares no ACP `pr` node, while the groom
     # variant keeps one for its filing plan. Read off the module that owns
     # that scoping rather than respelled here.
-    assert (
-        _acp_node_names(payload=_VARIANT) == _acp_node_names(payload=_BUNDLE) | GROOM_ONLY_ACP_NODES
-    )
+    # The bundle realizes the `implement` layer key as the split stage's `red`
+    # and `green` nodes (Scenario 285), which the groom variant's own working
+    # node `implement` answers, so parity is compared on the layer keys.
+    layer_keys = {
+        "implement" if node in _IMPLEMENT_STAGE_NODES else node
+        for node in _acp_node_names(payload=_BUNDLE)
+    }
+    assert _acp_node_names(payload=_VARIANT) == layer_keys | GROOM_ONLY_ACP_NODES
     assert re.search(
         rf'^\s*{_CAPTURE_ADAPTER_INPUT}\s*=\s*"', _toml(payload=_VARIANT), re.MULTILINE
     )
-    assert not any(_CAPTURE in edge for edge in _edges(text=_dot(payload=_VARIANT)))
+    edges = [edge for edge in _edges(text=_dot(payload=_VARIANT)) if _CAPTURE in edge]
+    assert len(edges) == 1, edges
+    assert edges[0].startswith(f"start -> {_CAPTURE}")
+    assert _NEVER_ENTERED in edges[0]
 
 
 def test_the_capture_prompt_authors_and_executes_steps_per_factory_captured_assertion() -> None:

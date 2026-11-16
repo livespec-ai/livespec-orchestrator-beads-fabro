@@ -10,6 +10,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import cast
 
+from livespec_orchestrator_beads_fabro._incident_repayment_scope import scrub_incident_flags
 from livespec_orchestrator_beads_fabro.commands import _dispatcher_factory_bin as factory_bin
 from livespec_orchestrator_beads_fabro.commands._config import (
     FactoryTarget,
@@ -39,7 +40,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_ledger_checks import
     run_ledger_checks,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_ledger_close import load_items
-from livespec_orchestrator_beads_fabro.commands._dispatcher_loop_selection import ready_items
+from livespec_orchestrator_beads_fabro.commands._dispatcher_loop_selection import ready_item_ids
 from livespec_orchestrator_beads_fabro.commands._dispatcher_orphaned_run_check import (
     orphaned_factory_run_findings,
 )
@@ -234,6 +235,12 @@ def dispatch_preamble(
     extensible by ratification: a fourth step should change the gate's own
     sequence, not this function.
     """
+    # A normal dispatch is never an incident execution: both incident flags
+    # leave this process's environment here, ahead of every provider selection
+    # and every sandbox, hook or pull-request subprocess, whatever value an
+    # inherited copy held. Removal is not parsing, so a malformed value is
+    # removed too rather than becoming a configuration error of a normal run.
+    _ = scrub_incident_flags(environ=os.environ)
     invoker_refusal = require_invoker_refusal(args=args, repo=repo)
     if invoker_refusal is not None:
         _ = write_stderr(text=invoker_refusal)
@@ -324,7 +331,7 @@ def requested_items_preflight_error(
             f"ERROR: work-item(s) {missing_text} not found in the target-tenant "
             f"({repo.name}); --target-repo and --item must reference the same tenant\n"
         )
-    eligible_ids = {item.id for item in ready_items(items=items, repo=repo)}
+    eligible_ids = ready_item_ids(items=items, repo=repo)
     eligible_ids |= rework_redispatch_eligible_ids(repo=repo, items=items, journal=journal)
     not_ready = requested_ids - eligible_ids
     if not_ready:

@@ -62,12 +62,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import cast
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done import (
     PROOF_MODE_HUMAN_ATTESTED,
     DefinitionOfDoneAssertion,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_host_build_identity import (
+    BuildIdentity,
     build_identity_in,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_record import (
@@ -82,18 +84,25 @@ from livespec_orchestrator_beads_fabro.commands._plan_proof_record import (
     PlanProofEntry,
     latest_plan_proof_entry,
 )
+from livespec_orchestrator_beads_fabro.commands._plan_release_components import artifact_paths_in
 from livespec_orchestrator_beads_fabro.commands._plan_release_repository import (
+    InvalidReleaseComponents,
+    ReleaseComponent,
     ReleaseReader,
+    ReleaseTags,
     UnreadableRelease,
 )
 
 __all__: list[str] = [
     "NOT_EVIDENCE_NO_RELEASE",
+    "NOT_EVIDENCE_RELEASE_COMPONENTS",
     "NOT_EVIDENCE_SELF_VERIFIED",
     "NOT_EVIDENCE_UNKNOWN_RELEASE",
     "NOT_EVIDENCE_UNREADABLE_RELEASE",
     "PlanProofLeg",
+    "StandingReplay",
     "plan_proof_leg",
+    "standing_replay",
 ]
 
 # The four ways a published plan record fails to be evidence. Each is a distinct
@@ -108,6 +117,7 @@ __all__: list[str] = [
 # operator told only that "a release applies" cannot tell whether the gate asked
 # about the repository they released from.
 NOT_EVIDENCE_NO_RELEASE = "states release none, and a release applies to its release repository"
+NOT_EVIDENCE_RELEASE_COMPONENTS = "has an invalid dispatcher.release_components declaration"
 NOT_EVIDENCE_UNKNOWN_RELEASE = "names a release tag its release repository does not carry"
 NOT_EVIDENCE_UNREADABLE_RELEASE = (
     "names a release repository whose release tags the gate could not read"
@@ -134,6 +144,15 @@ class PlanProofLeg:
         return not self.unproved
 
 
+@dataclass(frozen=True, kw_only=True)
+class StandingReplay:
+    """The replay that stands, or the later timeline fact that superseded it."""
+
+    replay: PlanProofEntry | None
+    later_capture: PlanProofEntry | None
+    carrier_map_position: int | None
+
+
 def plan_proof_leg(
     *,
     assertions: Sequence[DefinitionOfDoneAssertion],
@@ -153,12 +172,17 @@ def plan_proof_leg(
         (one, _rejection(entry=one, entries=entries, reader=release_reader)) for one in entries
     )
     evidence = tuple(one for one, rejection in judged if rejection is None)
+    standing = standing_replay(
+        entries=evidence,
+        timeline=entries,
+        carrier_map_position=carrier_map_position,
+    )
     fresh = tuple(
         one
         for one in evidence
         if carrier_map_position is None or one.position > carrier_map_position
     )
-    replay = _standing_replay(fresh=fresh, entries=entries)
+    replay = standing.replay
     attested = tuple(one for one in fresh if one.record.verdict == VERDICT_HUMAN_ATTESTED)
     unproved = tuple(
         one.text
@@ -176,9 +200,12 @@ def plan_proof_leg(
     )
 
 
-def _standing_replay(
-    *, fresh: Sequence[PlanProofEntry], entries: Sequence[PlanProofEntry]
-) -> PlanProofEntry | None:
+def standing_replay(
+    *,
+    entries: Sequence[PlanProofEntry],
+    timeline: Sequence[PlanProofEntry],
+    carrier_map_position: int | None,
+) -> StandingReplay:
     """The replay that decides the non-attested assertions, or `None` for none.
 
     Three conditions, all from the clause and all fail-closed: the LATEST replay
@@ -188,13 +215,19 @@ def _standing_replay(
     earlier `verified` one, because that would let a superseded replay hold an
     assertion proved after a later party reported it did not reproduce.
     """
-    replay = latest_plan_proof_entry(entries=fresh, verdicts=PLAN_REPLAY_VERDICTS)
+    replay = latest_plan_proof_entry(entries=entries, verdicts=PLAN_REPLAY_VERDICTS)
     if replay is None or replay.record.verdict != VERDICT_VERIFIED:
-        return None
-    capture = latest_plan_proof_entry(entries=entries, verdicts=(VERDICT_CAPTURED,))
+        return StandingReplay(replay=None, later_capture=None, carrier_map_position=None)
+    if carrier_map_position is not None and replay.position < carrier_map_position:
+        return StandingReplay(
+            replay=None,
+            later_capture=None,
+            carrier_map_position=carrier_map_position,
+        )
+    capture = latest_plan_proof_entry(entries=timeline, verdicts=(VERDICT_CAPTURED,))
     if capture is not None and replay.position < capture.position:
-        return None
-    return replay
+        return StandingReplay(replay=None, later_capture=capture, carrier_map_position=None)
+    return StandingReplay(replay=replay, later_capture=None, carrier_map_position=None)
 
 
 def _covered(
@@ -269,16 +302,121 @@ def _release_rejection(*, record: ProofRecord, reader: ReleaseReader) -> str | N
     reading brought back for this record's own repository.
     """
     reading = reader.reading(body=record.body)
+    if isinstance(reading, InvalidReleaseComponents):
+        return f"{NOT_EVIDENCE_RELEASE_COMPONENTS}: {reading.finding}"
     if isinstance(reading, UnreadableRelease):
         return f"{NOT_EVIDENCE_UNREADABLE_RELEASE}: {reading.failure}"
     if not reading.tags:
         return None
     build = build_identity_in(body=record.body)
     named = None if build is None else build.release_tag
+    if reading.components is not None:
+        return _component_release_rejection(
+            record=record, reading=reading, named=named, reader=reader
+        )
+    return _repository_release_rejection(reading=reading, named=named)
+
+
+def _repository_release_rejection(*, reading: ReleaseTags, named: str | None) -> str | None:
+    """Apply the original repository-wide release rule."""
     if named is None:
         return f"{NOT_EVIDENCE_NO_RELEASE} {reading.repository}"
     if named not in reading.tags:
         return f"{NOT_EVIDENCE_UNKNOWN_RELEASE}: {reading.repository} does not carry {named}"
+    return None
+
+
+def _component_release_rejection(
+    *, record: ProofRecord, reading: ReleaseTags, named: str | None, reader: ReleaseReader
+) -> str | None:
+    """Judge a governed repository's declaration without weakening the legacy rule."""
+    components = cast("tuple[ReleaseComponent, ...]", reading.components)
+    has_unowned_tag = any(
+        not any(tag.startswith(component.tag_prefix) for component in components)
+        for tag in reading.tags
+    )
+    paths = artifact_paths_in(body=record.body)
+    build = build_identity_in(body=record.body)
+    imported = (
+        () if build is None or build.imported_components is None else build.imported_components
+    )
+    if has_unowned_tag or (not paths and not imported):
+        # Imported code is judged even here: naming an unrelated tag does not
+        # exempt a component the record claims to have imported.
+        return _imported_component_rejection(
+            imported=imported,
+            components=components,
+            named=named,
+            reading=reading,
+            build=build,
+            reader=reader,
+        ) or _repository_release_rejection(reading=reading, named=named)
+    released = tuple(
+        component
+        for component in components
+        if any(tag.startswith(component.tag_prefix) for tag in reading.tags)
+        and (
+            component.name in imported
+            or any(path.startswith(prefix) for prefix in component.paths for path in paths)
+        )
+    )
+    if not released:
+        return _imported_component_rejection(
+            imported=imported,
+            components=components,
+            named=named,
+            reading=reading,
+            build=build,
+            reader=reader,
+        )
+    names = ", ".join(component.name for component in released)
+    if named is None:
+        return f"states release none, and a release applies to component {names}"
+    allowed = frozenset(
+        tag
+        for tag in reading.tags
+        if any(tag.startswith(component.tag_prefix) for component in released)
+    )
+    if named not in allowed:
+        return f"names a release tag no artifact component carries: {names} does not carry {named}"
+    return _imported_component_rejection(
+        imported=imported,
+        components=components,
+        named=named,
+        reading=reading,
+        build=build,
+        reader=reader,
+    )
+
+
+def _imported_component_rejection(
+    *,
+    imported: tuple[str, ...],
+    components: tuple[ReleaseComponent, ...],
+    named: str | None,
+    reading: ReleaseTags,
+    build: BuildIdentity | None,
+    reader: ReleaseReader,
+) -> str | None:
+    """Verify every imported component against the named release tree.
+
+    Imported code is intentionally judged before a record can fall through the
+    artifact-path rule: importing an undeclared component is itself a release
+    claim, even when no artifact path happens to select a component.
+    """
+    for component_name in imported:
+        component = next((one for one in components if one.name == component_name), None)
+        if component is None:
+            return f"names undeclared imported component {component_name}"
+        if named is None or named not in reading.tags or not named.startswith(component.tag_prefix):
+            return f"names no release tag owned by imported component {component_name}"
+        if build is None or build.commit is None:
+            return f"names no default-branch commit for imported component {component_name}"
+        difference = reader.component_tree_difference(
+            commit=build.commit, tag=named, component=component
+        )
+        if difference is not None:
+            return f"imported component {component_name} differs at {difference}"
     return None
 
 

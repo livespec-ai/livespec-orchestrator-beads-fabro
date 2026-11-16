@@ -30,10 +30,9 @@ import pytest
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dot_graph import parse_dot_graph
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plugin_cache_gate import (
     SANDBOX_CLAUDE_PLUGINS_ROOT_ENV_VAR,
-    plugin_cache_gate_prepare_step,
 )
 
-from tests.prepare_step_support import runnable_script
+from tests.prepare_step_support import plugin_gate_installer_script
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = (
@@ -45,6 +44,9 @@ _WORKFLOW = (
     / "workflow.fabro"
 )
 _CHECK_SUITE_TOKEN = "{{ inputs.sandbox_check_suite }}"
+_DEFAULT_BRANCH_TOKEN = "{{ inputs.default_branch }}"
+_CONFORMANCE_HOOK_INSTALL_TOKEN = "{{ inputs.conformance_hook_install }}"
+_DEFAULT_BRANCH = "master"
 
 
 def _janitor_script() -> str:
@@ -58,7 +60,11 @@ def _rendered_script(*, check_suite: str, shell_quoted_input: bool) -> str:
     script = _janitor_script()
     assert script.count(_CHECK_SUITE_TOKEN) == 1
     replacement = shlex.quote(check_suite) if shell_quoted_input else check_suite
-    return script.replace(_CHECK_SUITE_TOKEN, replacement)
+    return (
+        script.replace(_DEFAULT_BRANCH_TOKEN, _DEFAULT_BRANCH)
+        .replace(_CHECK_SUITE_TOKEN, replacement)
+        .replace(_CONFORMANCE_HOOK_INSTALL_TOKEN, "")
+    )
 
 
 def _check_suite(*, tmp_path: Path, body: str) -> Path:
@@ -78,10 +84,23 @@ def _plugins_root(*, tmp_path: Path) -> Path:
     """
     plugins_root = tmp_path / "plugins"
     plugins_root.mkdir()
-    installer = tmp_path / "install-plugin-gate.sh"
-    _ = installer.write_text(
-        runnable_script(step=plugin_cache_gate_prepare_step()), encoding="utf-8"
+    bin_dir = plugins_root / "bin"
+    bin_dir.mkdir()
+    git = bin_dir / "git"
+    _ = git.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -eu\n"
+        'case "${1:-}" in\n'
+        "  fetch|rebase) exit 0 ;;\n"
+        "  rev-parse)\n"
+        "    if test \"${2:-}\" = --git-path; then printf '%s\\n' \"$PWD/.git/${3:?}\"; else printf '%s\\n' test-head; fi ;;\n"
+        "  *) printf 'unexpected git argv: %s\\n' \"$*\" >&2; exit 1 ;;\n"
+        "esac\n",
+        encoding="utf-8",
     )
+    git.chmod(0o755)
+    installer = tmp_path / "install-plugin-gate.sh"
+    _ = installer.write_text(plugin_gate_installer_script(), encoding="utf-8")
     _ = subprocess.run(
         ["bash", str(installer)],
         check=True,
@@ -101,7 +120,7 @@ def _env(
     `COV_CORE_*` by construction and no child self-instruments.
     """
     return {
-        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "PATH": f"{plugins_root / 'bin'}:/usr/local/bin:/usr/bin:/bin",
         "HOME": str(tmp_path / "home"),
         SANDBOX_CLAUDE_PLUGINS_ROOT_ENV_VAR: str(plugins_root),
         **(extra or {}),
@@ -124,6 +143,7 @@ def _run(
         ],
         check=False,
         capture_output=True,
+        cwd=tmp_path,
         env=_env(tmp_path=tmp_path, plugins_root=plugins_root, extra=extra_env),
         text=True,
     )

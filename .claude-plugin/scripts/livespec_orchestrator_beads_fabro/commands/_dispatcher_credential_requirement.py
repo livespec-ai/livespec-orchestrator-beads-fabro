@@ -70,7 +70,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -85,15 +85,18 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_allowance
 from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_deadline import (
     CredentialLifetimeRequirement,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_queue_allowance import (
-    credential_queue_allowance_from_block,
+from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_graph_inputs import (
+    effective_graph_inputs,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_window import (
-    credential_use_window_seconds,
+from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_requirement_types import (
+    WorkflowFaultDeferral,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_window_use import (
+    credential_use_window,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_execution_budget import execution_budget
-from livespec_orchestrator_beads_fabro.commands._dispatcher_integration_projection import (
-    workflow_declared_inputs,
+from livespec_orchestrator_beads_fabro.commands._dispatcher_graph_render import (
+    render_workflow_graph,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_overlay import (
     workflow_graph_path,
@@ -109,10 +112,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_policy_settings impo
 from livespec_orchestrator_beads_fabro.commands._dispatcher_projection import (
     CODEX_FRESHNESS_MARGIN_SECONDS,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget import (
-    run_wall_budget_from_block,
+from livespec_orchestrator_beads_fabro.commands._node_timeouts import (
+    node_timeouts_from_block,
+    node_timeouts_with_arguments,
 )
-from livespec_orchestrator_beads_fabro.commands._node_timeouts import node_timeouts_from_block
 from livespec_orchestrator_beads_fabro.commands._workflow_variants import (
     RESERVED_WORKFLOW_NAME,
     workflow_variant_from_block,
@@ -128,44 +131,6 @@ __all__: list[str] = [
     "requirement_refusal_text",
     "resolve_credential_lifetime_requirement",
 ]
-
-
-@dataclass(frozen=True, kw_only=True)
-class WorkflowFaultDeferral:
-    """A requirement unresolvable because the WORKFLOW ITSELF is faulty.
-
-    Returned INSTEAD of a refusal string when the reason no allowance could be
-    derived is that the selected workflow is unregistered, unreadable, declares
-    no graph, or carries an invalid node timeout -- faults that a LATER, more
-    specific dispatch stage already owns and already reports with its own
-    diagnostic and its own exit code.
-
-    WHY THIS IS A SEPARATE TYPE rather than a string the caller inspects. The
-    credential wall runs EARLY, so when it treated these faults as its own
-    refusal it answered FIRST and the owning stage never spoke: Scenario 89's
-    invalid node timeout reported a credential refusal at
-    `EXIT_PRECONDITION_ERROR` instead of a timeout refusal at the dispatch exit
-    code, and a registry fault wrote no outcome record at all because the wall
-    returned before the stage that writes one. The fault was never a credential
-    fault; the credential derivation merely NOTICED it first. Discriminating by
-    substring over the refusal prose would make the classification a property of
-    wording that any later edit silently breaks, which is the same defect class
-    as deriving a bound from a graph comment -- so the class is decided AT THE
-    SITE THAT KNOWS IT and carried in the type.
-
-    DEFERRING HERE CANNOT ADMIT UNGRADED CREDENTIAL USE, which is the property
-    that makes it safe rather than merely quieter. Every fault routed this way is
-    a fault in the workflow configuration a dispatch must read before it can
-    launch anything, so the owning stage refuses BEFORE any Fabro run exists and
-    no credential is ever projected into a sandbox -- which is exactly what the
-    two scenario tests guarding this assert by name ("refuses before any run
-    exists"). A bound that genuinely cannot be established for a READABLE,
-    well-formed workflow -- an unbounded cycle, an unknown `retry_policy`, an
-    unparseable checkpoint declaration -- is NOT routed here: it stays a refusal
-    string and still refuses at the gate, which is what preserves Scenario 19.
-    """
-
-    message: str
 
 
 # The ONE policy input the shipped graph's own edge guards read. Named rather
@@ -273,6 +238,7 @@ def resolve_credential_lifetime_requirement(
     workflow_override: str | None = None,
     workflow_name: str | None = None,
     policy_inputs: Mapping[str, int] | None = None,
+    node_timeout_arguments: tuple[str, ...] = (),
 ) -> CredentialLifetimeRequirement | str | WorkflowFaultDeferral:
     """Resolve the requirement for the workflow THIS dispatch selected, or refuse.
 
@@ -308,6 +274,7 @@ def resolve_credential_lifetime_requirement(
         block=block,
         workflow_name=variant.name,
         policy_inputs=policy_inputs,
+        node_timeout_arguments=node_timeout_arguments,
     )
 
 
@@ -317,6 +284,7 @@ def credential_lifetime_requirement_for(
     block: dict[str, Any],
     workflow_name: str = RESERVED_WORKFLOW_NAME,
     policy_inputs: Mapping[str, int] | None = None,
+    node_timeout_arguments: tuple[str, ...] = (),
 ) -> CredentialLifetimeRequirement | str | WorkflowFaultDeferral:
     """The requirement for an ALREADY-RESOLVED committed workflow, or a refusal.
 
@@ -361,6 +329,7 @@ def credential_lifetime_requirement_for(
         block=block,
         workflow_name=workflow_name,
         policy_inputs=policy_inputs,
+        node_timeout_arguments=node_timeout_arguments,
     )
 
 
@@ -371,9 +340,18 @@ def _requirement_from_graph(
     block: dict[str, Any],
     workflow_name: str,
     policy_inputs: Mapping[str, int] | None,
+    node_timeout_arguments: tuple[str, ...],
 ) -> CredentialLifetimeRequirement | str | WorkflowFaultDeferral:
     """Compose the allowance from the graph, the timeouts and the checkpoint."""
-    timeouts = node_timeouts_from_block(block=block)
+    configured = node_timeouts_from_block(block=block)
+    # The per-dispatch `--node-timeout` layer is applied here exactly as the
+    # payload applies it, so the allowance is computed from the same per-node
+    # values the rendered graph carries.
+    timeouts = (
+        configured
+        if isinstance(configured, str)
+        else node_timeouts_with_arguments(timeouts=configured, arguments=node_timeout_arguments)
+    )
     if isinstance(timeouts, str):
         # The node-timeout validator OWNS this diagnostic and refuses at its own
         # stage with its own exit code (Scenario 89); the credential derivation
@@ -381,17 +359,22 @@ def _requirement_from_graph(
         return WorkflowFaultDeferral(
             message=f"credential lifetime requirement unresolved: {timeouts}"
         )
-    window = _credential_use_window(block=block)
+    rendered = render_workflow_graph(committed_text=graph_text, timeouts=timeouts)
+    if isinstance(rendered, str):
+        return WorkflowFaultDeferral(
+            message=f"credential lifetime requirement unresolved: {rendered}"
+        )
+    window = credential_use_window(block=block)
     if isinstance(window, WorkflowFaultDeferral):
         return window
     commit_timeout = commit_timeout_seconds(committed_text=committed_text)
     if isinstance(commit_timeout, str):
         return commit_timeout
     overhead = per_attempt_overhead_seconds(commit_timeout_seconds=commit_timeout)
-    inputs = _graph_inputs(committed_text=committed_text, policy_inputs=policy_inputs)
+    inputs = effective_graph_inputs(committed_text=committed_text, policy_inputs=policy_inputs)
     budget = execution_budget(
-        graph_text=graph_text,
-        timeouts=timeouts,
+        graph_text=rendered.text,
+        timeouts=rendered.timeouts,
         per_attempt_overhead_seconds=overhead,
         graph_inputs=inputs,
     )
@@ -422,77 +405,6 @@ def _requirement_from_graph(
             inputs=inputs,
         ),
     )
-
-
-@dataclass(frozen=True, kw_only=True)
-class _CredentialUseWindow:
-    """The window and the queue half of it, resolved from one read of the block.
-
-    Both halves travel together because the status surfaces report queue time
-    consumed against the queue allowance while the gate enforces the window, and
-    a reader cannot recover an addend from a sum.
-    """
-
-    window_seconds: int
-    queue_allowance_seconds: int
-
-
-def _credential_use_window(
-    *, block: dict[str, Any]
-) -> _CredentialUseWindow | WorkflowFaultDeferral:
-    """The bounded credential-use window for this dispatch, or the owning fault.
-
-    BOTH keys are resolved from the SAME block read the node timeouts came from,
-    for the reason `prepare_workflow_payload` reads them together: the two
-    figures are summed into one bound, and two reads of the same configuration
-    could produce a window neither key's refusal would describe.
-
-    A malformed value is a `WorkflowFaultDeferral` rather than a credential
-    refusal, which is the same routing `node_timeouts_from_block`'s refusal
-    takes one function up and for the same reason: the dispatch-admission stage
-    OWNS both keys, refuses them with its own diagnostic before any run exists,
-    and a credential wall answering first leaves that stage silent.
-    """
-    queue_allowance = credential_queue_allowance_from_block(block=block)
-    if isinstance(queue_allowance, str):
-        return WorkflowFaultDeferral(
-            message=f"credential lifetime requirement unresolved: {queue_allowance}"
-        )
-    wall_budget = run_wall_budget_from_block(block=block)
-    if isinstance(wall_budget, str):
-        return WorkflowFaultDeferral(
-            message=f"credential lifetime requirement unresolved: {wall_budget}"
-        )
-    return _CredentialUseWindow(
-        window_seconds=credential_use_window_seconds(
-            queue_allowance_seconds=queue_allowance.seconds,
-            run_wall_budget_seconds=int(wall_budget.seconds),
-        ),
-        queue_allowance_seconds=queue_allowance.seconds,
-    )
-
-
-def _graph_inputs(
-    *, committed_text: str, policy_inputs: Mapping[str, int] | None
-) -> dict[str, int]:
-    """The integer graph inputs this dispatch RENDERS, for its templated guards.
-
-    The committed `[run.inputs]` defaults are the base, and the caller's
-    EFFECTIVE policy inputs override them -- that direction, because the
-    Dispatcher's rendered value is what the run receives and the committed
-    default is only what a bare `fabro run` would see. Reading the default where
-    the dispatch renders something wider would describe a smaller loop than the
-    run gets, silently and with a well-formed figure.
-
-    An input neither source names leaves its edge UNGUARDED, which
-    `execution_budget` treats as the conservative direction.
-    """
-    declared = {
-        name: int(value.strip())
-        for name, value in workflow_declared_inputs(committed_text=committed_text).items()
-        if value.strip().isdigit()
-    }
-    return declared if policy_inputs is None else {**declared, **policy_inputs}
 
 
 def _unregistered_variant_refusal(*, name: str) -> WorkflowFaultDeferral:

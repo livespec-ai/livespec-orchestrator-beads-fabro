@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install the `reconcile-runs` systemd service + timer on a dispatching host.
+# Install the `reconcile-runs` systemd service + timer, and the tenant
+# credential wrapper the service runs through, on a dispatching host.
 #
 # The refusal below is the whole point of having an installer rather than a
 # `cp`. `bd` reads the tenant password from a bare `BEADS_DOLT_PASSWORD` that
@@ -13,8 +14,12 @@
 #   sudo ./install.sh --repo <primary-checkout> [--plugin-root <dir>] [--user <name>]
 #
 # Environment overrides (all optional, all for testing or a non-standard host):
-#   LIVESPEC_ENV_WRAPPER  wrapper path to require AND to write into ExecStart
-#                         (default: the path the committed unit already names)
+#   LIVESPEC_ENV_WRAPPER  family wrapper path to require AND to write into the
+#                         installed tenant wrapper (default: the path the
+#                         committed tenant-wrap.sh already names)
+#   LIVESPEC_TENANT_WRAP  where the tenant wrapper is installed, AND the path
+#                         written into ExecStart (default: the path the
+#                         committed unit already names)
 #   UNIT_DIR              where the units are written (default /etc/systemd/system)
 #   DRY_RUN=1             render and write the units, but run no systemctl
 
@@ -27,12 +32,41 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly HERE
 readonly SERVICE_TEMPLATE="${HERE}/reconcile-runs.service"
 readonly TIMER_TEMPLATE="${HERE}/reconcile-runs.timer"
+readonly TENANT_WRAP_SOURCE="${HERE}/tenant-wrap.sh"
+# The override this installer's committed unit replaces (bd-ib-ft426g). Its
+# ExecStart pinned a plugin root and repository at the time it was written, so
+# leaving it in place would keep overriding every later install.
+readonly SUPERSEDED_DROP_IN="reconcile-runs.service.d/60-tenant-wrap.conf"
 
-# The wrapper the committed unit names, read OUT of that unit rather than
-# repeated here: a second copy of the path is a second thing to keep in sync,
-# and the one that drifts is always the one nobody reads.
+# Both paths are read OUT of the committed files rather than repeated here: a
+# second copy of a path is a second thing to keep in sync, and the one that
+# drifts is always the one nobody reads.
+#
+# The tenant wrapper's install path: the command the committed unit's ExecStart
+# runs.
+default_tenant_wrap() {
+  sed -n 's|^ExecStart=\([^ ]*\) --.*|\1|p' "${SERVICE_TEMPLATE}" | sed -n '1p'
+}
+
+# The family wrapper the tenant wrapper runs everything inside: the default of
+# its single `family="${TW_FAMILY_WRAPPER:-<path>}"` line.
 default_env_wrapper() {
-  sed -n 's|^ExecStart=\([^ ]*\) --.*|\1|p' "${SERVICE_TEMPLATE}" | head -n 1
+  sed -n 's|^family="${TW_FAMILY_WRAPPER:-\(.*\)}"$|\1|p' "${TENANT_WRAP_SOURCE}" | sed -n '1p'
+}
+
+# Write the tenant wrapper with the family wrapper's default path substituted,
+# through a temporary file renamed into place: bash reads a running script as it
+# goes, so rewriting the file a pass is executing in place could corrupt that
+# pass. With the default path the substitution changes nothing, so the installed
+# body is the committed body.
+install_tenant_wrap() {
+  local env_wrapper="$1" dest="$2" tmp
+  mkdir -p "$(dirname "${dest}")"
+  tmp="$(mktemp "${dest}.XXXXXX")"
+  sed -e 's|^family="${TW_FAMILY_WRAPPER:-.*}"$|family="${TW_FAMILY_WRAPPER:-'"${env_wrapper}"'}"|' \
+    "${TENANT_WRAP_SOURCE}" >"${tmp}"
+  chmod 0755 "${tmp}"
+  mv -f "${tmp}" "${dest}"
 }
 
 usage() {
@@ -63,9 +97,10 @@ main() {
     return "${EX_CONFIG}"
   fi
 
-  local template_wrapper env_wrapper
-  template_wrapper="$(default_env_wrapper)"
-  env_wrapper="${LIVESPEC_ENV_WRAPPER:-${template_wrapper}}"
+  local env_wrapper template_tenant_wrap tenant_wrap
+  env_wrapper="${LIVESPEC_ENV_WRAPPER:-$(default_env_wrapper)}"
+  template_tenant_wrap="$(default_tenant_wrap)"
+  tenant_wrap="${LIVESPEC_TENANT_WRAP:-${template_tenant_wrap}}"
   if [[ ! -x "${env_wrapper}" ]]; then
     printf 'ERROR: project env wrapper not executable: %s\n' "${env_wrapper}" >&2
     printf 'The timer would run `bd` without BEADS_DOLT_PASSWORD and fail every pass as\n' >&2
@@ -79,14 +114,21 @@ main() {
   local unit_dir="${UNIT_DIR:-/etc/systemd/system}"
   mkdir -p "${unit_dir}"
 
+  install_tenant_wrap "${env_wrapper}" "${tenant_wrap}"
+  printf 'installed %s\n' "${tenant_wrap}"
   sed \
     -e "s|@PLUGIN_ROOT@|${plugin_root}|g" \
     -e "s|@PRIMARY_REPO@|${repo}|g" \
     -e "s|@RUN_AS_USER@|${run_as_user}|g" \
-    -e "s|${template_wrapper}|${env_wrapper}|g" \
+    -e "s|^ExecStart=${template_tenant_wrap} |ExecStart=${tenant_wrap} |" \
     "${SERVICE_TEMPLATE}" >"${unit_dir}/reconcile-runs.service"
   cp "${TIMER_TEMPLATE}" "${unit_dir}/reconcile-runs.timer"
   printf 'installed %s/reconcile-runs.{service,timer}\n' "${unit_dir}"
+  if [[ -e "${unit_dir}/${SUPERSEDED_DROP_IN}" ]]; then
+    rm -f "${unit_dir}/${SUPERSEDED_DROP_IN}"
+    rmdir "${unit_dir}/reconcile-runs.service.d" 2>/dev/null || true
+    printf 'removed superseded drop-in %s/%s\n' "${unit_dir}" "${SUPERSEDED_DROP_IN}"
+  fi
 
   if [[ "${DRY_RUN:-}" == "1" ]]; then
     printf 'DRY_RUN=1: skipping systemctl daemon-reload / enable --now\n'

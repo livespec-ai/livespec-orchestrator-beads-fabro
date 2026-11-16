@@ -1,0 +1,624 @@
+"""`dev-tooling/preserve/preserve_runs.sh` on a container worker node (livespec-dev-tooling-smzkpu).
+
+A container worker (`homelab-worker.livespec.dev/class=worker`) runs plain containerd and takes no ssh
+login, so the script reads its sandbox through `kubectl exec` on the control node rather than through
+ssh and `k3s crictl` on the node itself (legacy-coordinator-agent ruling, 2026-11-09). These run the
+real script under bash against stub `ssh`, `sudo` and `k3s` commands. The stub `k3s kubectl exec` runs
+the sandbox command against a local workspace standing in for the pod's `/workspace`, and the run's
+origin is a local bare repository reached through `url.<base>.insteadOf`, so nothing leaves the host.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shlex
+import stat
+import subprocess
+from pathlib import Path
+
+__all__: list[str] = []
+
+_SCRIPT = Path(__file__).resolve().parents[3] / "dev-tooling" / "preserve" / "preserve_runs.sh"
+_RUN = "01TESTRUN0000000000000000AB"
+_POD = "petri-01testrun-l0"
+_WORKER = "alpha-homelab-worker"
+_URL = "https://github.com/acme/widget"
+
+_SSH = """#!/bin/bash
+# Stub ssh: drop options, log `<host> <command>`, run the command locally.
+no_stdin=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -n) no_stdin=1; shift ;;
+    -o) shift 2 ;;
+    *) break ;;
+  esac
+done
+host=$1; shift
+printf '%s %s\\n' "$host" "$*" >> "$STUB_LOG"
+[ "$no_stdin" = 1 ] && exec bash -c "$*" < /dev/null
+exec bash -c "$*"
+"""
+
+_SUDO = """#!/bin/bash
+[ "$1" = -n ] && shift
+exec "$@"
+"""
+
+_K3S = """#!/bin/bash
+# Stub `k3s kubectl`: answers get pods and get nodes, and runs exec against the stand-in workspace.
+if [ "$1" = crictl ]; then
+  printf 'crictl %s\\n' "$*" >> "$STUB_LOG"
+  exit 98
+fi
+shift
+case "$1 $2" in
+  "get pods") cat "$PODS_JSON"; exit 0 ;;
+  "get nodes") printf '%s' "$WORKER_NODES"; exit 0 ;;
+esac
+if [ "$1" = exec ]; then
+  while [ $# -gt 0 ] && [ "$1" != -- ]; do shift; done
+  shift
+  [ "$1" = sh ] && [ "$2" = -c ] || exit 97
+  printf 'exec %s\\n' "$3" >> "$STUB_LOG"
+  case "$3" in *"dd if="*)
+    if [ -n "$STUB_RESET_ONCE" ] && [ ! -e "$STUB_RESET_ONCE" ]; then
+      : > "$STUB_RESET_ONCE"
+      sh -c "${3//\\/workspace/$SANDBOX_ROOT/workspace}" | head -c 1000
+      exit 1
+    fi ;;
+  esac
+  exec sh -c "${3//\\/workspace/$SANDBOX_ROOT/workspace}"
+fi
+exit 99
+"""
+
+
+def _git(*args: str, cwd: Path) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _stub(bin_dir: Path, name: str, body: str) -> None:
+    path = bin_dir / name
+    path.write_text(body, encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def _make_repos(tmp_path: Path) -> tuple[Path, str]:
+    """A bare origin, and a sandbox workspace whose run branch carries one commit of work."""
+    origin = tmp_path / "origin.git"
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    _git("init", "-q", "-b", "master", cwd=seed)
+    _git("config", "user.email", "t@example.invalid", cwd=seed)
+    _git("config", "user.name", "t", cwd=seed)
+    (seed / "README").write_text("base\n", encoding="utf-8")
+    _git("add", "README", cwd=seed)
+    _git("commit", "-q", "-m", "base", cwd=seed)
+    subprocess.run(["git", "clone", "-q", "--bare", str(seed), str(origin)], check=True)
+
+    workspace = tmp_path / "sandbox" / "workspace"
+    subprocess.run(["git", "clone", "-q", str(origin), str(workspace)], check=True)
+    _git("config", "user.email", "t@example.invalid", cwd=workspace)
+    _git("config", "user.name", "t", cwd=workspace)
+    _git("checkout", "-q", "-b", f"fabro/run/{_RUN}", cwd=workspace)
+    (workspace / "work.txt").write_text("the run's work\n", encoding="utf-8")
+    _git("add", "work.txt", cwd=workspace)
+    _git("commit", "-q", "-m", "work", cwd=workspace)
+    work_sha = _git("rev-parse", "HEAD", cwd=workspace)
+    _git("config", "remote.origin.url", f"{_URL}.git", cwd=workspace)
+    _git("config", "livespec.factoryRunId", "dispatch-1", cwd=workspace)
+
+    return origin, work_sha
+
+
+def _make_stubs(tmp_path: Path) -> Path:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _stub(bin_dir, "ssh", _SSH)
+    _stub(bin_dir, "sudo", _SUDO)
+    _stub(bin_dir, "k3s", _K3S)
+    return bin_dir
+
+
+def _setup(tmp_path: Path, *, worker_nodes: str) -> tuple[dict[str, str], Path, str]:
+    origin, work_sha = _make_repos(tmp_path)
+    bin_dir = _make_stubs(tmp_path)
+    pods = tmp_path / "pods.json"
+    pods.write_text(
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "metadata": {"name": _POD, "labels": {"petri.run": _RUN}},
+                        "spec": {"nodeName": _WORKER},
+                        "status": {"phase": "Running"},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    log = tmp_path / "calls.log"
+    log.write_text("", encoding="utf-8")
+    env = {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(tmp_path),
+        "TMPDIR": str(tmp_path),
+        "STUB_LOG": str(log),
+        "PODS_JSON": str(pods),
+        "WORKER_NODES": worker_nodes,
+        "SANDBOX_ROOT": str(tmp_path / "sandbox"),
+        "PRESERVE_WORK": str(tmp_path / "work"),
+        "PRESERVE_REPOS": _URL,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": f"url.{origin}.insteadOf",
+        "GIT_CONFIG_VALUE_0": _URL,
+    }
+    return env, origin, work_sha
+
+
+def _run(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["/bin/bash", str(_SCRIPT), _RUN],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+        timeout=120,
+    )
+
+
+def test_a_worker_nodes_run_is_preserved_through_kubectl_exec(tmp_path: Path) -> None:
+    env, origin, work_sha = _setup(tmp_path, worker_nodes=_WORKER)
+    result = _run(env)
+    assert result.returncode == 0, result.stderr
+    [row] = [line.split("\t") for line in result.stdout.splitlines()[1:]]
+    assert row[0] == _RUN and row[1] == _WORKER
+    assert row[5] == "VERIFIED", result.stdout + result.stderr
+    assert row[3] == work_sha and row[7] == "tip"
+    assert _git("rev-parse", f"refs/heads/preserve/run-{_RUN}", cwd=origin) == work_sha
+    assert not (Path(env["PRESERVE_WORK"]) / f"{_RUN}.git").exists()
+
+
+def test_a_worker_node_is_never_reached_over_ssh_or_crictl(tmp_path: Path) -> None:
+    env, _, _ = _setup(tmp_path, worker_nodes=_WORKER)
+    result = _run(env)
+    assert result.returncode == 0, result.stderr
+    calls = Path(env["STUB_LOG"]).read_text(encoding="utf-8").splitlines()
+    assert not [c for c in calls if c.startswith(f"{_WORKER} ")]
+    assert not [c for c in calls if c.startswith("crictl ")]
+    assert [c for c in calls if c.startswith("exec ")]
+
+
+def test_a_kept_copy_is_retried_before_any_pod_and_removed_after_readback(
+    tmp_path: Path,
+) -> None:
+    env, origin, work_sha = _setup(tmp_path, worker_nodes=_WORKER)
+    Path(env["PODS_JSON"]).write_text('{"items": []}', encoding="utf-8")
+    copy = Path(env["PRESERVE_WORK"]) / f"{_RUN}.git"
+    copy.parent.mkdir()
+    subprocess.run(
+        ["git", "clone", "-q", "--bare", str(tmp_path / "sandbox" / "workspace"), str(copy)],
+        check=True,
+    )
+    (Path(f"{copy}.preserve")).write_text(
+        f"repo={_URL}\nref=refs/heads/preserve/run-{_RUN}\nsha={work_sha}\n",
+        encoding="utf-8",
+    )
+
+    result = _run(env)
+
+    assert result.returncode == 0, result.stderr
+    assert _git("rev-parse", f"refs/heads/preserve/run-{_RUN}", cwd=origin) == work_sha
+    assert not copy.exists()
+    assert not Path(f"{copy}.preserve").exists()
+
+
+def test_a_kept_copy_with_a_missing_object_is_not_replaced_by_its_live_pod(
+    tmp_path: Path,
+) -> None:
+    env, _, _ = _setup(tmp_path, worker_nodes=_WORKER)
+    copy = Path(env["PRESERVE_WORK"]) / f"{_RUN}.git"
+    copy.parent.mkdir()
+    subprocess.run(
+        ["git", "clone", "-q", "--bare", str(tmp_path / "sandbox" / "workspace"), str(copy)],
+        check=True,
+    )
+    (Path(f"{copy}.preserve")).write_text(
+        f"repo={_URL}\nref=refs/heads/preserve/run-{_RUN}\nsha={'0' * 40}\n",
+        encoding="utf-8",
+    )
+
+    result = _run(env)
+
+    assert result.returncode == 0, result.stderr
+    assert copy.exists()
+    assert "KEPT(fsck missing object)" in result.stdout
+
+
+def test_a_legacy_copy_uses_its_reflog_candidate_before_reading_origin(
+    tmp_path: Path,
+) -> None:
+    """A branch reset to master still has its run work in the copied reflog."""
+    env, origin, work_sha = _setup(tmp_path, worker_nodes=_WORKER)
+    Path(env["PODS_JSON"]).write_text('{"items": []}', encoding="utf-8")
+    copy = Path(env["PRESERVE_WORK"]) / f"{_RUN}.git"
+    copy.parent.mkdir()
+    workspace = tmp_path / "sandbox" / "workspace"
+    subprocess.run(["git", "clone", "-q", "--bare", str(workspace), str(copy)], check=True)
+    master_sha = _git("rev-parse", "master", cwd=origin)
+    _git(
+        "update-ref",
+        "--create-reflog",
+        "-m",
+        "reset-to-master",
+        f"refs/heads/fabro/run/{_RUN}",
+        master_sha,
+        work_sha,
+        cwd=copy,
+    )
+    _git(
+        "update-ref",
+        "--create-reflog",
+        "-m",
+        "checkpoint",
+        f"refs/heads/fabro/run/{_RUN}",
+        work_sha,
+        master_sha,
+        cwd=copy,
+    )
+    _git(
+        "update-ref",
+        "--create-reflog",
+        "-m",
+        "reset-to-master",
+        f"refs/heads/fabro/run/{_RUN}",
+        master_sha,
+        work_sha,
+        cwd=copy,
+    )
+    _git(
+        "fetch",
+        "-q",
+        "origin",
+        "+refs/heads/master:refs/remotes/origin/master",
+        cwd=copy,
+    )
+    (copy.parent / "known.git.preserve").write_text(
+        f"repo={_URL}\nref=refs/heads/preserve/run-known\nsha={work_sha}\n",
+        encoding="utf-8",
+    )
+    _git(
+        "fetch",
+        "-q",
+        str(workspace),
+        f"+refs/heads/fabro/run/{_RUN}:refs/heads/preserve/run-{_RUN}",
+        cwd=origin,
+    )
+
+    result = _run(env)
+
+    assert result.returncode == 0, result.stderr
+    assert not copy.exists()
+    assert f"\t{_URL}\t{work_sha}\t" in result.stdout
+    assert "\tVERIFIED\t" in result.stdout
+
+
+def test_a_legacy_copy_with_no_sidecar_anywhere_is_verified_against_the_fleet_repositories(
+    tmp_path: Path,
+) -> None:
+    """The work directory holds only pre-sidecar copies, so origins come from the repository list."""
+    env, origin, work_sha = _setup(tmp_path, worker_nodes=_WORKER)
+    Path(env["PODS_JSON"]).write_text('{"items": []}', encoding="utf-8")
+    copy = Path(env["PRESERVE_WORK"]) / f"{_RUN}.git"
+    copy.parent.mkdir()
+    workspace = tmp_path / "sandbox" / "workspace"
+    subprocess.run(["git", "clone", "-q", "--bare", str(workspace), str(copy)], check=True)
+    _git("fetch", "-q", "origin", "+refs/heads/master:refs/remotes/origin/master", cwd=copy)
+    _git(
+        "fetch",
+        "-q",
+        str(workspace),
+        f"+refs/heads/fabro/run/{_RUN}:refs/heads/preserve/run-{_RUN}",
+        cwd=origin,
+    )
+
+    result = _run(env)
+
+    assert result.returncode == 0, result.stderr
+    assert list(copy.parent.glob("*.preserve")) == []
+    assert not copy.exists()
+    assert f"\t{_URL}\t{work_sha}\t" in result.stdout
+    assert "\tVERIFIED\t" in result.stdout
+
+
+def test_a_legacy_copy_whose_ref_no_listed_origin_holds_is_kept_with_an_unknown_repository(
+    tmp_path: Path,
+) -> None:
+    env, _, _ = _setup(tmp_path, worker_nodes=_WORKER)
+    Path(env["PODS_JSON"]).write_text('{"items": []}', encoding="utf-8")
+    copy = Path(env["PRESERVE_WORK"]) / f"{_RUN}.git"
+    copy.parent.mkdir()
+    workspace = tmp_path / "sandbox" / "workspace"
+    subprocess.run(["git", "clone", "-q", "--bare", str(workspace), str(copy)], check=True)
+    _git("fetch", "-q", "origin", "+refs/heads/master:refs/remotes/origin/master", cwd=copy)
+
+    result = _run(env)
+
+    assert result.returncode == 0, result.stderr
+    assert copy.exists()
+    assert "KEPT(legacy origin unknown)" in result.stdout
+
+
+def _refuse_pushes(origin: Path, tmp_path: Path) -> None:
+    """Origin rejects every push, and `sleep` is stubbed so the script's push backoff costs nothing."""
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\necho refused >&2\nexit 1\n", encoding="utf-8")
+    hook.chmod(0o755)
+    _stub(tmp_path / "bin", "sleep", "#!/bin/bash\nexit 0\n")
+
+
+def test_a_failed_push_keeps_the_copy_and_records_the_repository_and_sha(tmp_path: Path) -> None:
+    env, origin, work_sha = _setup(tmp_path, worker_nodes=_WORKER)
+    _refuse_pushes(origin, tmp_path)
+    result = _run(env)
+    assert result.returncode == 0, result.stderr
+    copy = Path(env["PRESERVE_WORK"]) / f"{_RUN}.git"
+    assert copy.is_dir()
+    record = Path(f"{copy}.preserve").read_text(encoding="utf-8")
+    assert f"repo={_URL}\n" in record and f"sha={work_sha}\n" in record
+    assert "FAILED(push" in result.stdout
+
+
+def test_a_kept_copy_whose_retry_push_fails_stays_for_the_next_pass(tmp_path: Path) -> None:
+    env, origin, work_sha = _setup(tmp_path, worker_nodes=_WORKER)
+    _refuse_pushes(origin, tmp_path)
+    assert "FAILED(push" in _run(env).stdout
+    Path(env["PODS_JSON"]).write_text('{"items": []}', encoding="utf-8")
+    result = _run(env)
+    copy = Path(env["PRESERVE_WORK"]) / f"{_RUN}.git"
+    assert copy.is_dir() and Path(f"{copy}.preserve").is_file()
+    assert "KEPT(push failed)" in result.stdout
+    (origin / "hooks" / "pre-receive").unlink()
+    result = _run(env)
+    assert "\tVERIFIED\t" in result.stdout
+    assert _git("rev-parse", f"refs/heads/preserve/run-{_RUN}", cwd=origin) == work_sha
+    assert not copy.exists() and not Path(f"{copy}.preserve").exists()
+
+
+def test_represerve_writes_its_alias_from_the_copy_and_then_removes_the_copy(
+    tmp_path: Path,
+) -> None:
+    env, origin, work_sha = _setup(tmp_path, worker_nodes=_WORKER)
+    script = _SCRIPT.with_name("represerve.sh")
+    result = subprocess.run(
+        ["/bin/bash", str(script), "00:00", _RUN, "bd-ib-item-01testrun"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    assert _git("rev-parse", f"refs/heads/preserve/run-{_RUN}", cwd=origin) == work_sha
+    assert _git("rev-parse", "refs/heads/preserve/bd-ib-item-01testrun", cwd=origin) == work_sha
+    work = Path(env["PRESERVE_WORK"])
+    assert not (work / f"{_RUN}.git").exists()
+    assert not list(work.glob(f"{_RUN}.git.*"))
+
+
+def test_a_copy_whose_run_commit_is_unreadable_is_kept_and_names_the_fsck_reason(
+    tmp_path: Path,
+) -> None:
+    env, origin, work_sha = _setup(tmp_path, worker_nodes=_WORKER)
+    objects = tmp_path / "sandbox" / "workspace" / ".git" / "objects"
+    (objects / work_sha[:2] / work_sha[2:]).unlink()
+    result = _run(env)
+    assert result.returncode == 0, result.stderr
+    assert (Path(env["PRESERVE_WORK"]) / f"{_RUN}.git").is_dir()
+    assert "fsck" in result.stdout, result.stdout
+    assert (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "-q", f"refs/heads/preserve/run-{_RUN}"],
+            cwd=origin,
+            check=False,
+            capture_output=True,
+        ).returncode
+        != 0
+    )
+
+
+def test_an_empty_legacy_copy_does_not_hide_its_live_pod(tmp_path: Path) -> None:
+    env, origin, work_sha = _setup(tmp_path, worker_nodes=_WORKER)
+    copy = Path(env["PRESERVE_WORK"]) / f"{_RUN}.git"
+    copy.parent.mkdir()
+    subprocess.run(["git", "clone", "-q", "--bare", str(origin), str(copy)], check=True)
+    _git("fetch", "-q", "origin", "+refs/heads/master:refs/remotes/origin/master", cwd=copy)
+    result = _run(env)
+    assert result.returncode == 0, result.stderr
+    assert f"\t{work_sha}\t" in result.stdout and "\tVERIFIED\t" in result.stdout
+    assert _git("rev-parse", f"refs/heads/preserve/run-{_RUN}", cwd=origin) == work_sha
+
+
+def test_the_worker_exec_route_runs_only_read_commands(tmp_path: Path) -> None:
+    env, _, _ = _setup(tmp_path, worker_nodes=_WORKER)
+    result = _run(env)
+    assert result.returncode == 0, result.stderr
+    calls = Path(env["STUB_LOG"]).read_text(encoding="utf-8").splitlines()
+    readers = {"test", "git", "cat", "find", "cd", "xargs"}
+    for call in (c.removeprefix("exec ") for c in calls if c.startswith("exec ")):
+        for part in call.split("&&"):
+            words = shlex.split(part)
+            assert words[0] in readers, call
+            if words[0] == "git":
+                assert "--get" in words, call
+            if words[0] == "xargs":
+                assert words[-1] == "cat", call
+
+
+def test_a_non_worker_node_keeps_the_ssh_and_crictl_route(tmp_path: Path) -> None:
+    """With the node absent from the worker list, the script goes to the node over ssh and crictl."""
+    env, _, _ = _setup(tmp_path, worker_nodes="")
+    result = _run(env)
+    calls = Path(env["STUB_LOG"]).read_text(encoding="utf-8").splitlines()
+    assert [c for c in calls if c.startswith(f"{_WORKER} ") and "k3s crictl ps" in c]
+    assert not [c for c in calls if c.startswith("exec ")]
+    assert "NO_CONTAINER" in result.stdout
+
+
+def test_a_worker_copy_is_read_in_bounded_chunks(tmp_path: Path) -> None:
+    """A tree larger than the chunk budget is copied over several exec streams, intact.
+
+    One exec stream carrying the whole tree was reset by the API server on the first M4 run
+    (2026-11-09, 31.8 MiB); each exec now carries at most the chunk budget.
+    """
+    env, origin, _ = _setup(tmp_path, worker_nodes=_WORKER)
+    workspace = tmp_path / "sandbox" / "workspace"
+    (workspace / "big.bin").write_bytes(os.urandom(5 * 1024 * 1024 // 2))
+    _git("add", "big.bin", cwd=workspace)
+    _git("commit", "-q", "-m", "big", cwd=workspace)
+    work_sha = _git("rev-parse", "HEAD", cwd=workspace)
+    env["PRESERVE_EXEC_CHUNK_BYTES"] = str(1024 * 1024)
+    result = _run(env)
+    assert result.returncode == 0, result.stderr
+    [row] = [line.split("\t") for line in result.stdout.splitlines()[1:]]
+    assert row[5] == "VERIFIED", result.stdout + result.stderr
+    assert _git("rev-parse", f"refs/heads/preserve/run-{_RUN}", cwd=origin) == work_sha
+    calls = Path(env["STUB_LOG"]).read_text(encoding="utf-8").splitlines()
+    ranged = [c for c in calls if c.startswith("exec dd ")]
+    assert len(ranged) >= 3, calls
+    assert all("bs=1048576" in c and "count=1" in c for c in ranged)
+
+
+def test_an_exact_chunk_multiple_and_an_empty_file_copy_without_extra_or_missing_ranges(
+    tmp_path: Path,
+) -> None:
+    """A file of exactly k chunks gets exactly k dd ranges; a zero-byte file gets none."""
+    env, origin, work_sha = _setup(tmp_path, worker_nodes=_WORKER)
+    git_dir = tmp_path / "sandbox" / "workspace" / ".git"
+    (git_dir / "packed-refs").write_bytes(b"")
+    (git_dir / "objects" / "pack" / "filler.tmp").write_bytes(os.urandom(2 * 1024 * 1024))
+    env["PRESERVE_EXEC_CHUNK_BYTES"] = str(1024 * 1024)
+    result = _run(env)
+    assert result.returncode == 0, result.stderr
+    [row] = [line.split("\t") for line in result.stdout.splitlines()[1:]]
+    assert row[5] == "VERIFIED", result.stdout + result.stderr
+    assert _git("rev-parse", f"refs/heads/preserve/run-{_RUN}", cwd=origin) == work_sha
+    calls = Path(env["STUB_LOG"]).read_text(encoding="utf-8").splitlines()
+    filler = [c for c in calls if c.startswith("exec dd ") and "filler.tmp" in c]
+    assert len(filler) == 2, filler
+    assert not [c for c in calls if c.startswith("exec dd ") and "packed-refs" in c]
+    assert not (Path(env["PRESERVE_WORK"]) / f"{_RUN}.git").exists()
+
+
+def test_a_reset_chunk_is_retried_and_never_reaches_the_copy_partial(tmp_path: Path) -> None:
+    """One exec stream reset mid-chunk (partial bytes, non-zero exit) costs one retry, not the copy."""
+    env, origin, _ = _setup(tmp_path, worker_nodes=_WORKER)
+    workspace = tmp_path / "sandbox" / "workspace"
+    (workspace / "big.bin").write_bytes(os.urandom(5 * 1024 * 1024 // 2))
+    _git("add", "big.bin", cwd=workspace)
+    _git("commit", "-q", "-m", "big", cwd=workspace)
+    work_sha = _git("rev-parse", "HEAD", cwd=workspace)
+    env["PRESERVE_EXEC_CHUNK_BYTES"] = str(1024 * 1024)
+    env["STUB_RESET_ONCE"] = str(tmp_path / "reset-once")
+    result = _run(env)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "reset-once").exists(), "the stub never reset a chunk"
+    [row] = [line.split("\t") for line in result.stdout.splitlines()[1:]]
+    assert row[5] == "VERIFIED", result.stdout + result.stderr
+    assert _git("rev-parse", f"refs/heads/preserve/run-{_RUN}", cwd=origin) == work_sha
+    calls = Path(env["STUB_LOG"]).read_text(encoding="utf-8").splitlines()
+    ranged = [c for c in calls if c.startswith("exec dd ")]
+    assert len(ranged) == len(set(ranged)) + 1, "exactly one dd range was retried"
+
+
+_DISPATCH = "dispatch-1"
+_NEEDS_HUMAN = f"refs/heads/needs-human/{_DISPATCH}"
+
+# Moves origin's dispatch-id ref to the commit named by `refs/heads/other` and refuses that one push,
+# standing in for the run's own ending writer winning the race for the ref.
+_RACE_HOOK = f"""#!/bin/sh
+while read old new ref; do
+  if [ "$ref" = {_NEEDS_HUMAN} ] && [ ! -e "$GIT_DIR/raced" ]; then
+    : > "$GIT_DIR/raced"
+    unset GIT_QUARANTINE_PATH
+    git update-ref {_NEEDS_HUMAN} "$(git rev-parse refs/heads/other)"
+    exit 1
+  fi
+done
+"""
+
+
+def _preserve_with_needs_human(env: dict[str, str]) -> list[str]:
+    result = _run({**env, "PRESERVE_WRITE_NEEDS_HUMAN": "1"})
+    assert result.returncode == 0, result.stderr
+    [row] = [line.split("\t") for line in result.stdout.splitlines()[1:]]
+    return row
+
+
+def _diverged_commit(tmp_path: Path, origin: Path) -> str:
+    """A commit on origin, on `refs/heads/other`, that does not contain the run's work."""
+    clone = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", str(origin), str(clone)], check=True)
+    _git("config", "user.email", "t@example.invalid", cwd=clone)
+    _git("config", "user.name", "t", cwd=clone)
+    (clone / "other.txt").write_text("somebody else's work\n", encoding="utf-8")
+    _git("add", "other.txt", cwd=clone)
+    _git("commit", "-q", "-m", "other", cwd=clone)
+    _git("push", "-q", "origin", "HEAD:refs/heads/other", cwd=clone)
+    return _git("rev-parse", "HEAD", cwd=clone)
+
+
+def _needs_human_refs(origin: Path) -> dict[str, str]:
+    lines = _git(
+        "for-each-ref", "--format=%(objectname) %(refname)", "refs/heads/needs-human", cwd=origin
+    )
+    return {ref: sha for sha, ref in (line.split(" ", 1) for line in lines.splitlines())}
+
+
+def test_an_ancestor_needs_human_ref_is_moved_forward_and_no_sibling_is_written(
+    tmp_path: Path,
+) -> None:
+    env, origin, work_sha = _setup(tmp_path, worker_nodes=_WORKER)
+    base = _git("rev-parse", "refs/heads/master", cwd=origin)
+    _git("update-ref", _NEEDS_HUMAN, base, cwd=origin)
+    row = _preserve_with_needs_human(env)
+    assert _needs_human_refs(origin) == {_NEEDS_HUMAN: work_sha}
+    assert row[5] == f"VERIFIED+NH_ADVANCED:needs-human/{_DISPATCH}:{base[:12]}"
+
+
+def test_a_diverged_needs_human_ref_stays_and_the_preserve_goes_to_a_suffixed_sibling(
+    tmp_path: Path,
+) -> None:
+    env, origin, work_sha = _setup(tmp_path, worker_nodes=_WORKER)
+    other = _diverged_commit(tmp_path, origin)
+    _git("update-ref", _NEEDS_HUMAN, other, cwd=origin)
+    row = _preserve_with_needs_human(env)
+    sibling = f"{_NEEDS_HUMAN}-{work_sha[:12]}"
+    assert _needs_human_refs(origin) == {_NEEDS_HUMAN: other, sibling: work_sha}
+    assert (
+        row[5] == f"VERIFIED+NH_KEPT:{other[:12]}+NH_SUFFIX:{sibling.removeprefix('refs/heads/')}"
+    )
+
+
+def test_a_forward_move_rejected_by_a_raced_ref_leaves_origin_and_writes_the_sibling(
+    tmp_path: Path,
+) -> None:
+    env, origin, work_sha = _setup(tmp_path, worker_nodes=_WORKER)
+    other = _diverged_commit(tmp_path, origin)
+    _git("update-ref", _NEEDS_HUMAN, _git("rev-parse", "refs/heads/master", cwd=origin), cwd=origin)
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text(_RACE_HOOK, encoding="utf-8")
+    hook.chmod(hook.stat().st_mode | stat.S_IXUSR)
+    row = _preserve_with_needs_human(env)
+    sibling = f"{_NEEDS_HUMAN}-{work_sha[:12]}"
+    assert _needs_human_refs(origin) == {_NEEDS_HUMAN: other, sibling: work_sha}
+    assert (
+        row[5] == f"VERIFIED+NH_KEPT:{other[:12]}+NH_SUFFIX:{sibling.removeprefix('refs/heads/')}"
+    )

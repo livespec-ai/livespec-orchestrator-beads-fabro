@@ -50,12 +50,29 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_io import (
     JournalFile,
     ShellCommandRunner,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_recapture_exhausted_hold import (
+    recapture_exhausted_refusal,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_recapture_exhausted_route import (
+    RecaptureSources,
+    route_recapture_exhausted,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_fresh_ruling import (
+    current_ruling_route,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_held_outcomes import (
+    held_outcomes,
+    is_held,
+    recovery_held_route_report,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_measurements import (
-    MEASUREMENT_PRESERVED_WORK,
     unobservable_measurements,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_non_fallback import (
     non_fallback_refusals,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_pass_listing import (
+    PassListingRunner,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_preserved import (
     PreservedWorkAbsent,
@@ -65,12 +82,18 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_preserved i
 from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_records import (
     PRESERVED_WORK_ABSENT,
     PRESERVED_WORK_VERIFIED,
-    RECOVERY_HELD_STAGE,
     recovery_held_record,
-    recovery_held_report,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_release import (
+    recapture_exhausted_for_recovery,
     released_for_recovery,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_resume_listing import (
+    resume_of,
+    resume_with_listing,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_resume_protection import (
+    resume_protection,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_routes import (
     ROUTE_FRESH,
@@ -80,8 +103,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_routes impo
     RecoveryHold,
     RecoveryLoss,
     RecoveryMeasurement,
-    RecoveryResume,
     RecoveryRoute,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_ruled_seed import (
+    current_seed_ruling,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_reflection_journal import (
     read_journal_records,
@@ -91,10 +116,16 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_observation i
     gather_resume,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_refusals import resume_refusals
+from livespec_orchestrator_beads_fabro.commands._dispatcher_ruling_currency import FreshRuling
+from livespec_orchestrator_beads_fabro.commands._dispatcher_seed_ruling import SeedRuling
+from livespec_orchestrator_beads_fabro.commands._dispatcher_stale_assignee_release import (
+    stale_assignee_with_run,
+)
 from livespec_orchestrator_beads_fabro.types import WorkItem
 
 __all__: list[str] = [
     "RecoveryRouting",
+    "recapture_exhausted_refusal",
     "route_recovery",
 ]
 
@@ -149,7 +180,7 @@ class RecoveryRouting:
         then delete the very branch the resumed run was about to check out.
         """
         route = self.route_for(work_item_id=work_item_id)
-        return route is None or route.route != ROUTE_RESUME
+        return route is None or route.route in {ROUTE_FRESH, ROUTE_SEEDED}
 
     def offered(self, *, candidates: list[WorkItem]) -> list[WorkItem]:
         """The candidates the admission valve is offered, which excludes every hold.
@@ -159,9 +190,7 @@ class RecoveryRouting:
         valve is the only thing that writes `ready -> active`, so an item it never
         sees keeps its status without anything having to put it back.
         """
-        return [
-            one for one in candidates if not _is_held(route=self.route_for(work_item_id=one.id))
-        ]
+        return [one for one in candidates if not is_held(route=self.route_for(work_item_id=one.id))]
 
     def held_report(self, *, work_item_id: str) -> str | None:
         """The refusal `dispatch --item` exits 3 with, or `None` for a live route.
@@ -182,10 +211,7 @@ class RecoveryRouting:
         test of the name could only ever disagree with the payload it is about
         to render.
         """
-        route = self.route_for(work_item_id=work_item_id)
-        if route is None or route.hold is None:
-            return None
-        return recovery_held_report(work_item_id=work_item_id, hold=route.hold)
+        return recovery_held_route_report(work_item_id=work_item_id, routes=self.routes)
 
     def held_outcomes(self) -> list[DispatchOutcome]:
         """One deferred outcome per held item, for the drain's own report.
@@ -197,18 +223,7 @@ class RecoveryRouting:
         tell the two apart. That pairing is the one `_dispatcher_rework_admission`
         already uses for its own deferral.
         """
-        return [
-            DispatchOutcome(
-                work_item_id=one.work_item_id,
-                status="capacity-deferred",
-                stage=RECOVERY_HELD_STAGE,
-                pr_number=None,
-                merge_sha=None,
-                detail=_held_detail(route=one),
-            )
-            for one in self.routes
-            if _is_held(route=one)
-        ]
+        return held_outcomes(routes=self.routes)
 
 
 def route_recovery(
@@ -220,10 +235,38 @@ def route_recovery(
 ) -> RecoveryRouting:
     """Assign one route to every candidate, measuring only the released ones."""
     journaled = read_journal_records(journal_path=journal.path)
-    runner = ShellCommandRunner()
+    # ONE runner for the pass, so the needs-human identification every item grades
+    # against is taken once; see `_dispatcher_recovery_pass_listing`.
+    runner = PassListingRunner(inner=ShellCommandRunner())
     routes: list[RecoveryRoute] = []
     for item in candidates:
-        if not released_for_recovery(records=journaled, work_item_id=item.id):
+        if recapture_exhausted_for_recovery(records=journaled, work_item_id=item.id):
+            routes.append(
+                route_recapture_exhausted(
+                    args=args,
+                    repo=repo,
+                    item=item,
+                    journal=journal,
+                    runner=runner,
+                    sources=RecaptureSources(
+                        gather_resume_fn=gather_resume,
+                        journal_records=journaled,
+                        preserved_seed=verified_preserved_seed,
+                    ),
+                )
+            )
+            continue
+        ruling = current_seed_ruling(repo=repo, item=item)
+        if isinstance(ruling, RecoveryHold):
+            routes.append(_held_route(item=item, journal=journal, hold=ruling))
+            continue
+        # "While an item carries a current ruling, recovery routing MUST treat the
+        # item as released for recovery", whatever its latest dispatch ended in.
+        if (
+            ruling is None
+            and not released_for_recovery(records=journaled, work_item_id=item.id)
+            and not stale_assignee_with_run(repo=repo, item=item)
+        ):
             routes.append(RecoveryRoute(work_item_id=item.id, route=ROUTE_FRESH))
             continue
         routes.append(
@@ -239,26 +282,10 @@ def route_recovery(
                 repo=repo,
                 runner=runner,
                 journal=journal,
+                ruling=ruling,
             )
         )
     return RecoveryRouting(routes=tuple(routes))
-
-
-def _is_held(*, route: RecoveryRoute | None) -> bool:
-    """Whether this route is the hold; an absent route never is."""
-    return route is not None and route.route == ROUTE_HELD
-
-
-def _held_detail(*, route: RecoveryRoute) -> str:
-    """Every reason one held item names, as one line for the deferred outcome."""
-    hold = route.hold
-    if hold is None:
-        return "recovery held"
-    named = (
-        *(f"{one.name}: {one.detail}" for one in hold.measurements),
-        *hold.refusals,
-    )
-    return "recovery held: " + "; ".join(named)
 
 
 def _released_route(
@@ -268,6 +295,7 @@ def _released_route(
     repo: Path,
     runner: CommandRunner,
     journal: JournalFile,
+    ruling: SeedRuling | FreshRuling | None,
 ) -> RecoveryRoute:
     """The route one RELEASED candidate takes, from the resume's own measurement.
 
@@ -292,40 +320,63 @@ def _released_route(
     reason `run_resume_command` narrows them: without an anchor there is no head
     to check out and no record to attribute, so proceeding would launch a plain
     run while the journal recorded a resume.
+
+    A CURRENT SEED RULING IS GRADED THIRD, between those two gradings and the
+    ladder. It outranks the ladder because "Routing MUST take its seed from a
+    current seed ruling ahead of a `resume` and ahead of the preference order",
+    and it does NOT outrank the two gradings above it: "A non-fallback refusal
+    keeps its precedence over a ruling", and an unanswered measurement is held
+    whatever the ruling says. The pre-claim refusal of "Across-dispatch
+    required-result progress" is graded earlier still, by the pre-dispatch wall,
+    before this step is reached for any item.
     """
     measurements = unobservable_measurements(observation=gather.observation)
-    if measurements:
-        # An unobservable measurement at ANY step routes `held`, which is why this
-        # precedes the ladder rather than riding it: every one of these reads also
-        # produces a REFUSAL, and a refusal is graded as fallback-permitting or
-        # not — so falling through would seed or dispatch around a question that
-        # was never answered, and the record would read like a measured decision.
-        return _held_route(item=item, journal=journal, hold=RecoveryHold(measurements=measurements))
     refusals = non_fallback_refusals(observation=gather.observation)
-    if refusals:
+    hold = (
+        RecoveryHold(measurements=measurements)
+        if measurements
+        else RecoveryHold(refusals=refusals)
+        if refusals
+        else None
+    )
+    if hold is not None:
         # "A non-fallback refusal takes precedence over every fallback-permitting
         # one, so a merged pull request is never treated as a missing anchor."
-        # Hence BEFORE the ladder rather than inside it: the ladder's first test
+        # The hold is BEFORE the ladder rather than inside it: the ladder's first test
         # is whether ANY refusal applies, and a non-fallback one answers that
         # test identically to a fallback-permitting one — so falling through
         # would carry out a remedy the refusal exists to forbid, and would do it
         # with the record reading like an ordinary measured fallback.
-        return _held_route(item=item, journal=journal, hold=RecoveryHold(refusals=refusals))
+        return _held_route(item=item, journal=journal, hold=hold)
+    if ruling is not None:
+        # A CURRENT SEED RULING takes the seed "ahead of a `resume` and ahead of the
+        # preference order", so it sits past the two gradings above (which a ruling
+        # does not outrank) and ahead of the ladder. A ruled ref origin does not
+        # carry at the ruled commit holds the item: "Routing MUST NOT then fall
+        # through to another preserved tree, to the observed published head, or to
+        # `fresh`", which is why the hold returns here and not into the fallback.
+        return current_ruling_route(
+            runner=runner,
+            repo=repo,
+            item=item,
+            journal=journal,
+            gather=gather,
+            ruling=ruling,
+        )
     anchor = gather.anchor
     pull_request = gather.observation.pull_request
     if resume_refusals(observation=gather.observation) or anchor is None or pull_request is None:
         return _fallback_route(gather=gather, item=item, repo=repo, runner=runner, journal=journal)
-    return RecoveryRoute(
-        work_item_id=item.id,
-        route=ROUTE_RESUME,
-        resume=RecoveryResume(
-            entry_node=anchor.resumed_at,
-            head=anchor.head,
-            pull_request=pull_request,
-            earlier_run_ids=gather.earlier_run_ids,
-            source=anchor.source,
-            workflow_name=gather.workflow_name,
-        ),
+    protected = resume_protection(
+        gather=gather, item=item, repo=repo, runner=runner, journal=journal
+    )
+    return protected or resume_with_listing(
+        runner=runner,
+        repo=repo,
+        item=item,
+        journal=journal,
+        gather=gather,
+        resume=resume_of(gather=gather, anchor=anchor, pull_request=pull_request),
     )
 
 
@@ -349,12 +400,14 @@ def _fallback_route(
     it, and asking it anyway would spend an origin round trip per released
     candidate to answer a question the route had already settled.
     """
+    journaled = read_journal_records(journal_path=journal.path)
     preserved = verified_preserved_seed(
         runner=runner,
         repo=repo,
         work_item_id=item.id,
         earlier_run_ids=gather.earlier_run_ids,
-        journal_records=read_journal_records(journal_path=journal.path),
+        journal_records=journaled,
+        publications=gather.publications,
     )
     if isinstance(preserved, PreservedWorkUnobservable):
         return _held_route(
@@ -362,7 +415,7 @@ def _fallback_route(
             journal=journal,
             hold=RecoveryHold(
                 measurements=(
-                    RecoveryMeasurement(name=MEASUREMENT_PRESERVED_WORK, detail=preserved.detail),
+                    RecoveryMeasurement(name=preserved.measurement, detail=preserved.detail),
                 )
             ),
         )

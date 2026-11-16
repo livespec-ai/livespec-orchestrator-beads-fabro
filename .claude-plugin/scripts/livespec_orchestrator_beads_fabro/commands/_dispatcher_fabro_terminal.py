@@ -32,6 +32,12 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_provider_limit_outco
 from livespec_orchestrator_beads_fabro.commands._dispatcher_recapture_exhausted import (
     recapture_exhausted_outcome,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_acquire_failure import (
+    sandbox_acquire_failure_outcome,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_termination import (
+    outcome_naming_sandbox_termination,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_terminal_events import (
     terminal_event_output,
 )
@@ -74,6 +80,8 @@ def fabro_run_terminal_outcome(
     mapping below produced it: a refusal booked as a successful turn mints its
     candidate hold even when a later failure kept its own route, so the evidence
     rides the outcome the disposition reads instead of being re-derived there.
+    The sandbox provider's termination report is named on every one of them for
+    the same reason: an OOM-killed run can end at any terminal.
     """
     outcome = _terminal_outcome(
         outcome_type=outcome_type,
@@ -86,7 +94,8 @@ def fabro_run_terminal_outcome(
     if outcome is None:
         return None
     turns = reclassified_turns(plan=plan, inspect=inspect, run_id=run_id)
-    return replace(outcome, reclassified_turns=turns) if turns else outcome
+    named = replace(outcome, reclassified_turns=turns) if turns else outcome
+    return outcome_naming_sandbox_termination(outcome=named, inspect=inspect)
 
 
 def _terminal_outcome(
@@ -148,14 +157,22 @@ def _terminal_outcome(
     )
     if unobservable is not None:
         return unobservable
-    terminated = needs_human_terminal_outcome(
+    terminated = sandbox_acquire_failure_outcome(
         outcome_type=outcome_type,
         plan=plan,
         run_id=run_id,
         inspect=inspect,
         failure=failure,
-        text=client_text,
     )
+    if terminated is None:
+        terminated = needs_human_terminal_outcome(
+            outcome_type=outcome_type,
+            plan=plan,
+            run_id=run_id,
+            inspect=inspect,
+            failure=failure,
+            text=client_text,
+        )
     # AFTER the needs-human terminal and BEFORE the generic failure, because the
     # `non_converged` terminal also ends a recapture-cap run and the generic arm
     # would hand its detail to the non-convergence bounce.

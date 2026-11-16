@@ -44,7 +44,9 @@ This section refines the pre-push step ordering inherited from livespec; it adds
 
 **A deletion-only push skips the pre-push aggregate.** The repository's pre-push gate (`01-check-pre-push`, run through `just check-pre-push`) MUST read the ref updates git supplies on the hook's standard input, one per line as `<local ref> <local object id> <remote ref> <remote object id>`. When there is at least one line and every line's local object id consists only of zeros, the push only deletes refs: the gate MUST then exit zero without running the green-token check or the `just check` aggregate, and MUST print one line saying the gate was skipped because the push only deletes refs. Any other input, including no input at all and any push that creates or updates even one ref beside its deletions, MUST run the full gate exactly as before. The lefthook pre-push entry MUST pass the hook's standard input through to the gate. This skip MUST NOT be reachable by `--no-verify`, by an environment variable, or by any flag; the ref updates themselves are its only input. The repository's always-run ledger-conformance pre-push step (`02-ledger-conformance`) is a separate step this skip does not reach: it MUST still run on a deletion-only push, so the skip MUST live inside `just check-pre-push` and never at the lefthook level. Scenario 188 in `scenarios.md` exercises this section.
 
-**A green aggregate on the exact tree carries to its push.** When the `just check` aggregate passes, it MUST record a green verdict for the tree it checked, keyed on that commit's tree object id, even when it skipped declared targets. A verdict whose aggregate skipped targets MUST name them. A verdict vouches only for the targets that ran and passed and whose result the committed tree alone decides, the tree-pure members; a member that reads state outside the tree is never covered by a verdict. The pre-push gate MUST honour a recorded green verdict whose tree is byte-identical to the tree being pushed, with a clean worktree, in place of running again the members that verdict covers, MUST still run every member of the pre-push check set that reads state outside the tree and refuse the push when one fails, and MUST print one line naming the honoured verdict and every target the verdict skipped. A push whose tree differs from the recorded verdict's tree, such as a `publish_draft` push after its own refresh rebase onto a moved default branch, MUST run the full pre-push gate exactly as before. Like the deletion-only skip, honouring a verdict MUST NOT be reachable by `--no-verify`, by an environment variable or by any flag; the recorded verdict and the tree are its only inputs. Measured 2026-10-26: the factory janitor skips targets that cannot run in the sandbox, so it recorded no verdict, and each `publish_draft` pre-push re-ran the whole aggregate, about 24 minutes at two test workers, on the tree the janitor had just passed. Scenario 253 in `scenarios.md` exercises this paragraph.
+**A green aggregate on the exact tree carries to its push.** When the `just check` aggregate passes, it MUST record a green verdict for the tree it checked, keyed on that commit's tree object id, even when it skipped declared targets. A verdict whose aggregate skipped targets MUST name them. A verdict vouches only for the targets that ran and passed and whose result the committed tree alone decides, the tree-pure members; a member that reads state outside the tree is never covered by a verdict. The pre-push gate MUST honour a recorded green verdict whose tree is byte-identical to the tree being pushed, with a clean worktree, in place of running again the members that verdict covers, MUST still run every member of the pre-push check set that reads state outside the tree and refuse the push when one fails, and MUST print one line naming the honoured verdict and every target the verdict skipped. A push whose tree differs from the recorded verdict's tree, such as a `pr_refresh` push after its own refresh rebase onto a moved default branch, MUST run the full pre-push gate exactly as before. Like the deletion-only skip, honouring a verdict MUST NOT be reachable by `--no-verify`, by an environment variable or by any flag; the recorded verdict and the tree are its only inputs. Measured 2026-10-26: the factory janitor skips targets that cannot run in the sandbox, so it recorded no verdict, and each `publish_draft` pre-push re-ran the whole aggregate, about 24 minutes at two test workers, on the tree the janitor had just passed. Scenario 253 in `scenarios.md` exercises this paragraph.
+
+**A hand commit's passing delegated pre-commit verdict carries to its push.** This repository sets both `delegated_gate = true` and `delegated_pre_commit = true`, so livespec-dev-tooling `SPECIFICATION/contracts.md` §"Delegated pre-push gate" **Same-tree delegated pre-commit verdict** binds its pre-push gate. Before it consults its own green token (`dev-tooling/green-token-scope.sh`), the pre-push gate MUST run livespec-dev-tooling's same-tree delegated pre-commit library command (livespec-dev-tooling-yud7rc), passing the member names of its own check set. A delegated pre-commit run qualifies only when livespec-dev-tooling recorded pre-push evidence for it naming its gate Job, and at push time the pushing worktree is clean and its `HEAD` tree is the tree that evidence names. When a run qualifies, the pre-push gate MUST NOT submit a pre-push gate Job and MUST NOT run the local fall-through aggregate. It MUST still run, on the pushing host against the same tree, every member of its check set that the evidence does not name as run and passed, every world-reading member, and every member that reads an authorization held outside the tree. It MUST refuse the push, naming the member, when any of them fails. It MUST print the gate Job's name, the tree hash whose verdict it accepted, the name of each member it ran, and the number of members it skipped because that verdict covered them. When no run qualifies, the pre-push gate MUST gate exactly as the rest of this section requires. `dev-tooling/green-token-scope.sh` MUST NOT be the reason a qualifying run's evidence is refused: its refusal of tokens carrying `pre_commit_aggregate` still applies to the green token, and does not apply to the library command's evidence. A pre-commit aggregate that ran on the committing host never qualifies. A deletion-only push still skips the aggregate as the first paragraph of this section requires, and that rule takes precedence. This paragraph is spec-first: as of its ratification this repository's pre-push gate never consults delegated pre-commit evidence, and work item bd-ib-3k3xh7 owns the change.
 
 ## Pre-commit staged pre-check
 
@@ -82,11 +84,23 @@ This section refines the pre-commit step ordering inherited from livespec; it ad
   until the server has written its port file, the server process has exited,
   or 30 seconds have elapsed, whichever comes first; it MUST NOT fail a
   telemetry case only because the server took longer than two seconds to
-  write its port file. When the server has not written its port file by the
-  end of that wait, the harness MUST fail the case with a line naming the
-  capture server's exit status (or that it was still running at the bound)
-  and its captured standard error, and MUST stop any capture server process
-  it started.
+  write its port file. The harness MUST treat the server process as exited
+  only on evidence that it has exited. A liveness probe that fails while the
+  process may still be alive, for example `kill -0` refused with a permission
+  error, MUST NOT be read as an exit, and the start wait MUST keep its
+  30-second bound. When the server has not written its port file by the end
+  of that wait, the harness MUST fail the case with a line naming the capture
+  server's exit status (or that it was still running at the bound) and its
+  captured standard error, and MUST stop any capture server process it
+  started. Every wait the harness performs on the capture server process MUST
+  be bounded. Stopping the server MUST end its wait at a stop bound of 10
+  seconds after the stop signal is sent, and the harness MUST NOT wait on the
+  process after that bound. Like the 30-second start bound, the stop bound is
+  observed through the diagnostic the harness emits when it is reached, not
+  by timing the harness. When the server is still running at the end of the
+  stop wait, the harness MUST fail the telemetry case that started it with a
+  line naming the capture server as still running after its stop, so that the
+  harness run ends with a failing verdict rather than never ending.
 - Server-mode auto-commit stays OFF and `bd config dolt.auto-start` is
   `false`. The plugin MUST NOT re-enable per-write commits and MUST NOT
   start, stop, or otherwise own the externally-managed server lifecycle
@@ -232,6 +246,32 @@ allowed to pin.
   through the node's outcome and the `preferred_label` vocabulary already
   in use, so the graph remains loadable on the engine the factory moves
   onto.
+- **CI graph-gate binary.** CI's factory-graph gate is the
+  `check-fabro-graph-validity` check, which validates the repository's
+  committed Fabro workflow graphs during CI. It validates with the pinned
+  upstream `fabro-sh/fabro` release, not with the factory's carrier build,
+  and that binary is outside "the factory" as this section scopes it. The
+  pinned release's release triple MUST be at or after `0.396.0`, the first
+  upstream release that refuses `run.prepare`, so the gate judges graphs by
+  the rules of the engine the factory moves onto. An earlier release,
+  including `v0.254.0` and the factory's own `0.393.0` carrier client, MUST
+  NOT be the gate's client, because its validator accepts graphs that
+  engine rejects. The gate's installer MUST install the pinned release's static
+  Linux asset whose architecture matches the CI runner's own (`x86_64` or
+  `aarch64`). It MUST verify the downloaded asset against the sha256 that
+  release publishes for that asset, pinned beside the version, before
+  installing it. On any other runner architecture it MUST exit non-zero
+  with a message naming that architecture and MUST NOT install a binary.
+  Wherever the gate runs, in CI or on a developer host, it MUST read the
+  version the resolved `fabro` client reports before it validates any
+  graph. When that client reports no parseable version, or a version whose
+  release triple is older than `0.396.0`, the gate MUST fail with a control
+  finding naming the reported version and the `0.396.0` floor, or, when
+  no version is parseable, saying so, and MUST NOT validate any graph with
+  that client. It MUST NOT fall
+  back to another client. For every graph it validates, the gate MUST
+  report the graph's location together with the client version that
+  validated it.
 
 ## Fabro factory host provisioning constraints
 
@@ -285,7 +325,9 @@ orchestrator depends on for factory operation: the Codex companion plugin's
 interactive review/rescue paths (`codex:codex-rescue`, `/codex:review`,
 `/codex:adversarial-review`) and the orchestrator-owned raw `codex exec`
 credential-refresh invocation. These constraints govern when those surfaces MUST
-run with Codex `danger-full-access`.
+run with Codex `danger-full-access`. The bullet "Factory sandbox turns carry the
+Driver guards" separately governs factory sandbox agent turns, which are not
+among those surfaces.
 
 - **Gate evaluation is local and hook-time.** Codex full access is decided at
   hook time (SessionStart, and the raw `codex exec` credential-refresh command)
@@ -331,6 +373,17 @@ run with Codex `danger-full-access`.
   `codex exec` reads additional prompt text from stdin until EOF even when a
   prompt argument is present, and an inherited open socket therefore stalls the
   process indefinitely before it does any work.
+- **Factory sandbox turns carry the Driver guards.** A factory Codex sandbox
+  turn's per-run `CODEX_HOME` MUST carry the `livespec-driver-codex` plugin at
+  the Driver release the run pins, with its hooks enabled. The materialized
+  Driver hooks MUST be recorded as trusted in that `CODEX_HOME` only when the
+  materialized hook definitions and hook entrypoints byte-match that Driver
+  release tag, and a mismatch MUST fail the run's prepare step, naming the
+  plugin and the hook. Codex's hook-trust bypass MUST NOT be used to establish
+  that trust. A factory Claude sandbox turn's materialized plugin cache MUST
+  carry the `livespec-driver-claude` plugin's PreToolUse hooks at the release
+  the run pins. A command that a materialized PreToolUse guard forbids MUST be
+  blocked when a sandbox turn of either runtime attempts it.
 - **Out of scope — operator dogfooding.** Manually-typed
   `codex exec <plugin>:<op>` dogfooding commands are NOT gated by this contract.
   Their posture comes from the operator's own host-wide `~/.codex/config.toml`,
@@ -345,7 +398,10 @@ run with Codex `danger-full-access`.
   full-access flag and the stdin EOF redirect. Marker provenance is decided by
   re-running the `refresh` operation against the current manifest and diffing the
   resulting marker: any difference means the committed marker has drifted from
-  the manifest it claims to derive from. Review-time verification MUST check
+  the manifest it claims to derive from. The factory sandbox guard rule is
+  decided by a real dispatched factory run on the released orchestrator, in
+  which an implement turn of each runtime attempts a command its guard forbids
+  and the guard blocks it. Review-time verification MUST check
   those deciding signals whenever the hook, canary, gate, Codex invocation
   wrapper, or Codex dogfooding instructions change.
 
@@ -781,6 +837,19 @@ deficient record to be cured rather than a decision to be taken.
   dangerous value, MUST NOT auto-dispose a truly-unresolvable decision, MUST
   NOT create net-new work-items, and MUST bound every rework loop by its
   configured cap; every auto-disposition MUST be journaled.
+- No real-time sleeps or wall-clock verdicts in tests. A test under
+  `tests/` MUST NOT wait for a condition by sleeping in real time
+  (`time.sleep`), and MUST NOT decide pass or fail on a real wall-clock
+  elapsed reading (a difference of `time.monotonic`, `time.perf_counter`
+  or `time.time` values, or thread-start timing). It MUST instead advance
+  an injected clock or wait on a deterministic event (a joined thread, a
+  set `threading.Event`, a written file, a child's exit). A wall-clock
+  wait that remains MAY exist only as a liveness guard against a hang,
+  never as the condition that decides the verdict. A check in the
+  `just check` aggregate MUST refuse a test file that violates this rule,
+  naming each offending file and line, and MUST honour an explicit
+  per-line exemption marker that carries a written reason, for a test
+  whose subject is real time itself.
 
 ## Governed-repository integration constraints
 

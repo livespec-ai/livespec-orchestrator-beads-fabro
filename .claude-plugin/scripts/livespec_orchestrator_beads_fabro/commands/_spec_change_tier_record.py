@@ -69,6 +69,7 @@ __all__: list[str] = [
     "STAGE_FILING",
     "STAGE_GROOM",
     "STAGE_RELEASE",
+    "STAGE_RELINK",
     "RecordedSpecChangeTier",
     "TierClauseProvenance",
     "classification_did_not_run_comment",
@@ -88,6 +89,9 @@ SPEC_CHANGE_TIER_UNAVAILABLE_MARKER = "livespec-spec-change-tier-unavailable"
 STAGE_FILING = "filing"
 STAGE_GROOM = "groom"
 STAGE_DISPATCH = "dispatch"
+# Relinking does not re-judge or release a hold, but it does append a new tier
+# record so every later reader sees the replacement topic as the standing one.
+STAGE_RELINK = "relink-spec-tier"
 # The human `release-spec-tier` valve is a fourth point that records a tier: it
 # clears the hold, and the record it leaves says it was a human act.
 STAGE_RELEASE = "release-spec-tier"
@@ -138,6 +142,7 @@ class RecordedSpecChangeTier:
     linked_proposal_topic: str | None
     spec_version: str
     digest: str
+    rationale: str = ""
     selected_clauses: tuple[CondensedClause, ...] = ()
     named_clauses: tuple[CondensedClause, ...] = ()
     provenance_complete: bool = False
@@ -265,15 +270,19 @@ def reusable_spec_change_tier(
 ) -> RecordedSpecChangeTier | None:
     """The newest recorded classification, when it was taken against THIS pair.
 
-    `None` whenever the asked-for behaviour or the recorded clause provenance
-    differs. A version is audit evidence, not the reuse identity: a revision
-    outside the clauses the model saw or named must not spend another judgement.
+    `None` whenever the asked-for behaviour or a taken judgement's clause
+    provenance differs. A version is audit evidence, not the reuse identity: a
+    revision outside the clauses the model saw or named must not spend another
+    judgement. An exempt record names that no judgement was taken, so it has no
+    clause provenance to compare.
     """
     recorded = recorded_spec_change_tier(comments=comments)
     if recorded is None:
         return None
     if not recorded.provenance_complete or recorded.digest != digest:
         return None
+    if recorded.verdict_kind == _NOT_TAKEN:
+        return recorded
     named_clauses = clauses_named(
         spec_tree=spec_tree,
         headings=tuple(clause.heading for clause in recorded.named_clauses),
@@ -325,6 +334,7 @@ def _recorded_from(*, body: str) -> RecordedSpecChangeTier | None:
         linked_proposal_topic=_parsed(value=fields.get(_LINKED_TOPIC_FIELD)),
         spec_version=spec_version,
         digest=digest,
+        rationale=fields.get(_RATIONALE_FIELD, ""),
         selected_clauses=selected_clauses,
         named_clauses=named_clauses,
         provenance_complete=fields.get(_PROVENANCE_FIELD) == "complete",

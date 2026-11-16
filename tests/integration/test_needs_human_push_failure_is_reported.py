@@ -185,6 +185,98 @@ def test_a_successful_preservation_push_names_the_ref_it_pushed(tmp_path: Path) 
     assert f"{_REASON}loop cannot auto-resolve this work-item" in completed.stderr
 
 
+def test_a_forge_server_error_retries_the_preservation_push_before_reporting_failure(
+    tmp_path: Path,
+) -> None:
+    """A transient GitHub refusal spends the bounded retry budget before preservation fails."""
+    origin = _bare_origin(tmp_path=tmp_path)
+    work = _sandbox(tmp_path=tmp_path, origin_url=str(origin))
+    attempts = tmp_path / "preservation-push-attempts"
+    helper_root = tmp_path / "push-helper"
+    helper = helper_root / "bin" / "push_origin"
+    helper.parent.mkdir(parents=True)
+    _ = helper.write_text(
+        "#!/bin/sh\n"
+        f"printf x >> {attempts}\n"
+        "printf '%s\\n' 'remote: Internal Server Error' >&2\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    helper.chmod(0o700)
+
+    completed = _run_needs_human(
+        work=work,
+        run_id=_RUN_ID,
+        extra_env={"LIVESPEC_SANDBOX_GH_REFRESH_ROOT": str(helper_root)},
+    )
+
+    assert attempts.read_text(encoding="utf-8") == "xxx"
+    assert _PUSH_FAILED in completed.stderr
+    assert _PRESERVED not in completed.stderr
+
+
+def test_a_commit_refs_rejection_retries_before_reporting_preservation_failure(
+    tmp_path: Path,
+) -> None:
+    """A transient ``commit_refs`` refusal spends the bounded retry budget."""
+    origin = _bare_origin(tmp_path=tmp_path)
+    work = _sandbox(tmp_path=tmp_path, origin_url=str(origin))
+    attempts = tmp_path / "preservation-push-attempts"
+    helper_root = tmp_path / "push-helper"
+    helper = helper_root / "bin" / "push_origin"
+    helper.parent.mkdir(parents=True)
+    _ = helper.write_text(
+        "#!/bin/sh\n"
+        f"printf x >> {attempts}\n"
+        "printf '%s\\n' 'remote: fatal error in commit_refs' >&2\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    helper.chmod(0o700)
+
+    completed = _run_needs_human(
+        work=work,
+        run_id=_RUN_ID,
+        extra_env={"LIVESPEC_SANDBOX_GH_REFRESH_ROOT": str(helper_root)},
+    )
+
+    assert attempts.read_text(encoding="utf-8") == "xxx"
+    assert _PUSH_FAILED in completed.stderr
+    assert _PRESERVED not in completed.stderr
+
+
+def test_a_commit_refs_rejection_that_landed_is_reported_as_preserved(
+    tmp_path: Path,
+) -> None:
+    """A failed client status cannot erase an origin ref that already landed."""
+    origin = _bare_origin(tmp_path=tmp_path)
+    work = _sandbox(tmp_path=tmp_path, origin_url=str(origin))
+    attempts = tmp_path / "preservation-push-attempts"
+    helper_root = tmp_path / "push-helper"
+    helper = helper_root / "bin" / "push_origin"
+    helper.parent.mkdir(parents=True)
+    _ = helper.write_text(
+        "#!/bin/sh\n"
+        f"printf x >> {attempts}\n"
+        '"$@"\n'
+        "printf '%s\\n' 'remote: fatal error in commit_refs' >&2\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    helper.chmod(0o700)
+
+    completed = _run_needs_human(
+        work=work,
+        run_id=_RUN_ID,
+        extra_env={"LIVESPEC_SANDBOX_GH_REFRESH_ROOT": str(helper_root)},
+    )
+
+    assert attempts.read_text(encoding="utf-8") == "xxx"
+    assert _git_revision(repo=origin, revision=_REF) == _git_revision(repo=work, revision="HEAD")
+    assert f"{_PRESERVED}: {_REF}" in completed.stderr
+    assert _PUSH_FAILED not in completed.stderr
+
+
 def _node_script(*, node: str) -> str:
     """The node's OWN script, unescaped from the DOT attribute — never a paraphrase."""
     text = _WORKFLOW.read_text(encoding="utf-8")
@@ -212,6 +304,12 @@ def _sandbox(*, tmp_path: Path, origin_url: str) -> Path:
     _git(work, "add", "seed.txt")
     _git(work, "commit", "--quiet", "-m", "seed")
     _git(work, "remote", "add", "origin", origin_url)
+    # The node preserves the engine-named run branch's tip, so the fixture sits on
+    # one carrying settled work ahead of the default branch.
+    _git(work, "switch", "--quiet", "-c", f"fabro/run/{_RUN_ID}")
+    (work / "run-work.txt").write_text("the run's settled work\n", encoding="utf-8")
+    _git(work, "add", "run-work.txt")
+    _git(work, "commit", "--quiet", "-m", "settled run work")
     (work / _WIP).write_text(_WIP_BODY, encoding="utf-8")
     return work
 
@@ -239,11 +337,13 @@ def _env() -> dict[str, str]:
     return env
 
 
-def _run_needs_human(*, work: Path, run_id: str) -> subprocess.CompletedProcess[str]:
+def _run_needs_human(
+    *, work: Path, run_id: str, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["sh", "-c", _node_script(node="needs_human")],
         cwd=str(work),
-        env=_env(),
+        env={**_env(), **(extra_env or {})},
         check=False,
         text=True,
         capture_output=True,
@@ -290,3 +390,14 @@ def _pushed_refs(*, origin: Path) -> list[str]:
         capture_output=True,
     )
     return completed.stdout.split()
+
+
+def _git_revision(*, repo: Path, revision: str) -> str:
+    completed = subprocess.run(
+        ["git", "rev-parse", revision],
+        cwd=str(repo),
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return completed.stdout.strip()

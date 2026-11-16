@@ -28,6 +28,10 @@ _VALVE_MODULE = "livespec_orchestrator_beads_fabro.commands._drive_merge_hold_va
 # each guard case moves exactly one of them.
 _HEAD = "a" * 40
 _OTHER_HEAD = "b" * 40
+# The tree and parent the two heads share when the move between them is only a
+# reworded commit message.
+_TREE = "1" * 40
+_PARENT = "2" * 40
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -214,6 +218,27 @@ def _guard_answers(
     return [
         _Run(returncode=0, stdout=_ps_json() if ps is None else ps),
         _Run(returncode=0, stdout=_records_json() if records is None else records),
+    ]
+
+
+def _commit_json(*, tree: str = _TREE, parents: tuple[str, ...] = (_PARENT,)) -> str:
+    """A `gh api .../git/commits/<sha>` payload: the commit's tree and its parents."""
+    return json.dumps({"tree": {"sha": tree}, "parents": [{"sha": one} for one in parents]})
+
+
+def _commit_argv(*, sha: str) -> tuple[str, ...]:
+    return ("gh", "api", f"/repos/{{owner}}/{{repo}}/git/commits/{sha}")
+
+
+def _commit_answers(*, proved: str | None = None, current: str | None = None) -> list[_Run]:
+    """The two commit readings the head comparison takes: the proved head, then the current.
+
+    Taken only once the current head differs from the proved one; a head that
+    equals it needs neither reading.
+    """
+    return [
+        _Run(returncode=0, stdout=_commit_json() if proved is None else proved),
+        _Run(returncode=0, stdout=_commit_json() if current is None else current),
     ]
 
 
@@ -422,6 +447,63 @@ def test_a_failed_arm_is_reported_after_the_hold_was_removed(tmp_path: Path) -> 
     assert "boom" in str(result["summary"])
 
 
+def test_release_merges_directly_when_clean_status_refuses_auto_merge(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _hold(repo)
+    _journal(repo, records=[_contract_record(work_item_id=_ITEM_ID, merge_mode="rebase")])
+    runner = _Runner(
+        results=[
+            _Run(returncode=0, stdout=_pr_json()),
+            *_guard_answers(),
+            _Run(
+                returncode=1,
+                stderr="GraphQL: Pull request is in clean status (enablePullRequestAutoMerge)",
+            ),
+            _Run(returncode=0),
+        ]
+    )
+
+    result = run_human_valve_action(
+        repo=repo, action_id=f"set-merge-hold:{_ITEM_ID}:off", runner=runner
+    )
+
+    assert not _held()
+    assert runner.calls[-2:] == [
+        ("gh", "pr", "merge", "7", "--rebase", "--auto", "--delete-branch"),
+        ("gh", "pr", "merge", "7", "--rebase", "--delete-branch"),
+    ]
+    summary = str(result["summary"])
+    assert "merged directly" in summary
+    assert "#7" in summary
+    assert "--rebase" in summary
+
+
+def test_release_reports_a_failed_direct_merge_after_clean_status_refusal(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _hold(repo)
+    _journal(repo, records=[_contract_record(work_item_id=_ITEM_ID, merge_mode="rebase")])
+    runner = _Runner(
+        results=[
+            _Run(returncode=0, stdout=_pr_json()),
+            *_guard_answers(),
+            _Run(
+                returncode=1,
+                stderr="GraphQL: Pull request is in clean status (enablePullRequestAutoMerge)",
+            ),
+            _Run(returncode=1, stderr="direct merge blocked"),
+        ]
+    )
+
+    result = run_human_valve_action(
+        repo=repo, action_id=f"set-merge-hold:{_ITEM_ID}:off", runner=runner
+    )
+
+    assert not _held()
+    assert result["domain_error"] == "direct-merge-failed"
+    assert "direct merge blocked" in str(result["summary"])
+    assert runner.calls[-1] == ("gh", "pr", "merge", "7", "--rebase", "--delete-branch")
+
+
 def test_release_refuses_while_a_run_of_the_item_is_live(tmp_path: Path) -> None:
     """The v145 arm guard's first measurement: a live run means no arming.
 
@@ -504,6 +586,7 @@ def test_release_refuses_a_head_no_proof_record_names(tmp_path: Path) -> None:
         results=[
             _Run(returncode=0, stdout=_pr_json(head=_OTHER_HEAD)),
             *_guard_answers(),
+            *_commit_answers(current=_commit_json(tree="3" * 40)),
         ]
     )
 
@@ -515,6 +598,139 @@ def test_release_refuses_a_head_no_proof_record_names(tmp_path: Path) -> None:
     assert result["domain_error"] == "unproved-head"
     assert _OTHER_HEAD in str(result["summary"])
     assert _HEAD in str(result["summary"])
+    assert not any(call[:3] == ("gh", "pr", "merge") for call in runner.calls)
+
+
+def test_release_arms_a_head_that_differs_from_the_proved_head_only_in_its_message(
+    tmp_path: Path,
+) -> None:
+    """A reworded commit keeps the proof: same parent, same tree, new head.
+
+    The measured case: a hand reword moved the head while the tree and the parent
+    stayed put, and the release refused for want of a record naming the new head.
+    The proof graded a tree, and the tree did not move.
+
+    The result names BOTH heads and the tree they share, because that is how an
+    operator reads back what the arming was justified by; and the arm itself is
+    the ordinary one, with the journaled merge method.
+    """
+    repo = _repo(tmp_path)
+    _hold(repo)
+    _journal(repo, records=[_contract_record(work_item_id=_ITEM_ID, merge_mode="squash")])
+    runner = _Runner(
+        results=[
+            _Run(returncode=0, stdout=_pr_json(head=_OTHER_HEAD)),
+            *_guard_answers(),
+            *_commit_answers(),
+            _Run(returncode=0),
+        ]
+    )
+
+    result = run_human_valve_action(
+        repo=repo, action_id=f"set-merge-hold:{_ITEM_ID}:off", runner=runner
+    )
+
+    assert result["status"] == "green"
+    assert not _held()
+    assert runner.calls[-3:-1] == [_commit_argv(sha=_HEAD), _commit_argv(sha=_OTHER_HEAD)]
+    assert runner.calls[-1] == ("gh", "pr", "merge", "7", "--squash", "--auto", "--delete-branch")
+    summary = str(result["summary"])
+    assert _HEAD in summary
+    assert _OTHER_HEAD in summary
+    assert _TREE in summary
+
+
+def test_release_refuses_a_head_whose_tree_differs_naming_the_tree_comparison(
+    tmp_path: Path,
+) -> None:
+    """A head carrying another tree is code nothing graded, whatever its parent.
+
+    The refusal names the TREE comparison as the measurement that failed, because
+    the remedy follows from it: a different tree needs a proof of its own, where
+    a different parent with the same tree is a question about history. Both heads
+    ride the message so an operator can tell which side moved.
+    """
+    repo = _repo(tmp_path)
+    _hold(repo)
+    _journal(repo, records=[_contract_record(work_item_id=_ITEM_ID, merge_mode="rebase")])
+    runner = _Runner(
+        results=[
+            _Run(returncode=0, stdout=_pr_json(head=_OTHER_HEAD)),
+            *_guard_answers(),
+            *_commit_answers(current=_commit_json(tree="3" * 40)),
+        ]
+    )
+
+    result = run_human_valve_action(
+        repo=repo, action_id=f"set-merge-hold:{_ITEM_ID}:off", runner=runner
+    )
+
+    assert _held()
+    assert result["domain_error"] == "unproved-head"
+    summary = str(result["summary"])
+    assert "tree comparison" in summary
+    assert _HEAD in summary
+    assert _OTHER_HEAD in summary
+    assert not any(call[:3] == ("gh", "pr", "merge") for call in runner.calls)
+
+
+def test_release_refuses_the_proved_tree_on_another_parent_naming_the_parent_comparison(
+    tmp_path: Path,
+) -> None:
+    """The same tree on a different parent is a different history, so it is not armed.
+
+    The trees match, so the TREE comparison passes and cannot be the measurement
+    named. The parent comparison is, and it is kept apart from the tree one for
+    the reason the clause keeps them apart: a rebase onto a new base reproduces
+    the tree of a change and not the code it will merge with.
+    """
+    repo = _repo(tmp_path)
+    _hold(repo)
+    _journal(repo, records=[_contract_record(work_item_id=_ITEM_ID, merge_mode="rebase")])
+    runner = _Runner(
+        results=[
+            _Run(returncode=0, stdout=_pr_json(head=_OTHER_HEAD)),
+            *_guard_answers(),
+            *_commit_answers(current=_commit_json(parents=("4" * 40,))),
+        ]
+    )
+
+    result = run_human_valve_action(
+        repo=repo, action_id=f"set-merge-hold:{_ITEM_ID}:off", runner=runner
+    )
+
+    assert _held()
+    assert result["domain_error"] == "unproved-head"
+    summary = str(result["summary"])
+    assert "parent comparison" in summary
+    assert "tree comparison" not in summary
+    assert _HEAD in summary
+    assert _OTHER_HEAD in summary
+    assert not any(call[:3] == ("gh", "pr", "merge") for call in runner.calls)
+
+
+def test_release_leaves_the_pull_request_unarmed_when_a_commit_cannot_be_read(
+    tmp_path: Path,
+) -> None:
+    """A head whose commit cannot be read is not shown to differ only in its message."""
+    repo = _repo(tmp_path)
+    _hold(repo)
+    _journal(repo, records=[_contract_record(work_item_id=_ITEM_ID, merge_mode="rebase")])
+    runner = _Runner(
+        results=[
+            _Run(returncode=0, stdout=_pr_json(head=_OTHER_HEAD)),
+            *_guard_answers(),
+            _Run(returncode=0, stdout=_commit_json()),
+            _Run(returncode=1, stderr="not found"),
+        ]
+    )
+
+    result = run_human_valve_action(
+        repo=repo, action_id=f"set-merge-hold:{_ITEM_ID}:off", runner=runner
+    )
+
+    assert _held()
+    assert result["domain_error"] == "unproved-head"
     assert not any(call[:3] == ("gh", "pr", "merge") for call in runner.calls)
 
 
@@ -660,3 +876,66 @@ def test_the_default_runner_shells_out_to_gh(
 
     assert _held()
     assert calls[0][0] == _view_argv()
+
+
+_MERGE_QUEUE_REFUSAL = "X Cannot use `-d` or `--delete-branch` when merge queue enabled"
+
+
+def test_release_rearms_without_delete_branch_when_a_merge_queue_refuses_it(
+    tmp_path: Path,
+) -> None:
+    """bd-ib-hnj3td: a merge-queue repository refuses the flag, so the arm is retried without it."""
+    repo = _repo(tmp_path)
+    _hold(repo)
+    _journal(repo, records=[_contract_record(work_item_id=_ITEM_ID, merge_mode="rebase")])
+    runner = _Runner(
+        results=[
+            _Run(returncode=0, stdout=_pr_json()),
+            *_guard_answers(),
+            _Run(returncode=1, stderr=_MERGE_QUEUE_REFUSAL),
+            _Run(returncode=0),
+        ]
+    )
+
+    result = run_human_valve_action(
+        repo=repo, action_id=f"set-merge-hold:{_ITEM_ID}:off", runner=runner
+    )
+
+    assert result["status"] == "green", result
+    assert not _held()
+    assert runner.calls[-2:] == [
+        ("gh", "pr", "merge", "7", "--rebase", "--auto", "--delete-branch"),
+        ("gh", "pr", "merge", "7", "--rebase", "--auto"),
+    ]
+
+
+def test_release_merges_directly_without_delete_branch_in_a_merge_queue_repository(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    _hold(repo)
+    _journal(repo, records=[_contract_record(work_item_id=_ITEM_ID, merge_mode="rebase")])
+    runner = _Runner(
+        results=[
+            _Run(returncode=0, stdout=_pr_json()),
+            *_guard_answers(),
+            _Run(returncode=1, stderr=_MERGE_QUEUE_REFUSAL),
+            _Run(
+                returncode=1,
+                stderr="GraphQL: Pull request is in clean status (enablePullRequestAutoMerge)",
+            ),
+            _Run(returncode=1, stderr=_MERGE_QUEUE_REFUSAL),
+            _Run(returncode=0),
+        ]
+    )
+
+    result = run_human_valve_action(
+        repo=repo, action_id=f"set-merge-hold:{_ITEM_ID}:off", runner=runner
+    )
+
+    assert result["status"] == "green", result
+    assert "merged directly" in str(result["summary"])
+    assert runner.calls[-2:] == [
+        ("gh", "pr", "merge", "7", "--rebase", "--delete-branch"),
+        ("gh", "pr", "merge", "7", "--rebase"),
+    ]

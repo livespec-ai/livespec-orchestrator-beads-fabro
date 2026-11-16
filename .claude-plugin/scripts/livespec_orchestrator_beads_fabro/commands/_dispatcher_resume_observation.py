@@ -69,6 +69,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from livespec_orchestrator_beads_fabro._store_dispatch_claim import claim_row_for
 from livespec_orchestrator_beads_fabro._store_merge_hold import merge_hold_from_labels
 from livespec_orchestrator_beads_fabro._store_rework_mutations import LABEL_REWORK_PENDING
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dispatch_lock import (
@@ -81,6 +82,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import Comman
 from livespec_orchestrator_beads_fabro.commands._dispatcher_item_ledger_reads import (
     read_dispatch_labels,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import store_config
 from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_evidence import (
     read_pull_request_records,
 )
@@ -92,7 +94,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_reflection_journal i
     read_journal_records,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_anchor import (
+    FACTORY_RECORD_VERDICTS,
     ResumeAnchor,
+    published_head,
     resume_anchor,
     resume_anchor_from_cancel,
 )
@@ -113,6 +117,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_journal impor
 from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_refusals import (
     ResumeObservation,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_rework_after_merge import (
+    rework_rejected_after_merge,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_tdd_probe import dispatch_ids_for
 from livespec_orchestrator_beads_fabro.commands._run_attribution import journaled_run_ids
 from livespec_orchestrator_beads_fabro.types import WorkItem
@@ -129,6 +136,9 @@ _ACTIVE_STATUS = "active"
 _LABELS_UNREADABLE = "labels-unreadable"
 _MERGE_HOLD = "merge-hold"
 _WHITESPACE = re.compile(r"\s+")
+_ASSERTION_HEADING = re.compile(
+    r"^## Assertion \d+ — (?P<assertion>[^\n]+(?:\n(?![ \t]*$)[^\n]+)*)$", re.MULTILINE
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -146,6 +156,17 @@ class ResumeGather:
     branch: str
     earlier_run_ids: tuple[str, ...]
     workflow_name: str | None
+    publications: tuple[tuple[str, str], ...] = ()
+
+
+def _publications_of(*, records: tuple[ProofRecord, ...]) -> tuple[tuple[str, str], ...]:
+    """Each head a factory record declares, paired with the run that published it."""
+    return tuple(
+        (head, one.run_id)
+        for one in records
+        if one.verdict in FACTORY_RECORD_VERDICTS
+        and (head := published_head(body=one.body)) is not None
+    )
 
 
 def gather_resume(
@@ -186,7 +207,11 @@ def gather_resume(
         runner=runner,
     )
     anchor = (
-        resume_anchor(records=records or (), executing_node=factory.executing_node)
+        resume_anchor(
+            records=records or (),
+            executing_node=factory.executing_node,
+            proof_verify_ended=factory.proof_verify_ended,
+        )
         if cancel is None
         else resume_anchor_from_cancel(cancel=cancel, executing_node=factory.executing_node)
     )
@@ -219,24 +244,44 @@ def gather_resume(
             ),
             earlier_run_succeeded=factory.earlier_run_succeeded,
             own_route=_own_route(repo=repo, item=item),
+            rework_after_merge=rework_rejected_after_merge(
+                records=journaled,
+                work_item_id=item.id,
+                merged_at=None if pull_request is None else pull_request.merged_at,
+            ),
         ),
         anchor=anchor,
         branch=branch,
-        earlier_run_ids=_earlier_run_ids(records=journaled, item=item, anchor=anchor),
+        earlier_run_ids=_earlier_run_ids(records=journaled, item=item, anchor=anchor, repo=repo),
         workflow_name=earlier_workflow_name(records=journaled, work_item_id=item.id),
+        publications=_publications_of(records=tuple(records or ())),
     )
 
 
 def unproved_assertions(*, item: WorkItem, record: ProofRecord) -> tuple[str, ...]:
-    """The item's current assertions the anchoring record does not carry.
+    """Every named assertion that establishes the item and anchoring record differ.
 
-    The LIST rather than a boolean, because the refusal has to name the
-    difference: an operator reading which assertion arrived after the earlier run
-    can decide whether a plain dispatch is what they want.
+    Current-only assertions arrived after the earlier run and keep the
+    established refusal wording; they come first.  A record-only assertion was
+    removed while the item rested, which is the other direction of the
+    exact-match precondition, and follows them, so an addition never hides a
+    removal.  Either makes a plain dispatch the safe route.
     """
+    assertions = effective_criteria(item=item).assertions
     body = _normalized(text=record.body)
+    current = frozenset(_normalized(text=one) for one in assertions)
+    missing = tuple(one for one in assertions if _normalized(text=one) not in body)
+    removed = tuple(
+        one for one in _recorded_assertions(record=record) if _normalized(text=one) not in current
+    )
+    return missing + removed
+
+
+def _recorded_assertions(*, record: ProofRecord) -> tuple[str, ...]:
+    """The assertion text the standard headings carry, including a wrapped tail."""
     return tuple(
-        one for one in effective_criteria(item=item).assertions if _normalized(text=one) not in body
+        " ".join(match.group("assertion").split())
+        for match in _ASSERTION_HEADING.finditer(record.body)
     )
 
 
@@ -274,7 +319,7 @@ def _earlier_run_id(*, cancel: CancelAnchor | None, provisional: ResumeAnchor | 
 
 
 def _changed_assertions(*, item: WorkItem, anchor: ResumeAnchor | None) -> tuple[str, ...]:
-    """The item's assertions the anchoring record does not carry; none without one.
+    """The item/record assertion difference, or none without an inherited record.
 
     An anchor carrying NO record inherits no proof — the resumed run enters at
     `proof_capture` and captures afresh — so there is no record for an assertion
@@ -289,7 +334,11 @@ def _changed_assertions(*, item: WorkItem, anchor: ResumeAnchor | None) -> tuple
 
 
 def _earlier_run_ids(
-    *, records: tuple[dict[str, object], ...], item: WorkItem, anchor: ResumeAnchor | None
+    *,
+    records: tuple[dict[str, object], ...],
+    item: WorkItem,
+    anchor: ResumeAnchor | None,
+    repo: Path,
 ) -> tuple[str, ...]:
     """Every identifier the earlier run answers to, the record's own leading.
 
@@ -306,7 +355,12 @@ def _earlier_run_ids(
     """
     named = [] if anchor is None else [anchor.run_id]
     named.extend(journaled_run_ids(records=records, work_item_id=item.id))
+    run_id_named = bool(named)
     named.extend(dispatch_ids_for(records=records, work_item_id=item.id))
+    if not run_id_named and (repo / ".livespec.jsonc").is_file():
+        claim = claim_row_for(path=store_config(repo=repo), work_item_id=item.id).stamp
+        if claim is not None:
+            named.extend(one for one in (claim.run_id, claim.dispatch_id) if one is not None)
     return tuple(dict.fromkeys(named))
 
 

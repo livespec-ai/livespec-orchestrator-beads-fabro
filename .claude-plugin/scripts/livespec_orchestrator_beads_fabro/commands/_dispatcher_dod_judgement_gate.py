@@ -41,18 +41,25 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement import
     JUDGEMENT_HELD,
     JUDGEMENT_UNAVAILABLE,
     first_remedy,
+    judgement_subject,
     judgement_subject_digest,
     rubric_digest,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_comments import (
-    item_comment_bodies,
+    judgement_comment_bodies,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_held import held_judgement
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_markers import (
+    is_receipt_comment,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_preflight_reuse import (
+    identity_for_dod_taking,
+    reusable_verdict_for_identity,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_record import (
     GoverningHeadingReceipt,
-    RecordedJudgement,
     did_not_run_comment,
     recorded_did_not_run_causes,
-    reusable_verdict,
     verdict_comment,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_run import (
@@ -62,8 +69,6 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_run im
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_spec_identity import (
     SpecIdentity,
-    spec_identity_for_governing,
-    whole_tree_identity,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import ShellCommandRunner
 from livespec_orchestrator_beads_fabro.commands._dod_governing_heading_judge import (
@@ -134,7 +139,7 @@ def judge_definition_of_done(  # noqa: PLR0913 - each argument is an independent
     runner: CommandRunner | None = None,
     payload_root: Path | None = None,
     governing_heading: GoverningHeadingReader | None = None,
-    release_of_held_spec_tier: bool = False,
+    release_of_held_spec_tier: bool | None = None,
 ) -> DodJudgementDecision:
     """Reuse the recorded verdict, else take the judgement and record it.
 
@@ -190,15 +195,19 @@ def judge_definition_of_done(  # noqa: PLR0913 - each argument is an independent
             else governing_heading
         )
         governing = reader(item=item, repo=repo)
-    identity = (
-        whole_tree_identity(cwd=repo)
-        if release_of_held_spec_tier
-        else spec_identity_for_governing(item=item, cwd=repo, governing=governing)
+    identity = identity_for_dod_taking(
+        item=item,
+        cwd=repo,
+        comments=comments,
+        governing=governing,
+        release_of_held_spec_tier=release_of_held_spec_tier,
     )
     digest = judgement_subject_digest(
         item=item, cwd=repo, comments=comments, spec_identity=identity.value
     )
-    reused = reusable_verdict(comments=comments, digest=digest, rubric_digest=rubric_bytes_digest)
+    reused = reusable_verdict_for_identity(
+        comments=comments, digest=digest, rubric_digest=rubric_bytes_digest, identity=identity
+    )
     if reused is not None:
         return DodJudgementDecision(
             work_item_id=item.id,
@@ -232,6 +241,10 @@ def judge_definition_of_done(  # noqa: PLR0913 - each argument is an independent
             append=append,
             bound_ended_candidates=verdict.bound_ended_candidates,
             attempts=verdict.attempts,
+            subject_characters=len(
+                judgement_subject(item=item, cwd=repo, comments=comments, governing=governing)
+            ),
+            carried_rider_count=sum(not is_receipt_comment(body=comment) for comment in comments),
         )
     append(
         body=verdict_comment(
@@ -284,7 +297,7 @@ def judge_item_definition_of_done(  # noqa: PLR0913 - each argument is an indepe
         append_work_item_comment(path=path, work_item_id=item.id, body=body)
         stamp_judged_if_able(mark=mark_work_item_dod_judgement_recorded, path=path, item_id=item.id)
 
-    bodies = item_comment_bodies(path=path, work_item_id=item.id)
+    bodies = judgement_comment_bodies(path=path, work_item_id=item.id, repo=repo)
     if bodies is None:
         return DodJudgementDecision(work_item_id=item.id, outcome=JUDGEMENT_UNAVAILABLE)
     decision = judge_definition_of_done(
@@ -306,46 +319,6 @@ def judge_item_definition_of_done(  # noqa: PLR0913 - each argument is an indepe
     return decision
 
 
-def held_judgement(
-    *, item: WorkItem, repo: Path, comments: Sequence[str], payload_root: Path | None = None
-) -> RecordedJudgement | None:
-    """The standing refusing verdict for this item, taking no judgement at all.
-
-    `None` both when no verdict is recorded against the item's current digests
-    and when the recorded one admitted it — the two are the same fact for every
-    caller, which is that nothing is holding this item back.
-
-    An UNREADABLE rubric answers `None` too, and that is the fail-open direction
-    this read already takes for an unreadable sidecar: a drain filter and a
-    hygiene listing both read "nothing is holding this item back" as the absence
-    of evidence, and the pre-dispatch wall is where a refusal is made. Holding an
-    item on a rubric nobody could read would empty the queue on an environment
-    fault, and the emptiness reads exactly like a factory with no work.
-
-    THIS READ IS NOT A TAKING, so it takes no governing-heading verdict. It uses
-    only a recorded verdict the component's reuse rule still allows. When none
-    exists the identity it compares is the whole-tree one, which differs from every
-    clause-form record and from every tree-form record taken against another
-    revision, so after a revision the item reads as not held and nothing here ever
-    spends a model.
-    """
-    rubric = judgement_rubric(payload_root=payload_root)
-    if rubric is None:
-        return None
-    governing = reusable_governing_heading_verdict(item=item, repo=repo, comments=comments)
-    identity = spec_identity_for_governing(item=item, cwd=repo, governing=governing)
-    recorded = reusable_verdict(
-        comments=comments,
-        digest=judgement_subject_digest(
-            item=item, cwd=repo, comments=comments, spec_identity=identity.value
-        ),
-        rubric_digest=rubric_digest(rubric=rubric),
-    )
-    if recorded is None or recorded.outcome != JUDGEMENT_HELD:
-        return None
-    return recorded
-
-
 def _unavailable(  # noqa: PLR0913 - each argument is one field of the record it writes.
     *,
     item: WorkItem,
@@ -357,6 +330,8 @@ def _unavailable(  # noqa: PLR0913 - each argument is one field of the record it
     append: Callable[..., None],
     bound_ended_candidates: Sequence[str] = (),
     attempts: Sequence[CandidateAttempt] = (),
+    subject_characters: int | None = None,
+    carried_rider_count: int | None = None,
 ) -> DodJudgementDecision:
     """Record that the judgement did not run, unless this cause already stands.
 
@@ -378,6 +353,8 @@ def _unavailable(  # noqa: PLR0913 - each argument is one field of the record it
                 digest=digest,
                 rubric_digest=rubric,
                 cause=cause,
+                subject_characters=subject_characters,
+                carried_rider_count=carried_rider_count,
                 bound_ended_candidates=bound_ended_candidates,
                 attempts=attempts,
             )

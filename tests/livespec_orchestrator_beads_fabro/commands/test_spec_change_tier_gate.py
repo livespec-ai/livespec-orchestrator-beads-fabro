@@ -35,8 +35,15 @@ from pathlib import Path
 
 import pytest
 from livespec_orchestrator_beads_fabro._beads_client import reset_fake_singleton
-from livespec_orchestrator_beads_fabro._store_comments import read_work_item_comments
+from livespec_orchestrator_beads_fabro._store_comments import (
+    append_work_item_comment,
+    read_work_item_comments,
+)
 from livespec_orchestrator_beads_fabro.commands import _spec_change_tier_record as record
+from livespec_orchestrator_beads_fabro.commands._spec_change_tier import (
+    behaviour_digest,
+    exempt_decision,
+)
 from livespec_orchestrator_beads_fabro.commands._spec_change_tier_gate import (
     CAUSE_CLASSIFICATION_UNREADABLE,
     CAUSE_SPEC_TREE_UNREADABLE,
@@ -45,9 +52,11 @@ from livespec_orchestrator_beads_fabro.commands._spec_change_tier_gate import (
 from livespec_orchestrator_beads_fabro.commands._spec_change_tier_record import (
     STAGE_DISPATCH,
     STAGE_FILING,
+    spec_change_tier_comment,
 )
 from livespec_orchestrator_beads_fabro.store import append_work_item
 from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
+from livespec_runtime.spec_stated import ItemClass
 
 _ITEM = "bd-ib-gate"
 _HEADING = "## A governing clause"
@@ -225,7 +234,7 @@ def test_an_unrelated_revision_reuses_the_tier_verdict_without_a_model_call(
     ledger = _install_judge(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
-        replies=("feature", _UNSTATED, "bug"),
+        replies=("feature", _UNSTATED, "bug", _STATED),
     )
     append_work_item(path=_config(repo=repo), item=_item())
 
@@ -247,11 +256,11 @@ def test_an_unrelated_revision_reuses_the_tier_verdict_without_a_model_call(
     assert _calls(ledger=ledger) == 2
 
 
-def test_a_bug_pays_for_the_classification_and_not_for_the_judgement(
+def test_a_bug_with_stated_behaviour_records_a_free_tier(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = _repo(tmp_path=tmp_path)
-    ledger = _install_judge(tmp_path=tmp_path, monkeypatch=monkeypatch, replies=("bug",))
+    ledger = _install_judge(tmp_path=tmp_path, monkeypatch=monkeypatch, replies=("bug", _STATED))
     append_work_item(path=_config(repo=repo), item=_item())
 
     outcome = classify_item_spec_change_tier(
@@ -260,8 +269,48 @@ def test_a_bug_pays_for_the_classification_and_not_for_the_judgement(
     assert outcome.is_spec_change is False
     assert outcome.recorded is not None
     assert outcome.recorded.classification == "bug"
+    assert outcome.recorded.verdict_kind == "stated"
     assert outcome.recorded.linked_proposal_topic is None
-    assert _calls(ledger=ledger) == 1
+    assert _calls(ledger=ledger) == 2
+
+
+@pytest.mark.parametrize("classification", ["bug", "chore", "non_functional"])
+def test_an_exempt_record_is_reused_until_its_asked_for_behaviour_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, classification: ItemClass
+) -> None:
+    repo = _repo(tmp_path=tmp_path)
+    ledger = _install_judge(
+        tmp_path=tmp_path, monkeypatch=monkeypatch, replies=("feature", _UNSTATED)
+    )
+    item = _item()
+    config = _config(repo=repo)
+    append_work_item(path=config, item=item)
+    append_work_item_comment(
+        path=config,
+        work_item_id=item.id,
+        body=spec_change_tier_comment(
+            item_id=item.id,
+            stage=STAGE_FILING,
+            decision=exempt_decision(classification=classification),
+            spec_version="1",
+            digest=behaviour_digest(item=item),
+        ),
+    )
+
+    reused = classify_item_spec_change_tier(item=item, repo=repo, path=config, stage=STAGE_DISPATCH)
+
+    assert reused.reused is True
+    assert _calls(ledger=ledger) == 0
+
+    changed = classify_item_spec_change_tier(
+        item=_item(description="Changed observable behaviour."),
+        repo=repo,
+        path=config,
+        stage=STAGE_DISPATCH,
+    )
+
+    assert changed.reused is False
+    assert _calls(ledger=ledger) == 2
 
 
 def test_an_edited_item_is_re_classified_rather_than_reusing_the_old_record(
@@ -287,7 +336,7 @@ def test_an_edited_item_is_re_classified_rather_than_reusing_the_old_record(
     )
     assert edited.reused is False
     assert edited.is_spec_change is False
-    assert _calls(ledger=ledger) == 3
+    assert _calls(ledger=ledger) == 4
 
 
 def test_an_unreadable_classification_records_the_cause_once_and_no_tier(
@@ -319,6 +368,26 @@ def test_an_unreadable_classification_records_the_cause_once_and_no_tier(
     # writes nothing: a comment per item per pass buries the item's history.
     assert len(_comments(repo=repo)) == 1
     assert _calls(ledger=ledger) == 2
+
+
+def test_a_classifier_with_no_eligible_model_records_that_distinct_cause(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path=tmp_path)
+    _ = (repo / ".livespec.jsonc").write_text(
+        '{"livespec-orchestrator-beads-fabro": {"connection": {"prefix": "bd-ib"}, '
+        '"dispatcher": {}}}',
+        encoding="utf-8",
+    )
+    append_work_item(path=_config(repo=repo), item=_item())
+
+    outcome = classify_item_spec_change_tier(
+        item=_item(), repo=repo, path=_config(repo=repo), stage=STAGE_FILING
+    )
+
+    assert outcome.recorded is None
+    assert outcome.cause == "no-eligible-model"
+    assert "no-eligible-model" in _comments(repo=repo)[0]
 
 
 def test_an_unreadable_spec_tree_records_its_own_cause_and_spends_nothing(

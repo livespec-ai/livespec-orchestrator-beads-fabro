@@ -3,13 +3,9 @@
 from __future__ import annotations
 
 import argparse
-import json
-from dataclasses import asdict
-from functools import partial
 from pathlib import Path
 
 from livespec_runtime.attention_item import AttentionItem
-from livespec_runtime.hygiene_scan import scan_hygiene
 
 from livespec_orchestrator_beads_fabro._store_answer_disposition import (
     read_answer_disposition_labels,
@@ -23,10 +19,13 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_workflow_pin_snapsho
 from livespec_orchestrator_beads_fabro.commands._needs_attention_capacity import (
     capacity_items,
 )
+from livespec_orchestrator_beads_fabro.commands._needs_attention_claim_tokens import (
+    claim_token_missing_items,
+)
 from livespec_orchestrator_beads_fabro.commands._needs_attention_conformance import (
     ConformanceContext,
     composed_conformant,
-    conformant_lane,
+    hygiene_scan_lane,
 )
 from livespec_orchestrator_beads_fabro.commands._needs_attention_currency_staleness import (
     currency_staleness_items,
@@ -40,16 +39,14 @@ from livespec_orchestrator_beads_fabro.commands._needs_attention_detection_stale
     detection_staleness_items,
 )
 from livespec_orchestrator_beads_fabro.commands._needs_attention_envelope import (
-    render_envelope_markdown,
+    render_json,
+    render_markdown,
 )
 from livespec_orchestrator_beads_fabro.commands._needs_attention_handoffs import (
     plans,
 )
-from livespec_orchestrator_beads_fabro.commands._needs_attention_idle_factory import (
-    idle_factory_items,
-)
-from livespec_orchestrator_beads_fabro.commands._needs_attention_idle_slot import (
-    idle_slot_items,
+from livespec_orchestrator_beads_fabro.commands._needs_attention_journal_lanes import (
+    journal_hold_and_idle_items,
 )
 from livespec_orchestrator_beads_fabro.commands._needs_attention_merge_hold import (
     merge_hold_items,
@@ -69,7 +66,7 @@ from livespec_orchestrator_beads_fabro.commands._needs_attention_ready_aging imp
     ready_aging_items,
 )
 from livespec_orchestrator_beads_fabro.commands._needs_attention_ready_aging import (
-    utc_now_iso as _ready_aging_utc_now_iso,
+    utc_now_iso as _utc_now_iso,
 )
 from livespec_orchestrator_beads_fabro.commands._needs_attention_release_adoption import (
     default_release_adoption_bases,
@@ -77,6 +74,12 @@ from livespec_orchestrator_beads_fabro.commands._needs_attention_release_adoptio
 )
 from livespec_orchestrator_beads_fabro.commands._needs_attention_spec_next_run import (
     spec_next,
+)
+from livespec_orchestrator_beads_fabro.commands._needs_attention_spec_tier_relink import (
+    spec_tier_relink_items,
+)
+from livespec_orchestrator_beads_fabro.commands._needs_attention_unpreflightable import (
+    unpreflightable_definition_of_done_items,
 )
 from livespec_orchestrator_beads_fabro.commands._needs_attention_unrunnable_acceptance import (
     unrunnable_acceptance_items,
@@ -130,10 +133,8 @@ def main(*, argv: list[str] | None = None) -> int:
         work_items_path=args.work_items_path,
         include_hygiene=not args.skip_hygiene,
     )
-    if args.as_json:
-        _ = write_stdout(text=render_json(attention=attention))
-    else:
-        _ = write_stdout(text=render_markdown(attention=attention))
+    render = render_json if args.as_json else render_markdown
+    _ = write_stdout(text=render(attention=attention))
     return 0
 
 
@@ -173,15 +174,11 @@ def build_attention(
     # carry that boundary at their own construction; the hygiene scan builds its
     # items inside the runtime, so it crosses the lane-granular one here.
     context = ConformanceContext(project_root=project_root, repo=repo_name)
-    hygiene_scan = (
-        conformant_lane(
-            context=context,
-            subject=f"hygiene scan of {repo_name}",
-            key=f"hygiene-scan-{repo_name}",
-            compose=partial(scan_hygiene, repo_path=project_root, repo_name=repo_name),
-        )
-        if include_hygiene
-        else []
+    hygiene_scan = hygiene_scan_lane(
+        context=context,
+        project_root=project_root,
+        repo_name=repo_name,
+        include_hygiene=include_hygiene,
     )
     # The acceptance-eligibility wall behind `impl_next`, `idle_slot_items` and
     # `unrunnable_acceptance_items` reads each item's recorded workflow pin; one
@@ -235,20 +232,24 @@ def build_attention(
                 held_work_item_ids=held_work_item_ids,
             )
             + capacity_items(project_root=project_root, repo=repo_name, items=materialized)
-            # The mirror image of the capacity fact above: that one reports a
-            # factory too busy to take more, this one a factory taking nothing
-            # while dispatchable work waits. An idle queue is silent on every
-            # other lane here — nothing is stranded, held, or aging past a
-            # bound — so without this row it is visible only by being noticed.
-            + idle_factory_items(project_root=project_root, repo=repo_name, items=materialized)
-            # The CROSS-TENANT half of that pair, and the one the row above
-            # structurally cannot report: it is scoped to this repository's own
-            # ready set, so a priority epic in another tenant is invisible to it,
-            # and so is a stale edge — an item held only by blockers that landed
-            # and were never closed. Composes nothing unless this repository
-            # commits a `dispatcher.idle_slot_audit` object, so an unconfigured
-            # repository reads no tenant and no board.
-            + idle_slot_items(project_root=project_root, repo=repo_name)
+            # Three lanes from ONE reading of the dispatch journal. First the
+            # facts for holds that only the journal records, which every other
+            # lane here is blind to: such an item rests in `ready` with no claim
+            # and no blocked reason. Then the mirror image of the capacity fact
+            # above: that one reports a factory too busy to take more, the
+            # idle-factory fact a factory taking nothing while dispatchable work
+            # waits, so that a journal-held item must not count as dispatchable
+            # there. An idle queue is silent on every other lane — nothing is
+            # stranded, held, or aging past a bound. Last the CROSS-TENANT half
+            # of that pair, which the row before it structurally cannot report:
+            # it is scoped to this repository's own ready set, so a priority epic
+            # in another tenant is invisible to it, and so is a stale edge — an
+            # item held only by blockers that landed and were never closed.
+            # Composes nothing unless this repository commits a
+            # `dispatcher.idle_slot_audit` object.
+            + journal_hold_and_idle_items(
+                project_root=project_root, repo=repo_name, items=materialized
+            )
             # The other half of that pair, and the one the idle-factory fact cannot
             # report: an item resting in `ready` that NO dispatch will ever take,
             # because the shared eligibility decision refuses it. Such a row is
@@ -270,6 +271,9 @@ def build_attention(
             # it is silent on that lane by construction and on every other lane
             # here, because nothing about it is stranded, aging or claimed.
             + held_definition_of_done_items(
+                project_root=project_root, repo=repo_name, items=materialized
+            )
+            + unpreflightable_definition_of_done_items(
                 project_root=project_root, repo=repo_name, items=materialized
             )
             # The four Proof of Done hygiene rows, reached through the one entry
@@ -341,29 +345,18 @@ def build_attention(
                 repo=repo_name,
                 records=read_intake_triage_records(path=config.work_items_path),
             )
+            # The row the claim-token cutover owes. Once `dispatcher.claim_tokens`
+            # is true, an item naming no current token is refused by every claim
+            # writer and reported by no lane above: nothing is stranded, held or
+            # aging, the writers simply stand down. Composes nothing, and reads
+            # nothing, while the key is false or absent.
+            + claim_token_missing_items(project_root=project_root, repo=repo_name, config=config)
+            # A held spec-change-tier item whose generalization-target heading was
+            # ratified under a different topic. The hold clears only on its EXACT
+            # linked topic and no other lane can tell the seat its stem went stale;
+            # the row names the candidate and the relink route, and changes nothing.
+            + spec_tier_relink_items(
+                project_root=project_root, repo=repo_name, items=materialized, config=config
+            )
             + hygiene_scan
         )
-
-
-def _utc_now_iso() -> str:
-    return _ready_aging_utc_now_iso()
-
-
-def render_json(*, attention: list[AttentionItem]) -> str:
-    return (
-        json.dumps({"attention": [asdict(item) for item in attention]}, indent=2, sort_keys=True)
-        + "\n"
-    )
-
-
-def render_markdown(*, attention: list[AttentionItem]) -> str:
-    """Render the operator Markdown by consuming this producer's OWN wire envelope.
-
-    The consumer-tolerance posture binds this repository's own consuming
-    surfaces, so the operator view is not rendered from the in-memory
-    composition: it is rendered from exactly the bytes a downstream consumer
-    receives, through the same tolerant per-item parse. That is what makes the
-    posture executable here rather than merely advertised — a malformed item can
-    only ever cost itself, and an unknown `kind` renders generically.
-    """
-    return render_envelope_markdown(envelope=render_json(attention=attention))

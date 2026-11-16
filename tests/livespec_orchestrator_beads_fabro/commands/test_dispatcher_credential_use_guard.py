@@ -39,17 +39,28 @@ freshness measurement and the projection -- a bounded renewal request, a queue
 wait, sandbox preparation. Anchoring on the projection instant alone stamps a
 deadline the credential cannot cover whenever that delay is non-zero, which is
 every real dispatch.
+
+HOW THESE CASES AVOID REAL TIME. The behaviour under test is a SHIPPED SHELL
+SCRIPT comparing `date` against an absolute epoch, enforced against processes
+this interpreter does not run. There is no clock to inject into `/bin/sh`, but
+there is a `date` and a `sleep` the script finds on PATH, so every timing case
+puts a controlled pair there: `date` reads a clock FILE and `sleep` advances it
+at once. The deadline is then an instant on that file, the guard's signals land
+on readings of it, and "the child stopped by the deadline" is read off the file
+at the moment a deterministic event -- EOF on a pipe every process in the group
+inherited -- says the group is gone. Cases that need no clock at all use an
+epoch so far past or future that no host reading can matter.
 """
 
 from __future__ import annotations
 
 import contextlib
 import os
+import select
 import signal
 import subprocess
-import time
-import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -57,11 +68,18 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_use_guard
     CREDENTIAL_EXPIRY_ENV_VAR,
     CREDENTIAL_REQUIRED_REMAINING_ENV_VAR,
     CREDENTIAL_USE_DEADLINE_ENV_VAR,
+    CREDENTIAL_USE_UNPROTECTED_ENV_VAR,
+    CREDENTIAL_USE_UNPROTECTED_VALUE,
     GUARD_REFUSAL_EXIT_CODE,
     GUARD_TERM_GRACE_SECONDS,
+    REVIEW_BIN_PATH,
+    REVIEW_READ_ONLY_ENV_VAR,
     credential_use_deadline_epoch_capped,
     guard_script_text,
     guarded_acp_command,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_use_projection import (
+    review_asset_sources,
 )
 
 # The guard spends its TERM grace INSIDE the allowance and hard-kills AT the
@@ -73,76 +91,18 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_use_guard
 # the bound.
 _SOON_SECONDS = GUARD_TERM_GRACE_SECONDS + 3
 
-# NO HOST-CLOCK TOLERANCE REMAINS. Every termination case below runs the guard
-# on the CONTROLLED CLOCK (`_controlled_clock`), so the instant a signal fires is
-# read off the clock the guard's own arithmetic advanced. A host-clock heartbeat
-# with a +0.5 s slack cannot tell a late KILL from a loaded host delivering a
-# correct one late: measured 2026-11-01 at load ~60, a correct guard's child was
-# read executing +0.735 s, +1.36 s and +2.90 s past the deadline. That slack
-# was never widened to pass a late kill; it was retired in favour of a reading
-# that has no slack at all.
 _SETTLE_SECONDS = 10
-# Ample for the guard's simulated-time loop, which spawns a few short processes
-# per controlled-clock step; it never decides a verdict.
-_CONTROLLED_CLOCK_HANG_GUARD_SECONDS = 120
-
-# EVERY PROCESS A CASE SPAWNS CARRIES THIS CASE'S TAG. The guard's reaper is
-# detached BY DESIGN -- it must outlive the shell that started it -- and it runs
-# the controlled-clock shims, so killing the child a case knows about leaves the
-# reaper, its heartbeat and its shims running long after pytest exits (measured
-# 2026-11-01: up to five days, bd-ib-degyxj). The tag rides the environment, which
-# every descendant inherits whatever its process group or session, so teardown
-# finds and stops exactly what THIS case started and nothing another case or run
-# owns.
-_CASE_TAG_ENV_VAR = "LIVESPEC_CREDENTIAL_GUARD_TEST_CASE"
-_case_tag = ""
-# How long teardown waits for a SIGKILLed process to leave `/proc`.
-_TEARDOWN_SECONDS = 10
+_CONTROLLED_EPOCH = 1_900_000_000
+# Epochs no host clock can be near: a deadline that is always in the future (the
+# year 2100) and one that has always passed (one second after 1970).
+_FAR_FUTURE_EPOCH = 4_102_444_800
+_LONG_PAST_EPOCH = 1
 
 
-def _tagged_pids(*, tag: str, proc_root: Path = Path("/proc")) -> list[int]:
-    """Every live process whose environment carries `tag`, this test process excepted."""
-    needle = f"{_CASE_TAG_ENV_VAR}={tag}".encode()
-    found: list[int] = []
-    for entry in proc_root.iterdir():
-        if not entry.name.isdigit() or int(entry.name) == os.getpid():
-            continue
-        try:
-            environ = (entry / "environ").read_bytes()
-        except OSError:
-            continue
-        if needle in environ.split(b"\0") and _executing(pid=int(entry.name)):
-            found.append(int(entry.name))
-    return found
-
-
-@pytest.fixture(autouse=True)
-def _reap_this_cases_processes() -> Iterator[None]:
-    """Stop every process this case spawned, whether it passed, failed or raised."""
-    global _case_tag  # noqa: PLW0603 -- one tag per case, read by `_hermetic_env`.
-    _case_tag = uuid.uuid4().hex
-    try:
-        yield
-    finally:
-        tag = _case_tag
-        _ = _eventually(
-            condition=lambda: _kill_all(pids=_tagged_pids(tag=tag)), guard_seconds=_TEARDOWN_SECONDS
-        )
-        assert _tagged_pids(tag=tag) == [], "this case left a process running after teardown"
-
-
-def _kill_all(*, pids: list[int]) -> bool:
-    """SIGKILL each pid; True once there was nothing left to kill."""
-    for pid in pids:
-        with contextlib.suppress(OSError):
-            os.kill(pid, signal.SIGKILL)
-    return not pids
-
-
-def _guard(*, tmp_path: Path) -> Path:
+def _guard(*, tmp_path: Path, script_text: str | None = None) -> Path:
     """Render the SHIPPED guard script and make it executable."""
     script = tmp_path / "credential-use-guard.sh"
-    _ = script.write_text(guard_script_text(), encoding="utf-8")
+    _ = script.write_text(script_text or guard_script_text(), encoding="utf-8")
     script.chmod(0o755)
     return script
 
@@ -165,7 +125,6 @@ def _hermetic_env() -> dict[str, str]:
         CREDENTIAL_REQUIRED_REMAINING_ENV_VAR,
     ):
         env.pop(name, None)
-    env[_CASE_TAG_ENV_VAR] = _case_tag
     return env
 
 
@@ -176,18 +135,17 @@ def _run(
     argv: list[str],
     timeout: float = _SETTLE_SECONDS,
     stdin_text: str | None = None,
-    path_prefix: Path | None = None,
+    clock_bin: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run the guard around `argv`, with the deadline supplied as the env var.
 
-    `path_prefix` puts a directory first on the guard's PATH, which is how a case
-    hands the guard a controlled `date` and `sleep` in place of the host's.
+    With `clock_bin`, that directory leads PATH so the guard reads its `date`.
     """
     env = _hermetic_env()
     if deadline is not None:
         env[CREDENTIAL_USE_DEADLINE_ENV_VAR] = deadline
-    if path_prefix is not None:
-        env["PATH"] = f"{path_prefix}:{env.get('PATH', '')}"
+    if clock_bin is not None:
+        env["PATH"] = f"{clock_bin}:{env.get('PATH', '')}"
     return subprocess.run(
         ["/bin/sh", str(_guard(tmp_path=tmp_path)), "--", *argv],
         input=stdin_text,
@@ -197,6 +155,425 @@ def _run(
         env=env,
         check=False,
     )
+
+
+@pytest.mark.parametrize(
+    ("command", "remedy"),
+    [
+        ("git push origin review-head", "git diff, git log and git show"),
+        ("just check", "named test ids only"),
+        ("livespec-implement-check-suite", "named test ids only"),
+    ],
+)
+def test_review_launchers_refuse_branch_writes_and_whole_suite_commands_for_every_adapter(
+    tmp_path: Path, command: str, remedy: str
+) -> None:
+    """The guard installs the same immediate review boundary before a Codex or Claude exec."""
+    review_bin = tmp_path / "review-bin"
+    review_bin.mkdir()
+    for path, source in review_asset_sources():
+        target = review_bin / Path(path).name
+        _ = target.write_text(source, encoding="utf-8")
+        target.chmod(0o755)
+    env = _hermetic_env()
+    env[CREDENTIAL_USE_UNPROTECTED_ENV_VAR] = CREDENTIAL_USE_UNPROTECTED_VALUE
+    env[REVIEW_READ_ONLY_ENV_VAR] = "1"
+    result = subprocess.run(
+        [
+            "/bin/sh",
+            str(
+                _guard(
+                    tmp_path=tmp_path,
+                    script_text=guard_script_text().replace(REVIEW_BIN_PATH, str(review_bin)),
+                )
+            ),
+            "--",
+            "/bin/sh",
+            "-c",
+            command,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=_SETTLE_SECONDS,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "LIVESPEC_REVIEW_GUARD_REFUSED" in result.stderr
+    assert remedy in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("command", "remedy"),
+    [
+        ("mise exec -- just check", "named test ids only"),
+        ("mise x -- just check", "named test ids only"),
+        ("mise exec just@1.40.0 -- just check", "named test ids only"),
+        ("mise x just@1.40.0 just@1.41.0 -- just check", "named test ids only"),
+        ("mise x -j 2 -E ci just@1.40.0 -- livespec-implement-check-suite", "named test ids only"),
+        ("mise -C . x -- just check", "named test ids only"),
+        ("mise exec just@1.40.0 just check", "named test ids only"),
+        ("mise x -c 'just check'", "named test ids only"),
+        ("mise exec --command=livespec-implement-check-suite", "named test ids only"),
+        ("mise x node -- git push origin review-head", "git diff, git log and git show"),
+        ("mise x git@2 -- git commit -m x", "git diff, git log and git show"),
+    ],
+)
+def test_review_launchers_refuse_commands_routed_through_every_mise_exec_form(
+    tmp_path: Path, command: str, remedy: str
+) -> None:
+    """`mise exec` and its `x` alias must not replace the review boundary's launchers."""
+    review_bin = tmp_path / "review-bin"
+    review_bin.mkdir()
+    for path, source in review_asset_sources():
+        target = review_bin / Path(path).name
+        _ = target.write_text(source, encoding="utf-8")
+        target.chmod(0o755)
+    base_bin = tmp_path / "base-bin"
+    base_bin.mkdir()
+    for name in ("mise", "just"):
+        target = base_bin / name
+        _ = target.write_text(
+            "#!/bin/sh\n" f'echo "LIVESPEC_TEST_UNGUARDED_{name.upper()}_REACHED" >&2\n' "exit 0\n",
+            encoding="utf-8",
+        )
+        target.chmod(0o755)
+    env = _hermetic_env()
+    env[CREDENTIAL_USE_UNPROTECTED_ENV_VAR] = CREDENTIAL_USE_UNPROTECTED_VALUE
+    env[REVIEW_READ_ONLY_ENV_VAR] = "1"
+    env["PATH"] = f"{base_bin}:{env['PATH']}"
+    result = subprocess.run(
+        [
+            "/bin/sh",
+            str(
+                _guard(
+                    tmp_path=tmp_path,
+                    script_text=guard_script_text().replace(REVIEW_BIN_PATH, str(review_bin)),
+                )
+            ),
+            "--",
+            "/bin/sh",
+            "-c",
+            command,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=_SETTLE_SECONDS,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "LIVESPEC_REVIEW_GUARD_REFUSED" in result.stderr
+    assert remedy in result.stderr
+    assert "LIVESPEC_TEST_UNGUARDED_MISE_REACHED" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["x", "--", "git", "log"],
+        ["exec", "git@2", "--", "git", "diff"],
+        ["x", "-c", "git show"],
+        ["-C", ".", "x", "node@20", "--", "node", "-v"],
+        ["ls"],
+    ],
+)
+def test_review_mise_launcher_passes_read_only_commands_to_the_real_mise(
+    tmp_path: Path, arguments: list[str]
+) -> None:
+    """The mise launcher refuses only the guarded commands; every other form reaches mise."""
+    review_bin = tmp_path / "review-bin"
+    review_bin.mkdir()
+    launcher = review_bin / "mise"
+    sources = {Path(path).name: source for path, source in review_asset_sources()}
+    _ = launcher.write_text(sources["mise"], encoding="utf-8")
+    launcher.chmod(0o755)
+    real = tmp_path / "real-mise"
+    _ = real.write_text('#!/bin/sh\necho "REAL_MISE_REACHED $*"\n', encoding="utf-8")
+    real.chmod(0o755)
+    env = _hermetic_env()
+    env["LIVESPEC_REVIEW_REAL_MISE"] = str(real)
+    result = subprocess.run(
+        ["/bin/sh", str(launcher), *arguments],
+        capture_output=True,
+        text=True,
+        timeout=_SETTLE_SECONDS,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == f"REAL_MISE_REACHED {' '.join(arguments)}"
+
+
+def _date_shim(*, bin_dir: Path, clock: Path) -> None:
+    """A `date` that reads the clock file, with a fractional `%N` the guard can parse."""
+    date_shim = bin_dir / "date"
+    _ = date_shim.write_text(
+        "#!/bin/sh\n"
+        f'now="$(cat "{clock}")"\n'
+        'case "$1" in\n'
+        '    +%s.%N) awk -v n="$now" \'BEGIN{printf "%.9f\\n", n}\' ;;\n'
+        '    +%s) awk -v n="$now" \'BEGIN{printf "%d\\n", n}\' ;;\n'
+        '    *) printf "%s\\n" "$now" ;;\n'
+        "esac\n",
+        encoding="utf-8",
+    )
+    date_shim.chmod(0o755)
+
+
+def _fixed_clock(*, tmp_path: Path, epoch: int) -> Path:
+    """A PATH directory whose `date` always reads `epoch`, for cases that never wait."""
+    bin_dir = tmp_path / "fixed-clock-bin"
+    bin_dir.mkdir()
+    clock = tmp_path / "fixed-clock"
+    _ = clock.write_text(f"{epoch}\n", encoding="utf-8")
+    _date_shim(bin_dir=bin_dir, clock=clock)
+    return bin_dir
+
+
+def _controlled_clock(
+    *,
+    tmp_path: Path,
+    armed: Path,
+    release: Path,
+    start: float,
+    initial_advance_delay_seconds: int = 0,
+) -> tuple[Path, Path]:
+    """Create the guard's `date`/`sleep` seam on a deterministic clock.
+
+    The first fake sleep announces that the detached reaper is armed, then
+    waits for the test's FIFO release. Only that first sleep reads the FIFO; later
+    sleeps advance the clock immediately, so the instant the guard signals is a reading of this
+    file rather than a measurement of host scheduling. A case can delay that first
+    advance in host time without advancing the controlled clock.
+    """
+    bin_dir = tmp_path / "controlled-clock-bin"
+    bin_dir.mkdir()
+    clock = tmp_path / "controlled-clock"
+    _ = clock.write_text(f"{start}\n", encoding="utf-8")
+    _date_shim(bin_dir=bin_dir, clock=clock)
+    sleep_shim = bin_dir / "sleep"
+    _ = sleep_shim.write_text(
+        "#!/bin/sh\n"
+        f'if [ ! -e "{armed}.once" ]; then\n'
+        f'    : > "{armed}.once"\n'
+        f'    printf armed > "{armed}"\n'
+        f'    IFS= read -r _ < "{release}" || true\n'
+        f'    if [ "{initial_advance_delay_seconds}" -gt 0 ]; then\n'
+        f'        /bin/sleep "{initial_advance_delay_seconds}"\n'
+        "    fi\n"
+        "fi\n"
+        f'now="$(cat "{clock}")"\n'
+        f'awk -v n="$now" -v d="$1" \'BEGIN{{printf "%.6f\\n", n+d}}\' > "{clock}.next"\n'
+        f'mv "{clock}.next" "{clock}"\n',
+        encoding="utf-8",
+    )
+    sleep_shim.chmod(0o755)
+    return bin_dir, clock
+
+
+def _close_guarded_fixture(
+    *, guarded: subprocess.Popen[bytes], pid_file: Path, descriptors: tuple[int, ...]
+) -> None:
+    """Close this case's descriptors and stop either surviving fixture process."""
+    for descriptor in descriptors:
+        with contextlib.suppress(OSError):
+            os.close(descriptor)
+    with contextlib.suppress(ProcessLookupError):
+        guarded.kill()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        _ = guarded.wait(timeout=_SETTLE_SECONDS)
+    with contextlib.suppress(FileNotFoundError, ProcessLookupError, ValueError):
+        os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGKILL)
+
+
+def _term_resistant_child(*, pid_file: Path, ready: Path) -> str:
+    """A child that ignores TERM from its first instruction and idles until killed."""
+    return f"trap '' TERM; echo $$ > {pid_file}; echo ready > {ready}; exec /bin/sleep 600"
+
+
+@dataclass
+class _GuardedFixture:
+    """A guarded child plus the descriptors and files the case rendezvouses on."""
+
+    guarded: subprocess.Popen[bytes]
+    pid_file: Path
+    armed_fd: int
+    ready_fd: int
+    release_fd: int
+    holder_read: int
+    holder_write: int
+    clock: Path
+    deadline: int
+
+    def descriptors(self) -> tuple[int, ...]:
+        return (self.holder_write, self.holder_read, self.armed_fd, self.ready_fd, self.release_fd)
+
+
+def _start_guarded_fixture(
+    *,
+    tmp_path: Path,
+    child_script: Callable[[Path, Path], str] | None = None,
+    start_fraction: float = 0.0,
+    initial_advance_delay_seconds: int = 0,
+    guard_text: str | None = None,
+) -> _GuardedFixture:
+    """Start a guarded child with controlled-clock rendezvous.
+
+    The clock starts `start_fraction` seconds into `_CONTROLLED_EPOCH` and the
+    deadline is `_SOON_SECONDS` whole seconds after that epoch. `child_script`
+    receives the pid file and the ready FIFO the child must write once it is set
+    up, and defaults to a TERM-resistant idler.
+    """
+    pid_file = tmp_path / "pid"
+    armed_fifo = tmp_path / "armed"
+    ready_fifo = tmp_path / "ready"
+    release_fifo = tmp_path / "release"
+    os.mkfifo(armed_fifo)
+    os.mkfifo(ready_fifo)
+    os.mkfifo(release_fifo)
+    # Read-write, not read-only: a FIFO with no writer is readable as EOF, so a
+    # read end alone can report "nothing will ever arrive" before the reaper or
+    # the child has opened its side. Holding a writer here makes the descriptor
+    # readable only once an announcement has actually been written.
+    armed_fd = os.open(armed_fifo, os.O_RDWR | os.O_NONBLOCK)
+    ready_fd = os.open(ready_fifo, os.O_RDWR | os.O_NONBLOCK)
+    release_fd = os.open(release_fifo, os.O_RDWR | os.O_NONBLOCK)
+    bin_dir, clock = _controlled_clock(
+        tmp_path=tmp_path,
+        armed=armed_fifo,
+        release=release_fifo,
+        start=_CONTROLLED_EPOCH + start_fraction,
+        initial_advance_delay_seconds=initial_advance_delay_seconds,
+    )
+    holder_read, holder_write = os.pipe()
+    deadline = _CONTROLLED_EPOCH + _SOON_SECONDS
+    env = _hermetic_env()
+    env[CREDENTIAL_USE_DEADLINE_ENV_VAR] = str(deadline)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    script = (
+        child_script or (lambda pid, ready: _term_resistant_child(pid_file=pid, ready=ready))
+    )(pid_file, ready_fifo)
+    guarded = subprocess.Popen(
+        [
+            "/bin/sh",
+            str(_guard(tmp_path=tmp_path, script_text=guard_text)),
+            "--",
+            "/bin/sh",
+            "-c",
+            script,
+        ],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        pass_fds=(holder_write,),
+    )
+    return _GuardedFixture(
+        guarded=guarded,
+        pid_file=pid_file,
+        armed_fd=armed_fd,
+        ready_fd=ready_fd,
+        release_fd=release_fd,
+        holder_read=holder_read,
+        holder_write=holder_write,
+        clock=clock,
+        deadline=deadline,
+    )
+
+
+def _await_event(*, fd: int, expected: bytes, what: str) -> None:
+    """Block until the FIFO `fd` delivers `expected`; the budget only bounds a hang.
+
+    `fd` is opened read-write, so it holds its own writer and cannot report a
+    pre-writer EOF: it becomes readable only when the announcement is written.
+    """
+    readable, _, _ = select.select([fd], [], [], _SETTLE_SECONDS)
+    assert readable, f"{what} never arrived"
+    assert os.read(fd, len(expected)) == expected
+
+
+def _await_group_gone(
+    *, fixture: _GuardedFixture, max_empty_waits: int | None, stayed_live: str
+) -> None:
+    """Block until EOF on the pipe every group member inherited; the clock decides the verdict.
+
+    A real-time wait that elapses with the pipe still open decides NOTHING: on a
+    loaded runner the group's exit can lag by any amount of host time. The only
+    verdict is the controlled clock's. `stayed_live` is raised when the clock has
+    reached the deadline while the pipe is still held, which is the instant the
+    reaper's KILL was due, so a group still live then outlived the bound. A wait
+    that leaves the clock short of the deadline just waits again, and
+    `max_empty_waits` is only the liveness guard against a hang: it names a reaper
+    that stopped advancing the clock, never a guard verdict about the deadline.
+    """
+    empty_waits = 0
+    while True:
+        readable, _, _ = select.select([fixture.holder_read], [], [], _SETTLE_SECONDS)
+        if readable:
+            assert os.read(fixture.holder_read, 1) == b""
+            return
+        empty_waits += 1
+        controlled_now = float(fixture.clock.read_text(encoding="utf-8").strip())
+        if max_empty_waits is not None and empty_waits >= max_empty_waits:
+            pytest.fail(
+                "the reaper stopped advancing the controlled clock before the group ended; "
+                f"controlled clock is {controlled_now}"
+            )
+        assert (
+            controlled_now < fixture.deadline
+        ), f"{stayed_live}; controlled clock is {controlled_now}"
+
+
+def _guarded_group_exit(
+    *,
+    tmp_path: Path,
+    child_script: Callable[[Path, Path], str] | None = None,
+    start_fraction: float = 0.0,
+    initial_advance_delay_seconds: int = 0,
+    guard_text: str | None = None,
+    max_empty_waits: int | None = None,
+) -> tuple[int, float, int]:
+    """Run the guard to the end of its group; return (guard status, clock reading, deadline).
+
+    The reaper's FIFO announcement says it is armed and the child's says it has
+    finished setting itself up; only then is the controlled clock released, so
+    no signal can land on a child that has not yet installed its disposition.
+    EOF on the pipe every group member inherited says the group is gone, and the
+    clock reading at that event is the instant the guard's signals landed,
+    because only the reaper's `sleep` advances it.
+    """
+    fixture = _start_guarded_fixture(
+        tmp_path=tmp_path,
+        child_script=child_script,
+        start_fraction=start_fraction,
+        initial_advance_delay_seconds=initial_advance_delay_seconds,
+        guard_text=guard_text,
+    )
+    try:
+        _await_event(fd=fixture.armed_fd, expected=b"armed", what="the reaper's armed announcement")
+        _await_event(fd=fixture.ready_fd, expected=b"ready\n", what="the child's readiness")
+        # The release end stays open until cleanup: the reaper opens the FIFO
+        # only AFTER announcing, and a FIFO with no open end discards the line
+        # and blocks that open for good.
+        os.write(fixture.release_fd, b"release\n")
+        os.close(fixture.holder_write)
+        fixture.holder_write = -1
+        _await_group_gone(
+            fixture=fixture,
+            max_empty_waits=max_empty_waits,
+            stayed_live="the group stayed live past the deadline",
+        )
+        status = fixture.guarded.wait(timeout=_SETTLE_SECONDS)
+        return status, float(fixture.clock.read_text(encoding="utf-8").strip()), fixture.deadline
+    finally:
+        _close_guarded_fixture(
+            guarded=fixture.guarded,
+            pid_file=fixture.pid_file,
+            descriptors=fixture.descriptors(),
+        )
 
 
 def test_a_sufficiently_fresh_deadline_lets_an_ordinary_command_finish(
@@ -211,7 +588,7 @@ def test_a_sufficiently_fresh_deadline_lets_an_ordinary_command_finish(
     marker = tmp_path / "ran"
     result = _run(
         tmp_path=tmp_path,
-        deadline=str(int(time.time()) + 3600),
+        deadline=str(_FAR_FUTURE_EPOCH),
         argv=["/bin/sh", "-c", f"printf done > {marker}; exit 7"],
     )
 
@@ -221,75 +598,61 @@ def test_a_sufficiently_fresh_deadline_lets_an_ordinary_command_finish(
     assert result.returncode == 7
 
 
-def test_a_running_child_stops_by_the_deadline_itself(tmp_path: Path) -> None:
-    """Execution stops BY the absolute epoch, read off the guard's own clock.
+@pytest.mark.parametrize("initial_advance_delay_seconds", [0, _SETTLE_SECONDS + 1])
+def test_a_running_child_stops_by_the_deadline_itself(
+    tmp_path: Path, initial_advance_delay_seconds: int
+) -> None:
+    """Execution stops BY the absolute epoch, read off the guard's controlled clock.
 
     The assertion is NOT "the process is gone eventually" -- that is satisfied by
     a guard whose grace runs past the deadline, which would permit exactly the
-    credential use the bound forbids. The child is a real process that honours
-    TERM, so the signal that stops it is the guard's TERM, and the controlled
-    clock says when the guard sent it: by the deadline, never after.
+    credential use the bound forbids. The clock only moves when the guard's
+    reaper sleeps, so its reading at the moment the group is gone is the instant
+    the guard's signal landed, and that instant must not be later than the
+    deadline. A compliant child dies at the TERM, a grace before it.
     """
-    bin_dir, clock = _controlled_clock(tmp_path=tmp_path, start=float(_CONTROLLED_EPOCH))
-    deadline = _CONTROLLED_EPOCH + _SOON_SECONDS
+    pid_file = tmp_path / "pid"
 
-    result = _run(
+    status, stopped_at, deadline = _guarded_group_exit(
         tmp_path=tmp_path,
-        deadline=str(deadline),
-        argv=["/bin/sh", "-c", "exec /bin/sleep 600"],
-        timeout=_CONTROLLED_CLOCK_HANG_GUARD_SECONDS,
-        path_prefix=bin_dir,
+        child_script=lambda pid,
+        ready: f"echo $$ > {pid}; echo ready > {ready}; exec /bin/sleep 600",
+        initial_advance_delay_seconds=initial_advance_delay_seconds,
     )
 
-    stopped_at = float(clock.read_text(encoding="utf-8"))
-    assert result.returncode == 128 + signal.SIGTERM, result.stderr
-    assert (
-        stopped_at <= deadline
-    ), f"the child was signalled {stopped_at - deadline:+.3f}s past the deadline"
+    assert stopped_at <= deadline
+    # The TERM, not the KILL, is what ended it, so the grace is spent inside the
+    # allowance and the clock never reached the deadline.
+    assert stopped_at >= deadline - GUARD_TERM_GRACE_SECONDS - 1
+    assert pid_file.exists(), "the child never started, so the bound stopped nothing"
+    assert status != 0
 
 
-def test_a_term_resistant_child_still_stops_by_the_deadline(tmp_path: Path) -> None:
+@pytest.mark.parametrize("initial_advance_delay_seconds", [0, _SETTLE_SECONDS + 1])
+def test_a_term_resistant_child_still_stops_by_the_deadline(
+    tmp_path: Path, initial_advance_delay_seconds: int
+) -> None:
     """TERM refusal buys no time at all, not even the escalation grace.
 
-    The child traps TERM and keeps stamping the clock, which is what an agent
-    mid-turn with its own signal handling looks like. Because the guard lands
-    TERM a grace BEFORE the deadline and KILL **at** it, refusing TERM costs the
-    child its grace and nothing more: it must still stop by the same instant a
-    compliant child would.
-
-    The guard runs on the CONTROLLED CLOCK (see `_controlled_clock` below), so
-    the instant its KILL fires is read off the clock its own arithmetic
-    advanced, not off a host stopwatch. Measured 2026-11-01 at load ~70: a
-    host-clock heartbeat read a correct guard's TERM-resistant child executing
-    +1.36 s past the deadline against a +0.5 s allowance, which is delivery
-    latency, not a late KILL. The child is a real process that ignores TERM, so
-    only the KILL stops it, and the KILL must fire by the deadline.
+    The child traps TERM and idles, which is what an agent mid-turn with its own
+    signal handling looks like. Because the guard lands TERM a grace BEFORE the
+    deadline and KILL **at** it, refusing TERM costs the child its grace and
+    nothing more: it must still stop by the same instant a compliant child
+    would, and the clock reading shows the KILL, not the TERM, ended it.
     """
-    trapped = tmp_path / "term-is-ignored"
-    bin_dir, clock = _controlled_clock(
-        tmp_path=tmp_path, start=float(_CONTROLLED_EPOCH), hold=trapped
-    )
-    deadline = _CONTROLLED_EPOCH + _SOON_SECONDS
-
-    result = _run(
+    status, stopped_at, deadline = _guarded_group_exit(
         tmp_path=tmp_path,
-        deadline=str(deadline),
-        # Absolute paths, so the child runs on the HOST's clock and only the
-        # guard reads the controlled one. The ignored TERM survives the exec.
-        argv=_term_ignoring_agent(trapped=trapped),
-        timeout=_CONTROLLED_CLOCK_HANG_GUARD_SECONDS,
-        path_prefix=bin_dir,
+        initial_advance_delay_seconds=initial_advance_delay_seconds,
     )
 
-    killed_at = float(clock.read_text(encoding="utf-8"))
-    assert result.returncode == 128 + signal.SIGKILL, result.stderr
-    assert (
-        killed_at <= deadline
-    ), f"a TERM-resistant child was killed {killed_at - deadline:+.3f}s past the deadline"
+    assert stopped_at <= deadline, f"a TERM-resistant child outlived the deadline: {stopped_at}"
+    assert stopped_at > deadline - 1, "the child ended at the TERM, so it was not TERM-resistant"
+    assert status != 0
 
 
+@pytest.mark.parametrize("initial_advance_delay_seconds", [0, _SETTLE_SECONDS + 1])
 def test_a_credential_using_grandchild_stops_by_the_deadline_after_its_parent_exits(
-    tmp_path: Path,
+    tmp_path: Path, initial_advance_delay_seconds: int
 ) -> None:
     """The ADAPTER PARENT EXITS and its child keeps the credential; both stop by the bound.
 
@@ -297,51 +660,67 @@ def test_a_credential_using_grandchild_stops_by_the_deadline_after_its_parent_ex
     it is the shape that matters: the process still holding the credential after
     an adapter returns is the grandchild, not the adapter.
 
-    THE HOLD IS LOAD-BEARING. The reaper is detached, so the wrapper returns as
-    soon as the short-lived parent exits. The guard's clock is HELD until the
-    wrapper has returned, so by construction no signal has been sent when the
-    parent exits; only then is the clock released, and the case asks whether the
-    TERM-resistant grandchild is gone and when the KILL that stopped it fired.
+    THE WAIT IS LOAD-BEARING. The reaper is detached, so the wrapper returns as
+    soon as the short-lived parent exits -- long before the deadline. Reading
+    the clock at that moment would pass even if the grandchild then ran forever,
+    which is exactly the vacuous shape this case must not have. So it reads the
+    clock only once the group has emptied, and the pipe every member inherited
+    cannot reach EOF while the grandchild is alive.
     """
-    hold = tmp_path / "release-the-clock"
-    bin_dir, clock = _controlled_clock(tmp_path=tmp_path, start=float(_CONTROLLED_EPOCH), hold=hold)
-    deadline = _CONTROLLED_EPOCH + _SOON_SECONDS
-    grandchild_pid = tmp_path / "grandchild-pid"
-    parent = tmp_path / "parent.sh"
-    _ = parent.write_text(
-        f"/bin/sh -c 'trap \"\" TERM; echo $$ > {grandchild_pid}; exec /bin/sleep 600' </dev/null >/dev/null 2>&1 &\n"
-        f"while [ ! -s {grandchild_pid} ]; do /bin/sleep 0.05; done\n"
-        "exit 0\n",
-        encoding="utf-8",
-    )
-
-    result = _run(
+    # The parent spawns a TERM-resistant long-running idler and exits IMMEDIATELY.
+    status, stopped_at, deadline = _guarded_group_exit(
         tmp_path=tmp_path,
-        deadline=str(deadline),
-        argv=["/bin/sh", str(parent)],
-        timeout=_CONTROLLED_CLOCK_HANG_GUARD_SECONDS,
-        path_prefix=bin_dir,
+        child_script=lambda pid, ready: (
+            f'/bin/sh -c \'trap "" TERM; echo $$ > {pid}; echo ready > {ready}; '
+            "exec /bin/sleep 600' </dev/null >/dev/null 2>&1 & exit 0"
+        ),
+        initial_advance_delay_seconds=initial_advance_delay_seconds,
     )
-    pid = int(grandchild_pid.read_text(encoding="utf-8").strip())
-    try:
-        # The wrapper has returned, the grandchild runs on, and the bound has not
-        # yet fallen: the guard's clock has not moved.
-        assert result.returncode == 0, result.stderr
-        assert _executing(pid=pid)
-        assert float(clock.read_text(encoding="utf-8")) == float(_CONTROLLED_EPOCH)
 
-        _ = hold.write_text("", encoding="utf-8")
+    # The wrapper returned while the bound had not yet fallen.
+    assert status == 0
+    assert (
+        stopped_at <= deadline
+    ), f"a credential-using grandchild outlived the deadline: {stopped_at}"
+    assert (
+        stopped_at > deadline - 1
+    ), "the grandchild ended before the KILL, so TERM was not refused"
 
-        assert _stops(pid=pid), "the credential-using grandchild was never stopped"
-        killed_at = float(clock.read_text(encoding="utf-8"))
-        assert (
-            deadline - 1 < killed_at <= deadline
-        ), f"a credential-using grandchild was killed {killed_at - deadline:+.3f}s from the deadline"
-    finally:
-        # Own what we spawned: never leak a sleeper into the rest of the suite.
-        with contextlib.suppress(OSError):
-            os.kill(pid, signal.SIGKILL)
-        _ = hold.write_text("", encoding="utf-8")
+
+def test_a_guard_that_signals_only_its_direct_child_leaves_the_grandchild_running(
+    tmp_path: Path,
+) -> None:
+    """The grandchild case rejects a direct-child-only signal as a stalled reaper.
+
+    The mutated reaper reaches its KILL arm but signals the exited adapter parent,
+    not its process group. Its clock consequently stops short of the deadline
+    while the inherited pipe remains open. That is distinct from claiming the
+    group outlived a deadline the controlled clock never reached.
+    """
+    direct_child_only = (
+        guard_script_text()
+        .replace(
+            'kill -TERM "-$pgid" 2>/dev/null || kill -TERM "$pgid" 2>/dev/null',
+            'kill -TERM "$pgid" 2>/dev/null',
+        )
+        .replace(
+            'kill -KILL "-$pgid" 2>/dev/null || kill -KILL "$pgid" 2>/dev/null',
+            'kill -KILL "$pgid" 2>/dev/null',
+        )
+    )
+
+    with pytest.raises(
+        pytest.fail.Exception, match="reaper stopped advancing the controlled clock"
+    ):
+        _ = _guarded_group_exit(
+            tmp_path=tmp_path,
+            child_script=lambda pid, ready: (
+                f'/bin/sh -c \'trap "" TERM; echo $$ > {pid}; echo ready > {ready}; '
+                "exec /bin/sleep 600' </dev/null >/dev/null 2>&1 & exit 0"
+            ),
+            guard_text=direct_child_only,
+            max_empty_waits=1,
+        )
 
 
 def test_a_launch_after_the_deadline_is_refused_without_running_the_command(
@@ -355,7 +734,7 @@ def test_a_launch_after_the_deadline_is_refused_without_running_the_command(
     marker = tmp_path / "must-not-exist"
     result = _run(
         tmp_path=tmp_path,
-        deadline=str(int(time.time()) - 60),
+        deadline=str(_LONG_PAST_EPOCH),
         argv=["/bin/sh", "-c", f"printf ran > {marker}"],
     )
 
@@ -371,22 +750,27 @@ def test_a_retried_launch_inherits_the_same_deadline_rather_than_a_fresh_budget(
 
     Two launches against ONE deadline, with the deadline falling between them.
     The first finishes inside its budget; the second is refused. A guard
-    measuring a duration per launch would admit both.
+    measuring a duration per launch would admit both. The fall of the deadline
+    is the test writing a later reading into the guard's clock file.
     """
-    deadline = str(int(time.time()) + _SOON_SECONDS)
+    deadline = str(_CONTROLLED_EPOCH + _SOON_SECONDS)
     first_marker = tmp_path / "first"
     second_marker = tmp_path / "second"
+    clock_bin = _fixed_clock(tmp_path=tmp_path, epoch=_CONTROLLED_EPOCH)
+    clock = tmp_path / "fixed-clock"
 
     first = _run(
         tmp_path=tmp_path,
         deadline=deadline,
         argv=["/bin/sh", "-c", f"printf one > {first_marker}"],
+        clock_bin=clock_bin,
     )
-    time.sleep(_SOON_SECONDS + 1)
+    _ = clock.write_text(f"{_CONTROLLED_EPOCH + _SOON_SECONDS + 1}\n", encoding="utf-8")
     second = _run(
         tmp_path=tmp_path,
         deadline=deadline,
         argv=["/bin/sh", "-c", f"printf two > {second_marker}"],
+        clock_bin=clock_bin,
     )
 
     assert first.returncode == 0
@@ -433,7 +817,7 @@ def test_the_start_check_reports_remaining_budget_without_running_anything(
     while the run sat queued must refuse at startup, not mid-turn.
     """
     env = _hermetic_env()
-    env[CREDENTIAL_USE_DEADLINE_ENV_VAR] = str(int(time.time()) + 3600)
+    env[CREDENTIAL_USE_DEADLINE_ENV_VAR] = str(_FAR_FUTURE_EPOCH)
     fresh = subprocess.run(
         ["/bin/sh", str(_guard(tmp_path=tmp_path)), "--check-start"],
         capture_output=True,
@@ -443,7 +827,7 @@ def test_the_start_check_reports_remaining_budget_without_running_anything(
         check=False,
     )
 
-    env[CREDENTIAL_USE_DEADLINE_ENV_VAR] = str(int(time.time()) - 1)
+    env[CREDENTIAL_USE_DEADLINE_ENV_VAR] = str(_LONG_PAST_EPOCH)
     aged = subprocess.run(
         ["/bin/sh", str(_guard(tmp_path=tmp_path)), "--check-start"],
         capture_output=True,
@@ -536,67 +920,95 @@ def test_every_launch_route_is_wrapped_through_one_argv_transform() -> None:
         assert "--" in wrapped
 
 
-def test_losing_the_waiting_process_does_not_disarm_the_bound(
+# Only a liveness guard: a healthy reaper ends the group within a handful of waits
+# whatever the runner's load, so reaching this count means the clock stopped.
+_HANG_GUARD_WAITS = 6
+
+
+def _lose_the_waiter_and_await_the_group(
+    *,
     tmp_path: Path,
+    initial_advance_delay_seconds: int = 0,
+    guard_text: str | None = None,
+    max_empty_waits: int | None = _HANG_GUARD_WAITS,
 ) -> None:
-    """The host-independence property, read against the guard's own epoch.
+    """Kill the waiting guard shell, release the controlled clock, await the group's end."""
+    fixture = _start_guarded_fixture(
+        tmp_path=tmp_path,
+        initial_advance_delay_seconds=initial_advance_delay_seconds,
+        guard_text=guard_text,
+    )
+    try:
+        _await_event(fd=fixture.armed_fd, expected=b"armed", what="the reaper's armed announcement")
+        _await_event(fd=fixture.ready_fd, expected=b"ready\n", what="the child's readiness")
+        fixture.guarded.send_signal(signal.SIGKILL)
+        _ = fixture.guarded.wait(timeout=_SETTLE_SECONDS)
+        # The release end stays open until cleanup: the reaper opens the FIFO
+        # only AFTER announcing, and a FIFO with no open end discards the line
+        # and blocks that open for good.
+        os.write(fixture.release_fd, b"release\n")
+        os.close(fixture.holder_write)
+        fixture.holder_write = -1
+        _await_group_gone(
+            fixture=fixture,
+            max_empty_waits=max_empty_waits,
+            stayed_live="the child stayed live after the waiter died",
+        )
+        assert float(fixture.clock.read_text(encoding="utf-8").strip()) <= fixture.deadline
+    finally:
+        _close_guarded_fixture(
+            guarded=fixture.guarded,
+            pid_file=fixture.pid_file,
+            descriptors=fixture.descriptors(),
+        )
+
+
+@pytest.mark.parametrize("initial_advance_delay_seconds", [0, _SETTLE_SECONDS + 1])
+def test_losing_the_waiting_process_does_not_disarm_the_bound(
+    tmp_path: Path, initial_advance_delay_seconds: int
+) -> None:
+    """The host-independence property, read from the guard's injected clock.
 
     The reaper lives in the sandbox beside the child, so losing the process that
     is WAITING does not extend anything. Here the waiter is killed deliberately
-    -- standing in for a dying host-side waiter -- while the guard's clock is
-    HELD, so the waiter is provably gone before any signal falls. The clock is
-    then released, and the TERM-resistant child must still be stopped, by a KILL
-    that fires by the deadline.
+    -- standing in for a dying host-side waiter -- before the controlled clock
+    advances. The reaper's FIFO event then releases the clock, and EOF on the
+    inherited holder pipe establishes that the child and reaper exited.
+
+    THE VERDICT IS THE CLOCK'S, NEVER A REAL-TIME WAIT'S. The child's exit after
+    the release can lag by any amount of host time on a loaded runner, and the
+    delayed parameter holds the reaper's first advance past the settle bound to
+    say so: a wait that elapses with the pipe still open reports "stayed live"
+    only once the controlled clock has passed the deadline.
     """
-    hold = tmp_path / "release-the-clock"
-    bin_dir, clock = _controlled_clock(tmp_path=tmp_path, start=float(_CONTROLLED_EPOCH), hold=hold)
-    deadline = _CONTROLLED_EPOCH + _SOON_SECONDS
-    pid_file = tmp_path / "pid"
-    env = _hermetic_env()
-    env[CREDENTIAL_USE_DEADLINE_ENV_VAR] = str(deadline)
-    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
-
-    guarded = subprocess.Popen(
-        [
-            "/bin/sh",
-            str(_guard(tmp_path=tmp_path)),
-            "--",
-            "/bin/sh",
-            "-c",
-            f"trap '' TERM; echo $$ > {pid_file}; exec /bin/sleep 600",
-        ],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+    _lose_the_waiter_and_await_the_group(
+        tmp_path=tmp_path, initial_advance_delay_seconds=initial_advance_delay_seconds
     )
-    try:
-        assert _appears(path=pid_file), "the guarded child never started"
-        pid = int(pid_file.read_text(encoding="utf-8").strip())
-        # THE RACE THIS CLOSES (CI run 41487043712, PR #4193). The child writes
-        # its pid as soon as it runs, which on a loaded host can be BEFORE the
-        # guard has forked its reaper. Killing the waiter then kills the only
-        # process that was about to arm the bound, and the case read that as
-        # "the agent was never stopped" -- a fact about the test's timing, not
-        # about the guard. The property under test starts once the reaper is
-        # armed, so the waiter is lost only after the reaper's first poll.
-        assert _eventually(
-            condition=_reaper_armed(clock=clock).exists
-        ), "the guard never armed its reaper"
 
-        guarded.send_signal(signal.SIGKILL)
-        _ = guarded.wait(timeout=_CONTROLLED_CLOCK_HANG_GUARD_SECONDS)
-        assert _executing(pid=pid)
-        _ = hold.write_text("", encoding="utf-8")
 
-        assert _stops(pid=pid), "the agent was never stopped after the waiter died"
-        killed_at = float(clock.read_text(encoding="utf-8"))
-        assert (
-            deadline - 1 < killed_at <= deadline
-        ), f"the agent was killed {killed_at - deadline:+.3f}s from the deadline after the waiter died"
-    finally:
-        _ = hold.write_text("", encoding="utf-8")
-        with contextlib.suppress(OSError, ValueError):
-            os.kill(int(pid_file.read_text(encoding="utf-8").strip()), signal.SIGKILL)
+def test_a_guard_disarmed_by_losing_its_waiter_fails_the_waiter_death_case(
+    tmp_path: Path,
+) -> None:
+    """The case still rejects a bound that dies with the process waiting on it.
+
+    The mutated reaper exits as soon as the guard shell that launched it is gone,
+    which is the host-dependence the case exists to exclude. The child then keeps
+    the inherited pipe while the controlled clock stops short of the deadline, so
+    the liveness guard names a reaper that stopped advancing -- and NOT a child
+    that outlived a deadline the clock never reached.
+    """
+    poll = '        group_is_ours || exit 0\n        left="$(until_epoch "$term_epoch")"'
+    disarmed = guard_script_text().replace(
+        poll, '        kill -0 "$$" 2>/dev/null || exit 0\n' + poll
+    )
+    assert disarmed != guard_script_text(), "the disarming mutation did not apply"
+
+    with pytest.raises(
+        pytest.fail.Exception, match="reaper stopped advancing the controlled clock"
+    ):
+        _lose_the_waiter_and_await_the_group(
+            tmp_path=tmp_path, guard_text=disarmed, max_empty_waits=1
+        )
 
 
 def test_a_bidirectional_protocol_session_survives_the_guard(tmp_path: Path) -> None:
@@ -618,7 +1030,7 @@ def test_a_bidirectional_protocol_session_survives_the_guard(tmp_path: Path) -> 
     requests = "first-request\nsecond-request\nthird-request\n"
     result = _run(
         tmp_path=tmp_path,
-        deadline=str(int(time.time()) + 3600),
+        deadline=str(_FAR_FUTURE_EPOCH),
         argv=[
             "python3",
             "-c",
@@ -645,174 +1057,10 @@ def test_a_bidirectional_protocol_session_survives_the_guard(tmp_path: Path) -> 
     ]
 
 
-# An arbitrary whole epoch second for the controlled clock. Nothing reads the
-# host's clock in the case below, so any value works; it is fixed so a failure
-# message names the same instants on every run.
-_CONTROLLED_EPOCH = 1_900_000_000
-
-
-def _term_ignoring_agent(*, trapped: Path) -> list[str]:
-    """An agent that ignores TERM, and says so only once the trap is installed.
-
-    The guard's clock is held on `trapped`, so no signal can fall before the
-    trap exists. Without that ordering a loaded host can deliver the TERM
-    before the shell has run `trap`, and the agent dies by TERM (exit 143)
-    instead of by the KILL the case is about: measured 2026-11-01 at load ~58,
-    in a diagnostic full suite.
-    """
-    return ["/bin/sh", "-c", f"trap '' TERM; : > {trapped}; exec /bin/sleep 600"]
-
-
-def _controlled_clock(
-    *, tmp_path: Path, start: float, hold: Path | None = None
-) -> tuple[Path, Path]:
-    """A `date` and a `sleep` that read and advance one simulated clock file.
-
-    `sleep N` adds N seconds to the clock and returns at once, and `date` reads
-    it back in the two formats the guard asks for. A guard run on these two
-    makes every scheduling decision against simulated time, so the instant its
-    KILL fires is a computed fact about its arithmetic rather than a reading of
-    how quickly a loaded host delivered it.
-
-    With `hold`, every simulated `sleep` first waits in real time until that
-    file exists. A case uses it to put the guard's clock at a standstill while
-    it arranges something that must happen BEFORE any signal can fall -- the
-    adapter parent exiting, the waiter dying -- and then releases it.
-    """
-    bin_dir = tmp_path / "controlled-clock-bin"
-    bin_dir.mkdir()
-    clock = tmp_path / "controlled-clock"
-    _ = clock.write_text(f"{start:.6f}\n", encoding="utf-8")
-    date_shim = bin_dir / "date"
-    _ = date_shim.write_text(
-        "#!/bin/sh\n"
-        f'now="$(cat {clock})"\n'
-        'case "$1" in\n'
-        """    +%s.%N) awk -v n="$now" 'BEGIN{s=int(n); printf "%d.%09d\\n", s, (n-s)*1e9}' ;;\n"""
-        """    *) awk -v n="$now" 'BEGIN{printf "%d\\n", int(n)}' ;;\n"""
-        "esac\n",
-        encoding="utf-8",
-    )
-    sleep_shim = bin_dir / "sleep"
-    _ = sleep_shim.write_text(
-        "#!/bin/sh\n"
-        f": > {_reaper_armed(clock=clock)}\n"
-        + (f"while [ ! -e {hold} ]; do /bin/sleep 0.05; done\n" if hold is not None else "")
-        + f'now="$(cat {clock})"\n'
-        f"""awk -v n="$now" -v d="$1" 'BEGIN{{printf "%.6f\\n", n+d}}' > {clock}.next\n"""
-        f"mv {clock}.next {clock}\n",
-        encoding="utf-8",
-    )
-    date_shim.chmod(0o755)
-    sleep_shim.chmod(0o755)
-    return bin_dir, clock
-
-
-def _reaper_armed(*, clock: Path) -> Path:
-    """The marker the controlled `sleep` leaves on its first call.
-
-    Only the guard's reaper calls `sleep` off PATH -- every child in this module
-    runs `/bin/sleep` -- so the marker existing means the reaper has been forked
-    and is polling. Nothing else proves it: the guarded child can write its pid
-    BEFORE the guard has forked the reaper.
-    """
-    return clock.with_name(f"{clock.name}.reaper-armed")
-
-
-def _executing(*, pid: int) -> bool:
-    """True while `pid` exists and is not a zombie -- a zombie holds no credential."""
-    try:
-        raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-    except OSError:
-        return False
-    return raw[raw.rfind(")") + 2 :].split()[0] != "Z"
-
-
-def _eventually(
-    *, condition: Callable[[], bool], guard_seconds: float = _CONTROLLED_CLOCK_HANG_GUARD_SECONDS
-) -> bool:
-    """Whether `condition` holds within the hang guard; the bound under test is read elsewhere."""
-    give_up = time.monotonic() + guard_seconds
-    while not condition():
-        if time.monotonic() >= give_up:
-            return False
-        time.sleep(0.05)
-    return True
-
-
-def _stops(*, pid: int) -> bool:
-    """Whether `pid` stops executing within the hang guard."""
-    return _eventually(condition=lambda: not _executing(pid=pid))
-
-
-def _appears(*, path: Path) -> bool:
-    """Whether `path` gains content within the hang guard."""
-    return _eventually(
-        condition=lambda: path.exists() and path.read_text(encoding="utf-8").strip() != ""
-    )
-
-
-def test_the_hang_guard_reports_a_condition_that_never_holds() -> None:
-    """A hung guard is reported as a failed wait, never as a hang of the suite."""
-    assert not _eventually(condition=lambda: False, guard_seconds=0.0)
-
-
-def test_a_process_with_no_proc_entry_is_not_executing() -> None:
-    """A pid the kernel cannot hold reads as stopped, never as an unreadable error.
-
-    Which branch of `_executing` the guard cases reach depends on whether the
-    reaper ran before the probe, so on a fast host none of them reads a pid whose
-    `/proc` entry is already gone (CI coverage, PR 4096). One past `pid_max` has
-    no entry on any host.
-    """
-    pid_max = int(Path("/proc/sys/kernel/pid_max").read_text(encoding="utf-8"))
-    assert not _executing(pid=pid_max + 1)
-
-
-def test_the_reaper_skips_a_proc_entry_that_vanishes_mid_scan(tmp_path: Path) -> None:
-    """A process that exits between the scan and the environ read is not an error.
-
-    Whether a real `/proc` scan meets such an entry depends on which process
-    exits when, so under a loaded gate Job the branch went uncovered (janitor
-    Job gate-livespec-orchestrator-beads-fabro-6zr7x, 2026-11-03). A numbered
-    directory with no `environ` file is that entry on every host.
-    """
-    (tmp_path / "4194305").mkdir()
-    assert _tagged_pids(tag=_case_tag, proc_root=tmp_path) == []
-
-
-def test_the_reaper_finds_and_kills_a_tagged_process_left_running() -> None:
-    """A tagged process still running at teardown is found and killed.
-
-    Teardown reaches its kill loop only when a case's process outlives the
-    case, which depends on scheduling, so this case leaves one running on
-    purpose and drives the reaper's own helpers over it.
-    """
-    child = subprocess.Popen(["/bin/sleep", "60"], env=_hermetic_env())
-    try:
-        assert _eventually(condition=lambda: child.pid in _tagged_pids(tag=_case_tag))
-        assert _kill_all(pids=[child.pid]) is False
-        assert child.wait(timeout=_CONTROLLED_CLOCK_HANG_GUARD_SECONDS) == -signal.SIGKILL
-    finally:
-        with contextlib.suppress(OSError):
-            child.kill()
-
-
-def test_the_hang_guard_polls_until_a_late_condition_holds() -> None:
-    """A condition false at first and true later is waited for, not given up on."""
-    checks: list[int] = []
-
-    def holds_on_the_second_check() -> bool:
-        checks.append(1)
-        return len(checks) >= 2
-
-    assert _eventually(condition=holds_on_the_second_check)
-    assert len(checks) == 2
-
-
 @pytest.mark.parametrize("start_fraction", [0.65, 0.95])
+@pytest.mark.parametrize("initial_advance_delay_seconds", [0, _SETTLE_SECONDS + 1])
 def test_a_fractional_start_still_stops_by_the_absolute_epoch(
-    tmp_path: Path, start_fraction: float
+    tmp_path: Path, start_fraction: float, initial_advance_delay_seconds: int
 ) -> None:
     """A guard entered PART-WAY THROUGH A SECOND must not kill late.
 
@@ -822,38 +1070,25 @@ def test_a_fractional_start_still_stops_by_the_absolute_epoch(
     scheduler jitter -- it reproduces at the same offset every run -- and a
     deadline that is late by construction is not a deadline.
 
-    The guard runs on a CONTROLLED CLOCK started at the chosen fraction, so the
-    instant its KILL fires is read off the clock its own arithmetic advanced.
-    A stopwatch on the host cannot tell that rounding apart from a kill a
-    loaded host merely delivered late: measured 2026-10-31 at load ~100, a
-    correct guard's kill landed +0.735 s past the deadline against a +0.5 s
-    allowance. On the controlled clock the flooring defect fires at
-    deadline+0.05 or +0.15, past the deadline, and the fixed arithmetic fires
-    inside the last second before it, whatever the host's load.
-
-    The agent is a real process that ignores TERM, so the KILL is what stops
-    it: the arm the rounding affected.
+    The start is ALIGNED to a chosen fraction rather than left to chance,
+    because an unaligned case passes roughly whenever the fraction happens to be
+    small. The child ignores TERM so the KILL is what stops it, which is the arm
+    the rounding affected.
     """
-    trapped = tmp_path / "term-is-ignored"
-    bin_dir, clock = _controlled_clock(
-        tmp_path=tmp_path, start=_CONTROLLED_EPOCH + start_fraction, hold=trapped
-    )
-    deadline = _CONTROLLED_EPOCH + _SOON_SECONDS
-
-    result = _run(
+    # The clock STARTS at the chosen fraction of a second, so the alignment the
+    # case needs is a value written into the clock file rather than a wait for
+    # the host's clock to reach it. The child ignores TERM, so the KILL is what
+    # stops it.
+    status, stopped_at, deadline = _guarded_group_exit(
         tmp_path=tmp_path,
-        deadline=str(deadline),
-        # Absolute paths, so the agent runs on the HOST's clock and only the
-        # guard reads the controlled one. The ignored TERM survives the exec.
-        argv=_term_ignoring_agent(trapped=trapped),
-        # A hang guard only: the guard's sleeps return at once, so it ends on
-        # its own KILL long before this.
-        timeout=_CONTROLLED_CLOCK_HANG_GUARD_SECONDS,
-        path_prefix=bin_dir,
+        start_fraction=start_fraction,
+        initial_advance_delay_seconds=initial_advance_delay_seconds,
     )
 
-    killed_at = float(clock.read_text(encoding="utf-8"))
-    assert result.returncode == 128 + signal.SIGKILL, result.stderr
     assert (
-        deadline - 1 < killed_at <= deadline
-    ), f"a start at .{int(start_fraction * 100)} killed {killed_at - deadline:+.3f}s from the deadline"
+        stopped_at <= deadline
+    ), f"a start at .{int(start_fraction * 100)} killed {stopped_at - deadline:+.3f}s past the deadline"
+    assert (
+        stopped_at > deadline - 1
+    ), "the child ended at the TERM, so the KILL arm was not measured"
+    assert status != 0

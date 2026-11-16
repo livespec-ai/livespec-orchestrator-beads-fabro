@@ -23,6 +23,7 @@ import re
 
 __all__: list[str] = [
     "escape_minijinja_literal",
+    "rewrite_minijinja_openers_for_goal",
 ]
 
 # MiniJinja's three OPENING delimiters: expression `{{`, statement `{%`,
@@ -34,6 +35,10 @@ __all__: list[str] = [
 # opener therefore guarantees arbitrary goal prose cannot alter graph
 # semantics regardless of content (work-item livespec-impl-beads-ajv).
 _MINIJINJA_OPEN_DELIMITER_RE = re.compile(r"\{\{|\{%|\{#")
+# The opening brace of every delimiter, matched by lookahead so the scan is
+# overlapping: in `{{%` the second brace opens a statement delimiter of its own,
+# and a consuming match would leave it live.
+_MINIJINJA_OPENING_BRACE_RE = re.compile(r"\{(?=[{%#])")
 
 
 def escape_minijinja_literal(*, text: str) -> str:
@@ -77,3 +82,14 @@ def escape_minijinja_literal(*, text: str) -> str:
         lambda match: '{{ "' + match.group(0) + '" }}',
         text,
     )
+
+
+def rewrite_minijinja_openers_for_goal(*, text: str) -> str:
+    """Make immutable goal prose inert without changing any other character.
+
+    Ledger comments and ratified lessons cannot safely be edited after the
+    fact.  Unlike item fields, they therefore remain dispatchable: only the
+    opening curly brace of each MiniJinja delimiter is rewritten to a square
+    bracket before that prose enters the goal.
+    """
+    return _MINIJINJA_OPENING_BRACE_RE.sub("[", text)

@@ -144,11 +144,13 @@ def test_credentials_cluster_importable_from_new_module_and_private_names_remove
     # it back here — which keeps both paths on ONE probe seam and one
     # absent-credential refusal.
     credential_env_public_names = {
+        "CheckedCredentialEnv",
         "assess_credential_status",
         "assess_resolved_credential",
         "check_credential_env",
+        "checked_credential_env",
         "dispatch_required_credentials_text",
-        "projected_credential_env_name",
+        "projected_credential",
     }
     assert set(_dispatcher_credential_env.__all__) == credential_env_public_names
 

@@ -49,19 +49,23 @@ _WORKFLOW = _REPO_ROOT / ".claude-plugin/.fabro/workflows/implement-work-item/wo
 _NATIVE_INSPECT = _REPO_ROOT / "tests/fixtures/fabro_native_inspect/background.json"
 _SUCCESSFUL_NODES = (
     "start",
+    # The sandbox setup chain (work-item bd-ib-dpsiwz): the committed graph declares
+    # the nine setup steps as command nodes between `start` and the gate, so every
+    # green run passes through all of them, in order.
+    *(f"run_prepare_{index}" for index in range(1, 10)),
     "dod_gate",
     # The post-turn mutation guard (bd-ib-al54tl) sits on `dod_gate`'s
     # fallthrough, so every green run passes through it.
     "dod_gate_mutation_guard",
-    "implement",
-    # The commit-run settle (bd-ib-xj3qqb) sits on `implement`'s fallthrough
-    # ahead of the completion gate, so every green run passes through it.
-    "implement_commit_settle",
-    # The implement stage's completion gate (v165, Scenario 204;
-    # bd-ib-ahxcjx). It is on the success route because it sits on
-    # `implement`'s single fallthrough: a green run reached the diff breaker
-    # THROUGH it, having stated its Definition of Done complete.
+    "red_admission",
+    "red",
+    "commit_red",
+    "green_admission",
+    "green",
+    # The completion gate (Scenario 204) sits on `green`'s fallthrough, and only
+    # a turn that stated its Definition of Done complete reaches `commit_green`.
     "implement_completion",
+    "commit_green",
     "implementation_diff",
     "janitor_admission",
     "janitor",

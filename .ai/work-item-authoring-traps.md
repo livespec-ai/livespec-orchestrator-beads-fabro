@@ -131,3 +131,63 @@ private notations. It matters most in LEDGER COMMENTS, because a comment cannot
 be repaired after the fact.
 `bd-ib-ai9a` is the live P1 carrying the mechanism and Fabro-side fix, and
 `bd-ib-pgne` is the orchestrator-side pre-flight refusal.
+
+**An "advisory" References finding still blocks the launch.** When the filing
+display reports, as `(advisory)`, that the Definition of Done's `References:`
+line does not name a heading the spec-stated judgement returned as governing,
+the item still reaches `ready`. But the fleet launcher's
+`dev-tooling/dod-preflight.sh`, which `fleet-launch/dispatch-dual.sh` runs before
+it takes a slot, refuses that same omission ("no slot, no launch"), and the
+ticket is lost. So at filing, name EVERY heading the judgement returns, separated
+by commas (`References: ## <first heading>, ## <second heading>`). Then run
+`with-livespec-env.sh -- ./dev-tooling/dod-preflight.sh <item-id>` from the
+repository root, and confirm it prints `{"outcome": "passed"}` before you hand
+the item to the dispatcher. (Measured 2026-11-08T23:06:33Z on `bd-ib-ysgz56`: it
+was filed with the advisory left in place, reached `ready`, and was refused at
+launch. Adding the second heading made the preflight pass.)
+
+Run the preflight even when the filing display reports `definition-of-done
+findings: none`. The display checks only the mechanical wall; it never runs the
+judgement, so it cannot report a heading the judgement would demand. Do not copy
+a sibling item's `References:` line either: a sibling can share the mechanism
+but not the governing clause. (Measured 2026-11-12 on `bd-ib-woiqjm`: it copied
+"## Scenario 176" from its sibling arms `bd-ib-lpdlsq` and `bd-ib-2zap56`, and
+the display reported no finding. The pre-dispatch judgement then refused it,
+because 176 governs refresh repair, not the `fix_commit_settle` route. One
+preflight run named the governing H2, `## ACP node timeouts`, and passed once it
+was added. Pass a candidate description file as the preflight's second argument
+to test an edit before writing it with `bd update --body-file`.)
+
+**A Definition-of-Done bullet the spec does not state holds the item at
+spec-change tier.** `dispatcher.py classify-tier` grades the Definition of Done
+against the ratified spec. Any bullet that no clause or scenario states reads
+`partial`, and the item is held for a linked proposal topic until that topic is
+ratified, even when `dod-preflight.sh` passes. So write each bullet as a
+paraphrase of the governing heading's own behaviour. Put numeric bars (exit
+statuses, trial counts, a CPU ceiling), import-structure properties and proof
+guidance in Context instead. A plan-level target belongs to the plan's own proof
+through its carrier map, never to a child's Definition of Done. After filing,
+run `with-livespec-env.sh python3 <plugin-root>/scripts/bin/dispatcher.py
+classify-tier --repo . --item <id>`. Treat anything but `tier none` as a
+Definition of Done to tighten. File a proposal only when the requirement
+genuinely belongs in the spec. (Measured 2026-11-12, three items in one plan
+session. `bd-ib-22j24v` was held for its 0.72 CPU ceiling, which the carrier map
+already gave to plan-level proof; moving it to Context gave `tier none`.
+`bd-ib-vc6o5q` was held for collect-alone and import-order bullets, which needed
+a proposal. `bd-ib-nq2wim` was held for exit statuses, HUP and a 200-trial bar;
+rewriting it to the ratified Terminal line clause released it.)
+
+**When you repair an item's Definition of Done in its description, also clear
+the native `acceptance_criteria` field.** Once the description has a gradeable
+`## Definition of Done`, the effective-criteria resolution reads the field no
+longer, and the filing display reports `resolved from
+description-definition-of-done` with no findings. The DoD judge, however, still
+receives the field (`_dispatcher_dod_judgement.py` appends any
+`acceptance_criteria` value to the text it grades), so stale lines left there
+from filing are graded too. Run `bd update <id> --acceptance ""` under the env
+wrapper, then confirm with `bd show <id> --json` that the field is absent before
+you hand the item to the factory. (Measured 2026-10-25: `bd-ib-yq4x4g`'s run
+`01M5T9XDVX9Y` stopped at needs-human before implement. A test-existence
+assertion and internal identifiers left in the field were graded, while the
+repaired description was clean. Moved here from a host-local agent memory note
+by `bd-ib-ftq3oh`.)

@@ -23,16 +23,19 @@ Make every commit through the sandbox commit runner, which this stage prompt
 names. Start the commit with
 `python3 "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-runner.py" start -- git commit ...`
 (the same `git commit` you would run in the foreground, with its own
-arguments), which prints a run id at once, then repeat
+arguments), which prints a run id at once, then wait once
 `python3 "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-runner.py" wait <run-id> --timeout-seconds 300`
-in later tool calls until it reports a terminal state. The runner invokes the
+in a later tool call. Wait at most once on each commit run you start. If that wait reports `running`, do not call `wait` again and do not stop it. End the turn and leave it for `review_fix_commit_settle` to wait out. The runner invokes the
 commit unchanged, so the repository hooks still run exactly as they would in
 the foreground. A `running` report is not a failed commit. Only `passed` is a
 commit; `failed` is the hook's refusal, with its exit status and output, and
 `no-verdict` means the commit's process ended without a verdict, so neither is
 a commit. The detached commit run and its bounded waits are the one exception
-to the rule against backgrounding a tool call, and every commit run you start
-must be terminal before your final message.
+to the rule against backgrounding a tool call. Ordinarily, every commit run you
+start must be terminal before your final message. But when the only remaining
+work is a commit you started through the sandbox commit runner and that runner
+still reports it as `running`, end the turn as succeeded, name that commit run's id in your final message, and leave it for `review_fix_commit_settle` to wait out. This exception takes precedence over the generic turn-ending rule below;
+every other commit run you start must be terminal before your final message.
 
 ## Red and Green commit discipline
 
@@ -42,6 +45,30 @@ test first and observe its genuine assertion failure before committing it.
 Before every Green commit or Green amend, run every test file the change touches and see each one pass.
 
 A change to a stage prompt file or `_dispatcher_overlay.py` must update the test that pins it in the same commit.
+
+## When the previous review-fix turn left an open Red commit
+
+A review-fix turn that ends with its last commit carrying `TDD-Red-*` trailers
+and no `TDD-Green-*` trailers has left an OPEN Red: the commit hook accepted the
+correctly failing test on its fast path, so no tree has yet been graded. The
+graph re-enters this node for it instead of sending the run to the janitor.
+When this file exists, you were re-entered for exactly that:
+
+    cat "$(git rev-parse --git-path livespec-review-fix-open-red-brief)"
+
+The brief names the open Red commit. Do NOT author a new Red commit and do not
+rewrite the test: write the minimum implementation that makes that Red's test
+pass, run the test file, and complete its Green amend through the sandbox commit
+runner (`git commit --amend --no-edit`, so the Red trailer block survives). The
+runner folds engine checkpoint commits sitting above the open Red onto it before
+amending, so issue that runner amend while HEAD is on the checkpoints rather
+than declining because they sit above the Red. Before that runner amend, do not
+run `git reset` with either `--soft` or `--hard`, and do not otherwise rewrite
+the open Red or the checkpoints above it. The test-file bytes must stay identical
+across the pair. A turn that ends with the Red still open spends one of this
+node's three visits and the run ends at
+`needs_human` when they are used. If the file does not exist, this visit was
+entered on an accepted review finding; carry on below.
 
 ## What to do
 
@@ -81,8 +108,10 @@ A change to a stage prompt file or `_dispatcher_overlay.py` must update the test
    Green); commit trailer `Co-Authored-By: Claude Fable 5
    <noreply@anthropic.com>`; never create or switch branches, never touch
    `.beads/` or `core.bare`.
-6. Re-run the repository's check suite (`{{ inputs.sandbox_check_suite }}`) yourself until it is green — the
-   janitor re-validates this clone after this stage.
+6. Run only the tests your change touches; the commit hook runs the affected-tests gate.
+   Leave the one full check aggregate to the following janitor visit. Do not start
+   `{{ inputs.sandbox_check_suite }}` yourself: the janitor re-validates this clone
+   after this stage.
 7. In your final reply, summarize each ACCEPTED finding as
    `FIXED — <what you changed>`. Mention rejected findings only to say
    they were intentionally left untouched per the disposition record.

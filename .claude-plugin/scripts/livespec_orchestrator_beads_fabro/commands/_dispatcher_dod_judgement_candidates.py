@@ -26,9 +26,11 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_gate_candidates 
     dod_gate_candidates,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_candidate_command import (
+    caller_environ,
     candidate_command,
     candidate_label,
     candidate_model,
+    claude_judge_token,
     is_codex_candidate,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_prompt import (
@@ -49,7 +51,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_shell_runner import 
 )
 from livespec_orchestrator_beads_fabro.commands._host_judge_spend_journal import (
     HostJudgeSpendJournal,
-    append_assistant_event,
+    append_stream_event,
     is_claude_agent,
     spend_journal_name,
     start_spend_journal,
@@ -155,7 +157,7 @@ def run_candidate_chain(  # noqa: PLR0913 - each argument is an independent seam
     resolved = candidate_resolver(cwd=cwd)
     if resolved is None:
         return CandidateChainResult(reply=None, cause=CAUSE_NO_ELIGIBLE_MODEL)
-    environ = _caller_environ(caller=caller, environ=dict(os.environ))
+    environ = caller_environ(caller=caller, environ=dict(os.environ))
     resolved_journal_name = (
         spend_journal_name(caller=caller, cwd=cwd) if journal_name is None else journal_name
     )
@@ -168,8 +170,16 @@ def run_candidate_chain(  # noqa: PLR0913 - each argument is an independent seam
     bound_ended: list[str] = []
     attempts: list[CandidateAttempt] = []
     for candidate in resolved:
+        # A Claude judge refused by the credential policy is never started; its
+        # stable cause names the defect in the did-not-run record and line.
+        claude_token = claude_judge_token(candidate=candidate, repo=cwd, environ=environ)
+        if isinstance(claude_token, CandidateAttempt):
+            attempts.append(claude_token)
+            last_cause = claude_token.outcome
+            continue
         attempt = _run_candidate(
             candidate=candidate,
+            claude_token=claude_token,
             prompt=prompt,
             cwd=cwd,
             runner=runner,
@@ -227,6 +237,7 @@ def _candidate_outcome(
 def _run_candidate(  # noqa: PLR0913 - each argument is an independent seam input.
     *,
     candidate: AcpCandidate,
+    claude_token: str,
     prompt: str,
     cwd: Path,
     runner: CommandRunner,
@@ -240,6 +251,7 @@ def _run_candidate(  # noqa: PLR0913 - each argument is an independent seam inpu
     argv, judge_environ = candidate_command(
         candidate=candidate,
         environ=environ,
+        claude_token=claude_token,
         bound_input=bound_input,
         journal_spend=journal_spend,
         journal_name=journal_name,
@@ -287,7 +299,7 @@ def _run_candidate(  # noqa: PLR0913 - each argument is an independent seam inpu
         )
     if journal is not None:
         for line in result.stdout.splitlines():
-            append_assistant_event(journal=journal, line=line)
+            append_stream_event(journal=journal, line=line)
     usage = candidate_input_usage(output=result.stdout) if bound_input else _UNBOUNDED_USAGE
     return _CandidateRun(result=result, usage=usage, ended_by_input_limit=False)
 
@@ -300,21 +312,9 @@ def _invocation_cause(*, exit_code: int) -> str:
     return CAUSE_JUDGE_COMMAND_FAILED
 
 
-def _caller_environ(*, caller: str | None, environ: dict[str, str]) -> dict[str, str]:
-    """Append the launching judgement's caller label when one is supplied."""
-    if caller is None:
-        return environ
-    label = f"livespec.caller={caller}"
-    inherited = environ.get("OTEL_RESOURCE_ATTRIBUTES")
-    return {
-        **environ,
-        "OTEL_RESOURCE_ATTRIBUTES": label if inherited is None else f"{inherited},{label}",
-    }
-
-
 def _observe_line(
     *, journal: HostJudgeSpendJournal, live_usage: _LiveUsage, bound_input: bool, line: str
 ) -> bool:
     """Journal a received response before optionally ending an over-budget candidate."""
-    append_assistant_event(journal=journal, line=line)
+    append_stream_event(journal=journal, line=line)
     return live_usage.observe(line=line) if bound_input else False

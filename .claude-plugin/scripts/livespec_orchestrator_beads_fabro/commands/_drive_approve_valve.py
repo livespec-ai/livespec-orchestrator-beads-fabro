@@ -21,11 +21,11 @@ from returns.pipeline import is_successful
 from returns.unsafe import unsafe_perform_io
 
 from livespec_orchestrator_beads_fabro import store
-from livespec_orchestrator_beads_fabro._store_factory_size_gate import (
-    route_factory_size_decomposition,
-)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_acceptance_eligibility import (
     acceptance_eligibility,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done_findings import (
+    goal_template_opening_delimiter_findings,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_gate import (
     judge_item_definition_of_done,
@@ -41,6 +41,12 @@ from livespec_orchestrator_beads_fabro.commands._drive_valve_result import (
     valve_refusal,
     valve_success,
 )
+from livespec_orchestrator_beads_fabro.commands._intake_valve_claim_writes import (
+    WRITER_HUMAN_VALVE,
+    ClaimWrite,
+    resting_at,
+    valve_claim_refusal,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -48,6 +54,15 @@ if TYPE_CHECKING:
     from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 
 __all__: list[str] = ["approve_item"]
+
+_SOURCE_STATUS = "pending-approval"
+# What an approve has done by the time its transition is refused. The
+# Definition-of-Done judgement runs first and records its own verdict on the
+# item (`_definition_of_done_refusal`); a refused transition does not remove it.
+_JUDGED = (
+    "any Definition-of-Done judgement this press ran is already recorded on the item "
+    "and stays there"
+)
 
 
 def _definition_of_done_refusal(
@@ -78,6 +93,14 @@ def _definition_of_done_refusal(
     `.variant` the decision already carries is how that happened; binding the
     result is the repair.
     """
+    template_findings = goal_template_opening_delimiter_findings(item=item)
+    if template_findings:
+        return valve_refusal(
+            aid=action_id,
+            wid=item.id,
+            err="ungradeable-acceptance-criteria",
+            msg=f"approve refused: {'; '.join(template_findings)}.",
+        )
     eligibility = acceptance_eligibility(item=item, cwd=repo)
     refusal = eligibility.refusal
     if refusal is not None:
@@ -102,6 +125,41 @@ def _definition_of_done_refusal(
     return None
 
 
+def _approval(*, repo: Path, config: StoreConfig, item: WorkItem, intent: str) -> ClaimWrite:
+    """One of this valve's two claim-changing writes, decided on a `pending-approval` item."""
+    return ClaimWrite(
+        repo=repo,
+        path=config,
+        item_id=item.id,
+        writer=WRITER_HUMAN_VALVE,
+        intent=intent,
+        still_as_decided=resting_at(status=_SOURCE_STATUS),
+    )
+
+
+def _size_decomposition(
+    *, repo: Path, config: StoreConfig, item: WorkItem, action_id: str, reason: str
+) -> dict[str, Any]:
+    """Route an oversized item to `backlog` and refuse the approval with the reason.
+
+    The route is a claim-changing write, so once `dispatcher.claim_tokens` is
+    true it is made only after winning the item's current token. A route that
+    does not win has moved nothing, and the refusal names the protocol's outcome
+    and not a `backlog` the item never reached.
+    """
+    lost = _approval(
+        repo=repo, config=config, item=item, intent="approve:size-decomposition"
+    ).write_size_decomposition(reason=reason)
+    if lost is not None:
+        return valve_claim_refusal(aid=action_id, wid=item.id, verb="approve", outcome=lost)
+    return valve_refusal(
+        aid=action_id,
+        wid=item.id,
+        err="size-decomposition",
+        msg=reason,
+    ) | {"target_status": "backlog", "message": reason}
+
+
 def approve_item(
     *, repo: Path, config: StoreConfig, item: WorkItem, action_id: str
 ) -> dict[str, Any]:
@@ -113,8 +171,8 @@ def approve_item(
     explicit `approve` on the label would strand an item that was parked at this
     valve when its policy changed.
     """
-    if item.status != "pending-approval":
-        return invalid_source_state(aid=action_id, item=item, expected="pending-approval")
+    if item.status != _SOURCE_STATUS:
+        return invalid_source_state(aid=action_id, item=item, expected=_SOURCE_STATUS)
     size_result = resolved_stored_factory_size_decision(
         cwd=repo,
         path_factory=lambda: config,
@@ -130,18 +188,26 @@ def approve_item(
         )
     size = unsafe_perform_io(size_result.unwrap())
     if size.disposition == "decompose":
-        reason = cast("str", size.reason)
-        route_factory_size_decomposition(path=config, work_item_id=item.id, reason=reason)
-        return valve_refusal(
-            aid=action_id,
-            wid=item.id,
-            err="size-decomposition",
-            msg=reason,
-        ) | {"target_status": "backlog", "message": reason}
+        return _size_decomposition(
+            repo=repo,
+            config=config,
+            item=item,
+            action_id=action_id,
+            reason=cast("str", size.reason),
+        )
     held = _definition_of_done_refusal(repo=repo, config=config, item=item, action_id=action_id)
     if held is not None:
         return held
-    store.update_work_item_status(path=config, item_id=item.id, status="ready")
+    lost = _approval(repo=repo, config=config, item=item, intent="approve").write_status(
+        status="ready",
+        unguarded=lambda: store.update_work_item_status(
+            path=config, item_id=item.id, status="ready"
+        ),
+    )
+    if lost is not None:
+        return valve_claim_refusal(
+            aid=action_id, wid=item.id, verb="approve", outcome=lost, already_done=_JUDGED
+        )
     return valve_success(
         aid=action_id,
         wid=item.id,

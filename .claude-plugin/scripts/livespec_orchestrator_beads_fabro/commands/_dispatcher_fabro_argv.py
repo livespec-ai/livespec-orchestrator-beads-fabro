@@ -22,6 +22,8 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_integration_projecti
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from livespec_orchestrator_beads_fabro.commands._codex_model_tiers import CodexModelTier
     from livespec_orchestrator_beads_fabro.commands._dispatcher_check_suite_view import (
         JanitorCheckSuite,
@@ -52,6 +54,7 @@ __all__: list[str] = [
     "janitor_venue_contains_merge_argv",
     "janitor_worktree_add_argv",
     "janitor_worktree_remove_argv",
+    "merge_queue_retry_argv",
     "parse_fleet_members",
     "pr_arm_argv",
     "pr_disarm_argv",
@@ -402,6 +405,29 @@ def pr_arm_argv(*, plan: DispatchPlan, number: int) -> list[str]:
         "--auto",
         "--delete-branch",
     ]
+
+
+# GitHub's refusal of the branch-deletion flag on a repository whose base branch
+# has a merge queue: `X Cannot use \`-d\` or \`--delete-branch\` when merge queue
+# enabled`, measured on livespec-ai/livespec-dev-tooling#4185 (bd-ib-hnj3td). The
+# method flag is only a warning there; this flag is fatal.
+MERGE_QUEUE_DELETE_BRANCH_REFUSAL = "when merge queue enabled"
+_DELETE_BRANCH_FLAG = "--delete-branch"
+
+
+def merge_queue_retry_argv(*, argv: Sequence[str], stderr: str) -> list[str] | None:
+    """The same `gh pr merge` without `--delete-branch`, when GitHub refused it for a merge queue.
+
+    `None` for every other outcome, so a repository WITHOUT a merge queue keeps
+    the single call that deletes its merged branch. A merge-queue repository
+    deletes merged head branches through its own setting, so dropping the flag
+    there loses nothing. Retrying on the measured refusal rather than probing
+    for a queue first spends no extra forge call on the repositories that never
+    refuse.
+    """
+    if MERGE_QUEUE_DELETE_BRANCH_REFUSAL not in stderr or _DELETE_BRANCH_FLAG not in argv:
+        return None
+    return [token for token in argv if token != _DELETE_BRANCH_FLAG]
 
 
 def pr_disarm_argv(*, plan: DispatchPlan, number: int) -> list[str]:

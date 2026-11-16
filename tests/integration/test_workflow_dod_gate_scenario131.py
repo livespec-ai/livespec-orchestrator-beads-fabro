@@ -58,6 +58,11 @@ from livespec_orchestrator_beads_fabro.commands._node_timeouts import (
 _BUNDLE = Path(".claude-plugin/.fabro/workflows/implement-work-item")
 _VARIANT = Path(".fabro/workflows/groom-work-item")
 _GATE = "dod_gate"
+# The groom variant's reserved nodes are entered only through one edge from `start`
+# guarded by a context key the graph never sets: Petri's validator walks edges
+# without reading conditions and refuses an unreachable node, and the guard keeps
+# every run off the node (bd-ib-ttrjvj).
+_NEVER_ENTERED = 'condition="context.livespec_groom_reserved_entry=never"'
 _ADAPTER_INPUT = "dod_gate_adapter"
 _ACP_BACKEND = 'backend="acp"'
 # A DOT node declaration: a name at the start of a line followed by its
@@ -118,7 +123,7 @@ def _plan(*, tmp_path: Path) -> DispatchPlan:
         janitor=None,
         janitor_checkout=tmp_path / ".janitor",
         janitor_core_checkout=tmp_path / ".janitor" / ".livespec-core",
-        janitor_core_repo_url="https://github.com/thewoolleyman/livespec.git",
+        janitor_core_repo_url="https://github.com/livespec-ai/livespec.git",
         janitor_core_ref="master",
         review_fix_visit_cap=3,
         merge_on_review_cap_outcome="succeeded",
@@ -146,11 +151,24 @@ def test_the_gate_is_an_acp_node_on_its_own_adapter_input() -> None:
 
 
 def test_the_gate_sits_between_start_and_implement() -> None:
-    """`start` enters the gate, and nothing enters `implement` from `start` any more."""
+    """`start` enters the setup chain, the chain enters the gate, and nothing enters `implement` from `start`.
+
+    The sandbox setup is a chain of `run_prepare_<N>` command nodes between `start`
+    and the first stage (work-item bd-ib-dpsiwz), so the gate is still the FIRST
+    stage after `start` -- it is entered from the chain's last node and from nothing
+    else.
+    """
     edges = _edges(text=_dot(payload=_BUNDLE))
 
-    assert [edge for edge in edges if edge.startswith("start ->")] == [f"start -> {_GATE}"]
+    assert [edge for edge in edges if edge.startswith("start ->")] == ["start -> run_prepare_1"]
     assert not any(edge.startswith("start -> implement") for edge in edges)
+    setup = sorted(
+        {int(found) for edge in edges for found in re.findall(r"run_prepare_(\d+)", edge)}
+    )
+    assert setup == list(range(1, len(setup) + 1)), "the setup chain is not numbered from 1"
+    assert [edge for edge in edges if edge.endswith(f"-> {_GATE}")] == [
+        f"run_prepare_{setup[-1]} -> {_GATE}"
+    ]
 
 
 def test_the_gate_falls_through_to_implement_and_routes_a_failure_to_needs_human() -> None:
@@ -170,27 +188,22 @@ def test_the_gate_falls_through_to_implement_and_routes_a_failure_to_needs_human
         for edge in _edges(text=_dot(payload=_BUNDLE))
         if edge.startswith("dod_gate_mutation_guard ->") and "condition=" not in edge
     ]
-    assert guard_fallthrough == ["dod_gate_mutation_guard -> implement"]
+    assert guard_fallthrough == ["dod_gate_mutation_guard -> red_admission"]
     blocked = [edge for edge in edges if edge.startswith(f"{_GATE} -> needs_human")]
     assert len(blocked) == 1
     assert 'condition="outcome=failed"' in blocked[0]
 
 
 def test_the_bundle_declares_the_gate_adapter_default() -> None:
-    """The built-in default is the entry the workflow declares for its review input.
-
-    The contracts file's built-in-defaults table puts `dod_gate` on the entry the
-    workflow declares for its review input, so the two lines are compared to each other
-    rather than to a model name restated here — a default pinned by copying a
-    literal would drift the moment the review pin moved.
-    """
+    """The gate's bundled default is a structured entry retaining the 1M model variant."""
     toml = _toml(payload=_BUNDLE)
-    gate = re.search(rf'^\s*{_ADAPTER_INPUT}\s*=\s*"(?P<value>.+)"', toml, re.MULTILINE)
-    review = re.search(r'^\s*review_adapter\s*=\s*"(?P<value>.+)"', toml, re.MULTILINE)
+    gate = re.search(rf"^\s*{_ADAPTER_INPUT}\s*=\s*'(?P<value>.+)'", toml, re.MULTILINE)
 
-    assert review is not None
     assert gate is not None, "the reserved workflow declares no dod_gate_adapter input"
-    assert gate.group("value") == review.group("value")
+    assert (
+        gate.group("value")
+        == '{"agent": "claude-acp", "model": "claude-opus-4-8[1m]", "effort": "high"}'
+    )
 
 
 def test_the_gate_is_a_registered_acp_node_with_its_own_input_candidate() -> None:
@@ -251,7 +264,9 @@ def test_the_registered_variant_declares_the_bundles_acp_node_set() -> None:
     # The ONE asymmetry runs the other way: since v121 the bundle publishes
     # through COMMAND stages and declares no ACP `pr` node, while the groom
     # variant keeps one for its filing plan.
-    assert _acp_node_names(payload=_VARIANT) == bundle | GROOM_ONLY_ACP_NODES
+    assert _acp_node_names(payload=_VARIANT) == (
+        (bundle - {"red", "green"}) | GROOM_ONLY_ACP_NODES | {"implement"}
+    )
     assert re.search(rf'^\s*{_ADAPTER_INPUT}\s*=\s*"', _toml(payload=_VARIANT), re.MULTILINE)
 
 
@@ -262,9 +277,15 @@ def test_the_variant_leaves_the_gate_unreached_by_its_edges() -> None:
     an adjudication turn on a graph whose purpose is to produce Definitions of
     Done rather than to grade one.
     """
-    edges = _edges(text=_dot(payload=_VARIANT))
+    dot = _dot(payload=_VARIANT)
+    edges = [edge for edge in _edges(text=dot) if _GATE in edge]
 
-    assert not any(_GATE in edge for edge in edges)
+    assert len(edges) == 1, edges
+    assert edges[0].startswith(f"start -> {_GATE}")
+    assert _NEVER_ENTERED in edges[0]
+    # The guard's key is one nothing in the graph sets: it occurs ONLY in the
+    # guard conditions themselves.
+    assert dot.count("livespec_groom_reserved_entry") == dot.count(_NEVER_ENTERED)
 
 
 def test_the_gate_prompt_verifies_all_four_definition_of_done_duties() -> None:

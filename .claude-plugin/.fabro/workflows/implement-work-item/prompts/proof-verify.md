@@ -152,6 +152,16 @@ For each `factory_captured` assertion, execute its numbered steps
   test of a program YOU wrote, which proves nothing about the one the
   capture ran — and it would report a green that no later replay can earn.
 
+### Keep repository check aggregates serial
+
+Replay a record's steps with at most ONE repository check aggregate running at a time.
+Do this even when the record's steps start several aggregates at once.
+That unsafe schedule is the one replay detail you must not reproduce: run each
+aggregate to its terminal exit before starting the next, without a trailing
+`&` inside one tool call or parallel tool calls. Preserve every individual
+command and expected observation; if serial execution disagrees with an
+expected observation, record the resulting non-reproduction.
+
 ## Step 3 — capture your own proof
 
 Capture per assertion the same way the record did — a screenshot for
@@ -429,7 +439,18 @@ verbatim:
     Proof of Done — verified — run <run-id> — <UTC timestamp>
     Proof of Done — not_reproduced — run <run-id> — <UTC timestamp>
 
-using the run id you resolved in Step 3 and an ISO-8601 UTC timestamp.
+using the run id you resolved in Step 3 and a UTC timestamp that is a CLOCK
+READING, never a time you estimated, rounded or composed yourself. Read the
+clock in the SAME command that writes the header, immediately before you
+post, so the time is no later than the instant the comment is created and
+within minutes of it:
+
+    stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'Proof of Done — %s — run %s — %s\n' "<verified or not_reproduced>" "<run-id>" "$stamp" > <file>
+
+Write the rest of the body to that file before or after this command, but if
+more than a minute passes between this command and the `gh pr comment` that
+posts the file, run it again to refresh the time before posting.
 
 The SECOND line must declare, exactly once, the publish-branch head YOUR
 replay ran on:

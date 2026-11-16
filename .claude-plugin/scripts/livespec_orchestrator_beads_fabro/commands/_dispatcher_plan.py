@@ -67,6 +67,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_fabro_argv import (
     janitor_venue_contains_merge_argv,
     janitor_worktree_add_argv,
     janitor_worktree_remove_argv,
+    merge_queue_retry_argv,
     parse_fleet_members,
     pr_arm_argv,
     pr_disarm_argv,
@@ -78,6 +79,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_goal import (
     GoalBriefMiniJinjaFinding,
     minijinja_findings_detail,
     minijinja_openers_in_goal_sources,
+    minijinja_openers_in_item_fields,
     minijinja_openers_in_text,
     render_goal,
 )
@@ -130,6 +132,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_projection import (
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_status import (
     PrView,
+    TerminalCheckFailure,
     parse_pr_view,
 )
 from livespec_orchestrator_beads_fabro.types import WorkItem
@@ -159,6 +162,7 @@ __all__: list[str] = [
     "InterruptedAttempt",
     "PrView",
     "SiblingClones",
+    "TerminalCheckFailure",
     "assess_codex_credential_freshness",
     "build_plan",
     "cc_otel_overlay_env",
@@ -186,8 +190,10 @@ __all__: list[str] = [
     "janitor_venue_contains_merge_argv",
     "janitor_worktree_add_argv",
     "janitor_worktree_remove_argv",
+    "merge_queue_retry_argv",
     "minijinja_findings_detail",
     "minijinja_openers_in_goal_sources",
+    "minijinja_openers_in_item_fields",
     "minijinja_openers_in_text",
     "parse_fleet_members",
     "parse_pr_view",

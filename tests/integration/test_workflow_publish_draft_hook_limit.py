@@ -71,7 +71,18 @@ _SCRIPT = re.compile(r'script="(?P<value>(?:[^"\\]|\\.)*)"')
 # hook was running and the test failed for a reason that had nothing to do with
 # the behaviour under test. The hook below still sleeps 90 seconds, six times
 # this bound, so it outlives it by a wide margin and the assertion is unchanged.
+#
+# THE BOUND IS ALSO PINNED AGAINST THE HOST'S CLOCK. The script shrinks the bound by
+# the whole seconds the stage has already spent, and the bound floors at one second.
+# On a loaded runner the steps ahead of the push -- measured at 31 to 89 seconds across
+# these cases -- used the rest of the fifteen, so the finished-hook case was cut off at
+# a one-second bound before git had run its hook (CI run 43606417265, 2026-11-14).
+# `_publish` therefore injects the stage's elapsed figure as zero by default, so the
+# bound the cases assert against is the one `push_observation_budget_seconds` computes
+# and not one the host's load chose. Only the late-push case, whose subject IS stage
+# time spent before the push, keeps the stage's own clock.
 _TEST_LIMIT_SECONDS = 135
+_STAGE_ELAPSED_ENV = "LIVESPEC_PUBLISH_DRAFT_STAGE_ELAPSED_SECONDS"
 
 
 def _git(cwd: Path, *argv: str) -> subprocess.CompletedProcess[str]:
@@ -88,6 +99,7 @@ def _publish_script() -> str:
         .replace(r"\"", '"')
         .replace("{{ inputs.default_branch }}", "master")
         .replace("{{ inputs.sandbox_check_suite }}", "true")
+        .replace("{{ inputs.conformance_hook_install }}", "")
     )
 
 
@@ -161,19 +173,35 @@ def _sandbox_helpers(*, tmp_path: Path, limit_seconds: int | None) -> Path:
     return root
 
 
-def _forge_double(*, tmp_path: Path) -> Path:
+def _forge_double(*, tmp_path: Path, merged_query_delay_seconds: int = 0) -> Path:
+    """The forge boundary; its merged-pull-request query is the stage's pre-push work.
+
+    `livespec_landed_check` asks the forge that query once, before the push and
+    after the refresh, so a delay on exactly that call is stage time spent
+    ahead of the push -- the shape a slow refresh rebase gives the real stage.
+    """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     gh = bin_dir / "gh"
-    _ = gh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    _ = gh.write_text(
+        "#!/bin/sh\n"
+        f'case "$*" in *"--state merged"*) sleep {merged_query_delay_seconds} ;; esac\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
     gh.chmod(gh.stat().st_mode | stat.S_IXUSR)
     return bin_dir
 
 
 def _publish(
-    *, tmp_path: Path, run: Path, limit_seconds: int | None
+    *,
+    tmp_path: Path,
+    run: Path,
+    limit_seconds: int | None,
+    pre_push_work_seconds: int = 0,
+    injected_stage_elapsed_seconds: int | None = 0,
 ) -> subprocess.CompletedProcess[str]:
-    bin_dir = _forge_double(tmp_path=tmp_path)
+    bin_dir = _forge_double(tmp_path=tmp_path, merged_query_delay_seconds=pre_push_work_seconds)
     root = _sandbox_helpers(tmp_path=tmp_path, limit_seconds=limit_seconds)
     env = {
         key: value
@@ -187,6 +215,8 @@ def _publish(
             "LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT": str(root),
         }
     )
+    if injected_stage_elapsed_seconds is not None:
+        env[_STAGE_ELAPSED_ENV] = str(injected_stage_elapsed_seconds)
     return subprocess.run(
         ["sh", "-c", _publish_script()],
         cwd=str(run),
@@ -253,3 +283,105 @@ def test_withheld_figures_leave_the_push_exactly_as_it_was(tmp_path: Path) -> No
     assert result.returncode == 0, result.stderr
     assert HOOK_OVER_LIMIT_SENTINEL not in result.stderr
     assert _remote_branch(run=run) != ""
+
+
+# A limit whose push bound is 35 seconds, with 20 of them spent before the push
+# starts. The bound that fires on the clock the STAGE keeps is therefore 15
+# seconds after the push begins; a bound counted from the push start would be
+# 35. The hook below outlives both, so the only difference between a correct
+# script and the measured defect is WHEN the observer is asked.
+_LATE_PUSH_LIMIT_SECONDS = 155
+_LATE_PUSH_PRE_PUSH_WORK_SECONDS = 20
+_LATE_PUSH_HOOK_ELAPSED_CEILING_MS = 25_000
+
+
+def test_a_push_starting_late_in_the_stage_is_ended_by_the_bound_the_stage_leaves(
+    tmp_path: Path,
+) -> None:
+    """Scenario 177: stage time spent before the push comes off the push's bound.
+
+    Measured 2026-11-04 on run 01M6HWJFSTQXB1YRN4QQSTJZB7: a refresh rebase used
+    part of publish_draft's hour, the push's bound was counted from the push
+    start, and the engine's stage timeout killed the script before the bound
+    could name the ending. Here the same shape is run at small scale: the hook
+    has been running for the bound's remainder, not for the full bound, when the
+    observer is asked.
+    """
+    _, run = _run_clone(tmp_path=tmp_path)
+    _install_pre_push(run=run, seconds=90)
+
+    result = _publish(
+        tmp_path=tmp_path,
+        run=run,
+        limit_seconds=_LATE_PUSH_LIMIT_SECONDS,
+        pre_push_work_seconds=_LATE_PUSH_PRE_PUSH_WORK_SECONDS,
+        injected_stage_elapsed_seconds=None,
+    )
+
+    assert result.returncode != 0, result.stderr
+    event = hook_over_limit_from_text(text=result.stderr)
+    assert event is not None, result.stderr
+    assert event.node == "publish_draft"
+    assert event.operation == "push"
+    assert event.limit_seconds == _LATE_PUSH_LIMIT_SECONDS
+    assert event.hook_elapsed_ms < _LATE_PUSH_HOOK_ELAPSED_CEILING_MS, event.hook_elapsed_ms
+    assert _remote_branch(run=run) == ""
+
+
+# Ten seconds of the stage are spent before the push, so the clock leaves a push
+# bound of five seconds; an injected figure of zero must leave the whole fifteen.
+_INJECTED_ELAPSED_PRE_PUSH_WORK_SECONDS = 10
+_INJECTED_ELAPSED_HOOK_ELAPSED_FLOOR_MS = 10_000
+
+
+def test_an_injected_stage_elapsed_figure_replaces_the_stage_clock_in_the_push_bound(
+    tmp_path: Path,
+) -> None:
+    """Scenario 304: the push bound can be made independent of the host's own clock.
+
+    The stage's real clock has spent ten of the push's fifteen seconds, which a
+    script reading it would turn into a five-second bound. With the elapsed figure
+    injected as zero the hook is observed after the full fifteen, so it has been
+    running for most of them when the observer is asked.
+    """
+    _, run = _run_clone(tmp_path=tmp_path)
+    _install_pre_push(run=run, seconds=90)
+
+    result = _publish(
+        tmp_path=tmp_path,
+        run=run,
+        limit_seconds=_TEST_LIMIT_SECONDS,
+        pre_push_work_seconds=_INJECTED_ELAPSED_PRE_PUSH_WORK_SECONDS,
+        injected_stage_elapsed_seconds=0,
+    )
+
+    assert result.returncode != 0, result.stderr
+    event = hook_over_limit_from_text(text=result.stderr)
+    assert event is not None, result.stderr
+    assert event.hook_elapsed_ms > _INJECTED_ELAPSED_HOOK_ELAPSED_FLOOR_MS, event.hook_elapsed_ms
+    assert "15s observation bound" in result.stderr
+    assert _remote_branch(run=run) == ""
+
+
+def test_an_over_limit_push_records_a_cause_naming_the_event_and_not_a_repair_miss(
+    tmp_path: Path,
+) -> None:
+    """Scenario 177: the needs-human cause names hook-over-limit, the node and the operation."""
+    _, run = _run_clone(tmp_path=tmp_path)
+    _install_pre_push(run=run, seconds=90)
+
+    result = _publish(tmp_path=tmp_path, run=run, limit_seconds=_TEST_LIMIT_SECONDS)
+
+    assert result.returncode != 0, result.stderr
+    reason_path = Path(
+        _git(
+            run, "rev-parse", "--path-format=absolute", "--git-path", "livespec-needs-human-reason"
+        ).stdout.strip()
+    )
+    assert reason_path.is_file(), result.stderr
+    reason = reason_path.read_text(encoding="utf-8")
+    assert "hook-over-limit" in reason
+    assert "publish_draft" in reason
+    assert "push" in reason
+    assert f"{_TEST_LIMIT_SECONDS}s" in reason
+    assert "LIVESPEC_REFRESH_REPAIR_ABSENT" not in reason

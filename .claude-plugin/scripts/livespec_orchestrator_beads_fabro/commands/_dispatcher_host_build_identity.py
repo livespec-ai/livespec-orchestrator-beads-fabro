@@ -43,6 +43,7 @@ from dataclasses import dataclass
 __all__: list[str] = [
     "BUILD_IDENTITY_HEADING",
     "COMMIT_LABEL",
+    "IMPORTED_CODE_LABEL",
     "INSTALLED_BUILD_LABEL",
     "NO_RELEASE",
     "RELEASE_TAG_LABEL",
@@ -54,6 +55,7 @@ BUILD_IDENTITY_HEADING = "Build identity"
 RELEASE_TAG_LABEL = "Release tag"
 INSTALLED_BUILD_LABEL = "Installed build"
 COMMIT_LABEL = "Commit"
+IMPORTED_CODE_LABEL = "imported code"
 # The literal the clause reserves for "no release applies to this work". It is
 # matched case-insensitively on read and written lower-case, because a record is
 # prose and a publisher who capitalised the sentence should not thereby have
@@ -63,7 +65,7 @@ NO_RELEASE = "none"
 # The closed label set the reader recognises. Any other bullet in the body is
 # prose — the record carries bullets for the proof mode, the governing scenario
 # and the reproduction verdict too — and must not become a build-identity field.
-_LABELS = frozenset({RELEASE_TAG_LABEL, INSTALLED_BUILD_LABEL, COMMIT_LABEL})
+_LABELS = frozenset({RELEASE_TAG_LABEL, INSTALLED_BUILD_LABEL, COMMIT_LABEL, IMPORTED_CODE_LABEL})
 
 # A bullet is the whole of the grammar: `- <label>: <value>`, anchored at the
 # start of its own line. Matching a label ANYWHERE in the body would read a
@@ -87,6 +89,8 @@ class BuildIdentity:
     release_tag: str | None
     installed_build: str | None
     commit: str | None
+    artifact_paths: tuple[str, ...] | None = None
+    imported_components: tuple[str, ...] | None = None
 
     @property
     def containment_ref(self) -> str | None:
@@ -114,6 +118,14 @@ class BuildIdentity:
             (RELEASE_TAG_LABEL, NO_RELEASE if self.release_tag is None else self.release_tag),
             (INSTALLED_BUILD_LABEL, self.installed_build),
             (COMMIT_LABEL, self.commit),
+            (
+                "artifact paths",
+                ", ".join(self.artifact_paths) if self.artifact_paths else None,
+            ),
+            (
+                IMPORTED_CODE_LABEL,
+                ", ".join(self.imported_components) if self.imported_components else None,
+            ),
         )
         lines = [f"## {BUILD_IDENTITY_HEADING}", ""]
         lines.extend(f"- {label}: {value}" for label, value in bullets if value is not None)
@@ -136,6 +148,7 @@ def build_identity_in(*, body: str) -> BuildIdentity | None:
         release_tag=None if release is None or release.casefold() == NO_RELEASE else release,
         installed_build=fields.get(INSTALLED_BUILD_LABEL),
         commit=fields.get(COMMIT_LABEL),
+        imported_components=_comma_delimited(value=fields.get(IMPORTED_CODE_LABEL)),
     )
 
 
@@ -159,3 +172,11 @@ def _bullet_fields(*, body: str) -> dict[str, str]:
             continue
         fields[label] = value
     return fields
+
+
+def _comma_delimited(*, value: str | None) -> tuple[str, ...] | None:
+    """Split an optional identity declaration without manufacturing blank values."""
+    if value is None:
+        return None
+    values = tuple(one.strip() for one in value.split(",") if one.strip())
+    return values or None

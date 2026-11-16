@@ -55,8 +55,15 @@ from livespec_orchestrator_beads_fabro.commands._node_timeouts import (
 )
 
 _BUNDLE = Path(".claude-plugin/.fabro/workflows/implement-work-item")
+# The split implement stage's ACP nodes, which share the `implement` layer key.
+_IMPLEMENT_STAGE_NODES = frozenset({"red", "green"})
 _VARIANT = Path(".fabro/workflows/groom-work-item")
 _VERIFY = "proof_verify"
+# The groom variant's reserved nodes are entered only through one edge from `start`
+# guarded by a context key the graph never sets: Petri's validator walks edges
+# without reading conditions and refuses an unreachable node, and the guard keeps
+# every run off the node (bd-ib-ttrjvj).
+_NEVER_ENTERED = 'condition="context.livespec_groom_reserved_entry=never"'
 _VERIFY_ADAPTER_INPUT = "proof_verify_adapter"
 _VERIFY_PROMPT = "proof-verify.md"
 _ACP_BACKEND = 'backend="acp"'
@@ -276,11 +283,19 @@ def test_the_registered_variant_declares_the_verify_node_and_leaves_it_unreached
     it. `GROOM_ONLY_ACP_NODES` is read off the module that owns that scoping
     rather than respelled here, so the two cannot drift apart.
     """
-    assert (
-        _acp_node_names(payload=_VARIANT) == _acp_node_names(payload=_BUNDLE) | GROOM_ONLY_ACP_NODES
-    )
+    # The bundle realizes the `implement` layer key as the split stage's `red`
+    # and `green` nodes (Scenario 285), which the groom variant's own working
+    # node `implement` answers, so parity is compared on the layer keys.
+    layer_keys = {
+        "implement" if node in _IMPLEMENT_STAGE_NODES else node
+        for node in _acp_node_names(payload=_BUNDLE)
+    }
+    assert _acp_node_names(payload=_VARIANT) == layer_keys | GROOM_ONLY_ACP_NODES
     assert _input_value(toml=_toml(payload=_VARIANT), name=_VERIFY_ADAPTER_INPUT) is not None
-    assert not any(_VERIFY in edge for edge in _edges(text=_dot(payload=_VARIANT)))
+    edges = [edge for edge in _edges(text=_dot(payload=_VARIANT)) if _VERIFY in edge]
+    assert len(edges) == 1, edges
+    assert edges[0].startswith(f"start -> {_VERIFY}")
+    assert _NEVER_ENTERED in edges[0]
 
 
 def test_no_review_edge_reaches_pr_and_the_ship_on_cap_hatch_is_gone() -> None:
@@ -473,7 +488,7 @@ def test_a_failed_replay_parks_and_an_unmatched_verdict_falls_through_to_needs_h
 
 
 def test_the_fix_budget_admits_every_loop_that_now_feeds_it() -> None:
-    """`fix.max_visits` IS the bound, and three nodes route into it.
+    """`fix.max_visits` IS the bound, and three agent-finding nodes route into it.
 
     A node that reaches `max_visits` ABORTS the run at entry
     (`VisitLimitExceeded` on the pinned engine; a firing-budget failure on the
@@ -491,9 +506,11 @@ def test_the_fix_budget_admits_every_loop_that_now_feeds_it() -> None:
     with a different number of rounds; asserting the three equal would now be
     asserting a coincidence.
 
-    The PRODUCER COUNT is asserted as the tripwire: a fifth node routing into
-    `fix` would silently halve somebody's share, and this is the assertion that
-    notices.
+    The PRODUCER COUNT is asserted as the tripwire: a fourth agent-finding node
+    routing into `fix` would silently halve somebody's share, and this is the
+    assertion that notices. `janitor_failure_route` is excluded because it only
+    classifies the ordinary `janitor_refresh_route` failure; it does not add a
+    new fix-loop allocation.
 
     THE FOURTH PRODUCER IS NOT AN AGENT FINDING and is excluded from the
     two-apiece arithmetic deliberately. v134's "Refresh-repair accounting"
@@ -509,14 +526,24 @@ def test_the_fix_budget_admits_every_loop_that_now_feeds_it() -> None:
         _source_of(edge=edge) for edge in _edges(text=text) if _target_of(edge=edge) == "fix"
     }
 
-    assert producers == {"janitor", "proof_capture", _VERIFY, "refresh_repair"}
+    assert producers == {
+        "fix_commit_settle",
+        "fix_open_red_route",
+        "janitor_failure_route",
+        "janitor_refresh_route",
+        "proof_capture",
+        _VERIFY,
+        "refresh_repair",
+    }
     budgets = {
         node: re.search(r"max_visits=(?P<value>\d+)", _node_body(text=text, node=node) or "")
         for node in ("fix", "disposition", "review_fix")
     }
     assert all(match is not None for match in budgets.values()), budgets
     values = {node: int(match.group("value")) for node, match in budgets.items() if match}
-    assert values["fix"] >= 2 * len(producers - {"refresh_repair"})
+    assert values["fix"] >= 2 * len(
+        producers - {"janitor_failure_route", "refresh_repair", "fix_open_red_route"}
+    )
     assert values["disposition"] == values["review_fix"]
 
 

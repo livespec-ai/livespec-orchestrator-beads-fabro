@@ -39,17 +39,32 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from livespec_orchestrator_beads_fabro._beads_client import make_beads_client
+from livespec_orchestrator_beads_fabro._store_claim_tokens import (
+    CLAIM_TOKEN_METADATA_KEY,
+    ClaimChangeResult,
+    change_claim,
+    create_claim_token,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from livespec_orchestrator_beads_fabro._beads_client import BeadsRecord
     from livespec_orchestrator_beads_fabro.types import StoreConfig
 
 __all__: list[str] = [
     "CLAIM_STAMP_METADATA_KEY",
+    "CLAIM_TOKEN_METADATA_KEY",
+    "ClaimChangeResult",
     "ClaimRow",
     "ClaimStamp",
+    "change_claim",
     "claim_row_for",
+    "claim_row_from_record",
     "claim_stamp_from_record",
+    "claim_stamp_metadata",
+    "claim_stamps_for",
+    "create_claim_token",
     "record_claim_stamp",
 ]
 
@@ -130,7 +145,34 @@ class ClaimRow:
 
 def claim_row_for(*, path: StoreConfig, work_item_id: str) -> ClaimRow:
     """Read one item's status, assignee and claim stamp as of one instant."""
-    record = make_beads_client(config=path).show_issue(issue_id=work_item_id)
+    return claim_row_from_record(
+        record=make_beads_client(config=path).show_issue(issue_id=work_item_id)
+    )
+
+
+def claim_stamps_for(
+    *, path: StoreConfig, work_item_ids: Sequence[str]
+) -> dict[str, ClaimStamp | None]:
+    """Each named item's claim stamp, read with ONE multi-id `bd show`.
+
+    An id the tenant does not hold is absent from the answer, as `show_issues` leaves
+    it out, so a caller can tell "no such item" from "an item carrying no stamp",
+    which maps to `None`.
+    """
+    records = make_beads_client(config=path).show_issues(issue_ids=list(work_item_ids))
+    return {
+        record_id: claim_stamp_from_record(record=record)
+        for record in records
+        if isinstance(record_id := record.get("id"), str)
+    }
+
+
+def claim_row_from_record(*, record: BeadsRecord) -> ClaimRow:
+    """The claim row one issue record carries.
+
+    Public so a writer can ask, of the record a token-guarded write is based
+    on, whether the row is still the one it read when it decided.
+    """
     return ClaimRow(
         status=_text(value=record.get("status")),
         assignee=_text(value=record.get("assignee")),
@@ -155,16 +197,28 @@ def record_claim_stamp(*, path: StoreConfig, work_item_id: str, stamp: ClaimStam
     """
     client = make_beads_client(config=path)
     metadata = _metadata_of(record=client.show_issue(issue_id=work_item_id))
-    metadata[CLAIM_STAMP_METADATA_KEY] = {
-        _DISPATCH_ID_KEY: stamp.dispatch_id,
-        _HOST_KEY: stamp.dispatching_host,
-        _RUN_ID_KEY: stamp.run_id,
-        _FACTORY_KEY: {
-            _FACTORY_NAME_KEY: stamp.factory_name,
-            _FACTORY_SERVER_KEY: stamp.factory_server,
-        },
-    }
+    metadata.update(claim_stamp_metadata(stamp=stamp))
     client.update_issue(issue_id=work_item_id, metadata=metadata)
+
+
+def claim_stamp_metadata(*, stamp: ClaimStamp) -> dict[str, Any]:
+    """The stamp as the one top-level metadata key it occupies, whole.
+
+    The overlay a writer merges into an item's metadata. `record_claim_stamp`
+    merges it in a write of its own; a token-guarded admission hands it to the
+    write that claims the item, so the stamp lands only if that admission wins.
+    """
+    return {
+        CLAIM_STAMP_METADATA_KEY: {
+            _DISPATCH_ID_KEY: stamp.dispatch_id,
+            _HOST_KEY: stamp.dispatching_host,
+            _RUN_ID_KEY: stamp.run_id,
+            _FACTORY_KEY: {
+                _FACTORY_NAME_KEY: stamp.factory_name,
+                _FACTORY_SERVER_KEY: stamp.factory_server,
+            },
+        }
+    }
 
 
 def _text(*, value: object) -> str | None:

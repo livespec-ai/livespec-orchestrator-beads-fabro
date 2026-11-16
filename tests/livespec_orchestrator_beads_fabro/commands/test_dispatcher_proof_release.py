@@ -311,14 +311,14 @@ def test_the_journal_record_names_the_repository_the_store_and_the_waiver() -> N
     module = _module()
 
     record = module.proof_store_journal_record(
-        repository="thewoolleyman/livespec-orchestrator-beads-fabro",
+        repository="livespec-ai/livespec-orchestrator-beads-fabro",
         tag="proof-assets",
         visibility="PRIVATE",
         rendering=RENDERING_AUTHENTICATED_LINK,
         created=True,
     )
 
-    assert record["repository"] == "thewoolleyman/livespec-orchestrator-beads-fabro"
+    assert record["repository"] == "livespec-ai/livespec-orchestrator-beads-fabro"
     assert record["store"] == "release_assets"
     assert record["proof_assets_release_tag"] == "proof-assets"
     assert record["visibility"] == "PRIVATE"

@@ -55,11 +55,21 @@ def _node_block(*, dot: str, name: str) -> str | None:
 
     An EDGE line never matches: the name must be followed directly by the
     opening bracket, which is the same discrimination `_dispatcher_graph_render`
-    relies on. The body admits no `]` of its own so a single-line declaration
-    cannot swallow the block that follows it.
+    relies on. A closing bracket on its own line ends the block, leaving quoted
+    shell bracket expressions inside a script attribute intact.
     """
-    found = re.search(rf"(?ms)^[ \t]*{re.escape(name)}[ \t]*\[(?P<body>[^\]]*)\]", dot)
+    found = re.search(rf"(?ms)^[ \t]*{re.escape(name)}[ \t]*\[(?P<body>.*?)^[ \t]*\]", dot)
     return None if found is None else found.group("body")
+
+
+def test_node_block_keeps_a_bracket_character_inside_a_quoted_script() -> None:
+    """A shell bracket expression is node content, not the DOT block terminator."""
+    dot = 'pr_refresh [\n    script="case "$value" in [^0-9]) : ;; esac"\n]\n'
+
+    body = _node_block(dot=dot, name="pr_refresh")
+
+    assert body is not None
+    assert 'script="case "$value" in [^0-9]) : ;; esac"' in body
 
 
 def _graph(*, directory: Path) -> str:
@@ -154,7 +164,7 @@ def test_groom_retains_its_acp_filing_plan_publisher() -> None:
 
 
 def test_groom_declares_an_unreachable_command_pr_refresh() -> None:
-    """Declared so the common timeout table resolves; unreachable by its edges.
+    """Declared so the common timeout table resolves; never entered by a run.
 
     The groom variant files slices and publishes no Git branch, so a reachable
     refresh would be meaningless; the DECLARATION is what the per-node timeout
@@ -167,7 +177,13 @@ def test_groom_declares_an_unreachable_command_pr_refresh() -> None:
     assert _COMMAND_SHAPE in body
     assert "script=" in body
     assert "timeout=" in body
-    assert _edge_sources(dot=dot, target="pr_refresh") == []
+    # Its one entry edge is guarded by a context key the graph never sets, so
+    # Petri's structural reachability rule is met and no run reaches it
+    # (bd-ib-ttrjvj).
+    assert _edge_sources(dot=dot, target="pr_refresh") == ["start"]
+    entry = re.findall(r"(?m)^[ \t]*start[ \t]*->[ \t]*pr_refresh\b.*$", dot)
+    assert len(entry) == 1, entry
+    assert 'condition="context.livespec_groom_reserved_entry=never"' in entry[0]
 
 
 def test_groom_pr_refresh_carries_the_reserved_command_and_input_references() -> None:

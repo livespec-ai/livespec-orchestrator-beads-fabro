@@ -177,8 +177,17 @@ def _arm(*, monkeypatch: pytest.MonkeyPatch) -> None:
             stderr="",
         ),
         "ps -a --json": CommandResult(exit_code=0, stdout="[]", stderr=""),
+        f"ls-remote origin refs/heads/{_BRANCH}": CommandResult(
+            exit_code=0, stdout=f"{_PUBLISHED_HEAD}\trefs/heads/{_BRANCH}\n", stderr=""
+        ),
         f"ls-remote {SEED_REMOTE} {NEEDS_HUMAN_REF_PREFIX}/": CommandResult(
             exit_code=0, stdout=f"{_PRESERVED_COMMIT}\t{_PRESERVED_REF}\n", stderr=""
+        ),
+        f"{_PRESERVED_COMMIT}^{{tree}}": CommandResult(
+            exit_code=0, stdout=f"{'1' * 40}\n", stderr=""
+        ),
+        f"{_PUBLISHED_HEAD}^{{tree}}": CommandResult(
+            exit_code=0, stdout=f"{'2' * 40}\n", stderr=""
         ),
     }
     _Shell.calls = []

@@ -37,6 +37,9 @@ import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from livespec_orchestrator_beads_fabro.commands._config_cycle_ceilings import (
+    runtime_ceiling_policy_refusal,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_acceptance_eligibility import (
     pre_dispatch_criteria_refusal,
 )
@@ -77,6 +80,12 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_wall i
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_fabro_currency_gate import (
     fabro_currency_refusal,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_safety_screen import (
+    out_of_enum_factory_safety_refusal,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_helper_build import (
+    helper_build_reach_refusal,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import (
     JournalFile,
@@ -162,6 +171,13 @@ def pre_dispatch_wall_exit(
     engine's currency is moot on a server whose App cannot see the repository, so
     grading currency first pays a forge read and an engine read to answer a
     question about a server that cannot serve this dispatch either way.
+
+    The HELPER-BUILD reach probe follows it, for the same kind of reason: its
+    answer is a property of the INSTALLED BUILD rather than of the items. The
+    sandbox fetches its helper programs from that build's commit, so a commit the
+    forge does not serve would fail every run in setup, after the claim; this
+    refuses it here instead, naming the commit (`_dispatcher_helper_build`). It
+    spends one sub-second forge read, which is less than the currency gate's two.
 
     The FABRO CURRENCY gate is next, and its position is load-bearing rather
     than tidy. It is a refusal whose answer is a property of the FACTORY rather
@@ -249,6 +265,8 @@ def pre_dispatch_wall_exit(
         with prelaunch_phase(checkpoint=prelaunch_checkpoint, name=phase):
             refusal = ask()
         if refusal is not None:
+            if phase == "dod-judgement" and getattr(args, "items", None) is not None:
+                refusal = f"{refusal.splitlines()[0]}\n"
             _ = write_stderr(text=f"{refusal}\n" if newline else refusal)
             return exit_code
     with prelaunch_phase(checkpoint=prelaunch_checkpoint, name="credential-requirement"):
@@ -360,6 +378,18 @@ def _refusing_sequence(
     """
     return (
         (
+            lambda: runtime_ceiling_policy_refusal(repo=repo),
+            EXIT_PRECONDITION_ERROR,
+            False,
+            "runtime-ceiling-policy",
+        ),
+        (
+            lambda: out_of_enum_factory_safety_refusal(items=items),
+            EXIT_PRECONDITION_ERROR,
+            False,
+            "factory-safety-screen",
+        ),
+        (
             lambda: implementation_pr_override_refusal(
                 args=args, repo=repo, items=items, journal=journal
             ),
@@ -386,6 +416,12 @@ def _refusing_sequence(
             EXIT_PRECONDITION_ERROR,
             False,
             "app-reach",
+        ),
+        (
+            lambda: helper_build_reach_refusal(items=items, journal=journal),
+            EXIT_PRECONDITION_ERROR,
+            False,
+            "helper-build-reach",
         ),
         (
             lambda: fabro_currency_refusal(args=args, repo=repo, items=items, journal=journal),

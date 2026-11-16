@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -44,8 +44,14 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_graph_adapters impor
 from livespec_orchestrator_beads_fabro.commands._dispatcher_graph_render import (
     render_workflow_graph,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_implement_mechanical import (
+    apply_mechanical_reentries,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_overlay import workflow_graph_path
-from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_entry import graph_entered_at
+from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_entry import (
+    graph_entered_at,
+    proof_only_graph,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget import (
     DEFAULT_RUN_WALL_BUDGET,
     RunWallBudget,
@@ -53,10 +59,14 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget impo
     run_wall_budget_from_block,
     run_wall_budget_journal_record,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_setup_nodes import (
+    substitute_setup_node_inputs,
+)
 from livespec_orchestrator_beads_fabro.commands._node_timeouts import (
     NodeTimeouts,
     node_timeouts_from_block,
     node_timeouts_journal_record,
+    node_timeouts_with_arguments,
 )
 from livespec_orchestrator_beads_fabro.effects import AttemptFailure, attempt
 
@@ -110,8 +120,11 @@ def prepare_workflow_payload(  # noqa: PLR0913 — kw-only; adapters and entry_n
     journal: JournalWriter,
     work_item_id: str,
     adapters: Mapping[str, str],
+    prepare_inputs: Mapping[str, str] | None = None,
     entry_node: str | None = None,
+    proof_only: bool = False,
     run_wall_budget_argument: str | None = None,
+    node_timeout_arguments: tuple[str, ...] = (),
 ) -> WorkflowPayload | str:
     """Resolve node timeouts and the wall budget, materialize, and journal.
 
@@ -137,7 +150,7 @@ def prepare_workflow_payload(  # noqa: PLR0913 — kw-only; adapters and entry_n
     budget would have cancelled.
     """
     block = dispatcher_block(cwd=repo)
-    timeouts = node_timeouts_from_block(block=block)
+    timeouts = _resolved_node_timeouts(block=block, arguments=node_timeout_arguments)
     if isinstance(timeouts, str):
         return timeouts
     budget = run_wall_budget_from_block(block=block, argument=run_wall_budget_argument)
@@ -156,19 +169,28 @@ def prepare_workflow_payload(  # noqa: PLR0913 — kw-only; adapters and entry_n
         payload_dir=payload_dir,
         timeouts=timeouts,
         adapters=adapters,
+        prepare_inputs=prepare_inputs,
         entry_node=entry_node,
-        run_wall_budget=budget,
+        proof_only=proof_only,
     )
     if isinstance(payload, str):
         return payload
-    conflict = node_timeout_conflict(budget=budget, nodes=payload.node_seconds)
+    # Carried THROUGH rather than written into the graph: the workflow graph
+    # declares no budget, because the Dispatcher's own host-side watchdog
+    # enforces it and the engine knows nothing about it.
+    payload = replace(payload, run_wall_budget=budget)
+    # The mechanical re-entry budget (bd-ib-pyeiky) is rendered into the payload
+    # graph from this same block read, so its keys and the timeouts agree.
+    conflict = apply_mechanical_reentries(
+        graph=payload.graph, block=block
+    ) or node_timeout_conflict(budget=budget, nodes=payload.node_seconds)
     if conflict is not None:
         return conflict
     journal.append(
         record={
             "stage": _NODE_TIMEOUTS_STAGE,
             "work_item_id": work_item_id,
-            **node_timeouts_journal_record(timeouts=timeouts, nodes=payload.node_seconds),
+            **node_timeouts_journal_record(timeouts=payload.timeouts, nodes=payload.node_seconds),
             **run_wall_budget_journal_record(budget=budget),
             **credential_queue_allowance_journal_record(allowance=queue_allowance),
         }
@@ -176,14 +198,25 @@ def prepare_workflow_payload(  # noqa: PLR0913 — kw-only; adapters and entry_n
     return payload
 
 
-def materialize_workflow_payload(
+def _resolved_node_timeouts(
+    *, block: dict[str, object], arguments: tuple[str, ...]
+) -> NodeTimeouts | str:
+    """Resolve the repository and per-dispatch layers before rendering the graph."""
+    configured = node_timeouts_from_block(block=block)
+    if isinstance(configured, str):
+        return configured
+    return node_timeouts_with_arguments(timeouts=configured, arguments=arguments)
+
+
+def materialize_workflow_payload(  # noqa: PLR0913 — kw-only rendering inputs are independent projections.
     *,
     committed: Path,
     payload_dir: Path,
     timeouts: NodeTimeouts,
     adapters: Mapping[str, str],
+    prepare_inputs: Mapping[str, str] | None = None,
     entry_node: str | None = None,
-    run_wall_budget: RunWallBudget = DEFAULT_RUN_WALL_BUDGET,
+    proof_only: bool = False,
 ) -> WorkflowPayload | str:
     """Copy the committed workflow payload and render its graph literally.
 
@@ -193,6 +226,12 @@ def materialize_workflow_payload(
     recorded as the item's workflow. A node the graph does not declare refuses
     here, before any run exists, rather than failing validation at run-create
     with an error naming a graph the operator never wrote.
+
+    `proof_only` selects the merged-resume arm: the committed graph with every
+    edge replaced so the run visits `proof_capture`, `proof_verify` and
+    `proof_grade` and nothing else. It is a selector of its own and not an
+    `entry_node`, since the arm is a different graph rather than the ordinary one
+    entered elsewhere.
     """
     committed_graph = _committed_graph(committed=committed)
     if isinstance(committed_graph, str):
@@ -201,7 +240,9 @@ def materialize_workflow_payload(
         committed_graph=committed_graph,
         timeouts=timeouts,
         adapters=adapters,
+        prepare_inputs=prepare_inputs,
         entry_node=entry_node,
+        proof_only=proof_only,
     )
     if isinstance(rendered, str):
         return rendered
@@ -220,13 +261,9 @@ def materialize_workflow_payload(
     return WorkflowPayload(
         payload_dir=payload_dir,
         graph=graph,
-        timeouts=timeouts,
+        timeouts=rendered.timeouts,
         node_seconds=rendered.node_seconds,
         node_commands=rendered.node_commands,
-        # Carried THROUGH rather than written into the graph: the workflow
-        # graph declares no budget, because the Dispatcher's own host-side
-        # watchdog enforces it and the engine knows nothing about it.
-        run_wall_budget=run_wall_budget,
     )
 
 
@@ -237,6 +274,7 @@ class _RenderedGraph:
     text: str
     node_seconds: Mapping[str, int]
     node_commands: Mapping[str, str]
+    timeouts: NodeTimeouts
 
 
 def _rendered_graph(
@@ -244,7 +282,9 @@ def _rendered_graph(
     committed_graph: Path,
     timeouts: NodeTimeouts,
     adapters: Mapping[str, str],
+    prepare_inputs: Mapping[str, str] | None,
     entry_node: str | None,
+    proof_only: bool,
 ) -> _RenderedGraph | str:
     """Read the committed graph and apply the three renders in their fixed order.
 
@@ -258,24 +298,41 @@ def _rendered_graph(
     )
     if isinstance(graph_text, AttemptFailure):
         return f"workflow graph {committed_graph} is unreadable: {graph_text.error}"
-    rendered = render_workflow_graph(committed_text=graph_text, timeouts=timeouts)
+    rendered = render_workflow_graph(
+        committed_text=substitute_setup_node_inputs(
+            graph_text=graph_text, prepare_inputs=prepare_inputs
+        ),
+        timeouts=timeouts,
+    )
     if isinstance(rendered, str):
         return rendered
     commands = render_acp_commands(
         graph_text=rendered.text,
         adapters=adapters,
-        stages={node: node for node in ACP_NODES},
+        stages={
+            **{node: node for node in ACP_NODES},
+            "red": "implement",
+            "green": "implement",
+        },
     )
     if isinstance(commands, str):
         return commands
-    entered = _entered_text(text=commands.text, entry_node=entry_node)
+    entered = _entered_text(text=commands.text, entry_node=entry_node, proof_only=proof_only)
+    if entered is None and proof_only:
+        return (
+            f"workflow graph {committed_graph} cannot be reduced to the proof-only arm:"
+            " it must declare start, exit, proof_capture, proof_verify and proof_grade"
+        )
     if entered is None:
         return (
             f"workflow graph {committed_graph} declares no node {entry_node!r} to"
             " resume at, or carries no unconditional `start` edge to move onto it"
         )
     return _RenderedGraph(
-        text=entered, node_seconds=rendered.node_seconds, node_commands=commands.node_commands
+        text=entered,
+        node_seconds=rendered.node_seconds,
+        node_commands=commands.node_commands,
+        timeouts=rendered.timeouts,
     )
 
 
@@ -291,13 +348,16 @@ def remove_workflow_payload(*, payload_dir: Path | None) -> None:
         shutil.rmtree(payload_dir, ignore_errors=True)
 
 
-def _entered_text(*, text: str, entry_node: str | None) -> str | None:
+def _entered_text(*, text: str, entry_node: str | None, proof_only: bool) -> str | None:
     """The graph as the run will see it: derived for a resume, unchanged otherwise.
 
     An ordinary dispatch returns the rendered text ITSELF rather than a copy
     passed through the derivation, so the resume path cannot change a byte of
-    what every other dispatch ships.
+    what every other dispatch ships. The proof-only arm is selected explicitly
+    and never inferred from an entry node.
     """
+    if proof_only:
+        return proof_only_graph(graph_text=text)
     if entry_node is None:
         return text
     return graph_entered_at(graph_text=text, node=entry_node)

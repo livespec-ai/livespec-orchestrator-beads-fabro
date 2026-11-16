@@ -4,7 +4,7 @@ This file holds acceptance scenarios in Gherkin form. Each Gherkin keyword line 
 
 ## Scenario: livespec consumes the package via uv git source
 
-Given livespec's `pyproject.toml` declares `livespec-dev-tooling` under `[dependency-groups].dev` with `[tool.uv.sources]` pinning a `git = "https://github.com/thewoolleyman/livespec-dev-tooling.git"` and `tag = "vX.Y.Z"`
+Given livespec's `pyproject.toml` declares `livespec-dev-tooling` under `[dependency-groups].dev` with `[tool.uv.sources]` pinning a `git = "https://github.com/livespec-ai/livespec-dev-tooling.git"` and `tag = "vX.Y.Z"`
 
 And livespec's `justfile` references each shared check as `uv run python -m livespec_dev_tooling.checks.<slug>`
 
@@ -28,7 +28,7 @@ And no plugin-local copy of any shared check is required
 
 ## Scenario: a CI workflow consumes the reusable check-matrix
 
-Given a consumer's `.github/workflows/ci.yml` declares `jobs.check-suite.uses: thewoolleyman/livespec-dev-tooling/.github/workflows/reusable-check-matrix.yml@vX.Y.Z`
+Given a consumer's `.github/workflows/ci.yml` declares `jobs.check-suite.uses: livespec-ai/livespec-dev-tooling/.github/workflows/reusable-check-matrix.yml@vX.Y.Z`
 
 And the workflow input `checks` lists the slugs the consumer wants to run
 
@@ -1540,9 +1540,9 @@ And the full pre-commit aggregate MUST NOT have started any member
 
 ## Scenario: a dev-tooling release bump rewrites the factory-reach image pin with the workflow image pins
 
-Given a repository whose `.github/workflows/ci.yml` pins `ghcr.io/thewoolleyman/livespec-fabro-sandbox:python-v1.110.0` under a job's `container:` block
+Given a repository whose `.github/workflows/ci.yml` pins `ghcr.io/livespec-ai/livespec-fabro-sandbox:python-v1.110.0` under a job's `container:` block
 
-And whose `ci-runner/k3s/phase2/factory/factory-reach-image.env` carries `FACTORY_REACH_SANDBOX_IMAGE=ghcr.io/thewoolleyman/livespec-fabro-sandbox:python-v1.110.0`
+And whose `ci-runner/k3s/phase2/factory/factory-reach-image.env` carries `FACTORY_REACH_SANDBOX_IMAGE=ghcr.io/livespec-ai/livespec-fabro-sandbox:python-v1.110.0`
 
 When a livespec-dev-tooling release v1.134.5 bumps the repository's pins
 

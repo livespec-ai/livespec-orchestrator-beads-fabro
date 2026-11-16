@@ -53,13 +53,16 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done_a
     advisory_definition_of_done_findings,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_comments import (
-    item_comment_bodies,
+    judgement_comment_bodies,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_gate import (
     held_judgement,
 )
 from livespec_orchestrator_beads_fabro.commands._needs_attention_conformance import (
     ConformanceContext,
+)
+from livespec_orchestrator_beads_fabro.commands._needs_attention_unpreflightable import (
+    unpreflightable_definition_of_done_items as _unpreflightable_definition_of_done_items,
 )
 from livespec_orchestrator_beads_fabro.effects import AttemptFailure, attempt
 from livespec_orchestrator_beads_fabro.errors import (
@@ -89,6 +92,28 @@ _READY_STATUS = "ready"
 # hold, `ready` for the dispatch refusal — so keying the lane on one of them
 # would make exactly one of the two holds invisible.
 _HELDABLE_STATUSES = frozenset({"backlog", "pending-approval", "ready"})
+
+
+def unpreflightable_definition_of_done_items(
+    *, project_root: Path, repo: str, items: list[WorkItem]
+) -> list[AttentionItem]:
+    """Compatibility entry point for the input-bound hygiene lane."""
+    return _unpreflightable_definition_of_done_items(
+        project_root=project_root, repo=repo, items=items
+    )
+
+
+def definition_of_done_hygiene_items(
+    *, project_root: Path, repo: str, items: list[WorkItem]
+) -> list[AttentionItem]:
+    """Compose the three receipt-only Definition-of-Done hygiene lanes."""
+    return (
+        advisory_definition_of_done_items(project_root=project_root, repo=repo, items=items)
+        + held_definition_of_done_items(project_root=project_root, repo=repo, items=items)
+        + unpreflightable_definition_of_done_items(
+            project_root=project_root, repo=repo, items=items
+        )
+    )
 
 
 def held_definition_of_done_items(
@@ -133,7 +158,7 @@ def held_definition_of_done_items(
     for item in items:
         if item.status not in _HELDABLE_STATUSES or item.id not in judged:
             continue
-        bodies = item_comment_bodies(path=config, work_item_id=item.id)
+        bodies = judgement_comment_bodies(path=config, work_item_id=item.id, repo=project_root)
         recorded = (
             None
             if bodies is None

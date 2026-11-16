@@ -50,6 +50,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandRunner
+from livespec_orchestrator_beads_fabro.commands._plan_release_components import release_components
 from livespec_orchestrator_beads_fabro.commands._plan_release_forge import (
     ForgeReadFailure,
     governed_repository_identity,
@@ -59,6 +60,8 @@ from livespec_orchestrator_beads_fabro.commands._plan_release_forge import (
 from livespec_orchestrator_beads_fabro.commands._plan_release_repository import (
     BareRepository,
     ExplicitRepository,
+    InvalidReleaseComponents,
+    ReleaseComponent,
     ReleaseReading,
     ReleaseTags,
     UnreadableRelease,
@@ -90,6 +93,7 @@ class ForgeReleaseReader:
     project_root: Path
     runner: CommandRunner
     governed: ExplicitRepository | ForgeReadFailure
+    components: tuple[ReleaseComponent, ...] | InvalidReleaseComponents | None
     readings: dict[str, ReleaseReading] = field(default_factory=dict)
 
     def reading(self, *, body: str) -> ReleaseReading:
@@ -103,6 +107,19 @@ class ForgeReleaseReader:
         self.readings[key] = resolved
         return resolved
 
+    def component_tree_difference(
+        self, *, commit: str, tag: str, component: ReleaseComponent
+    ) -> str | None:
+        """Compare the named commit and tag only beneath the component's paths."""
+        result = self.runner.run(
+            argv=["git", "diff", "--name-only", commit, tag, "--", *component.paths],
+            cwd=self.project_root,
+            timeout_seconds=30.0,
+        )
+        if result.exit_code != 0:
+            return f"could not compare trees: {result.stderr.strip() or result.stdout.strip()}"
+        return next((path for path in result.stdout.splitlines() if path), None)
+
 
 def forge_release_reader(*, project_root: Path, runner: CommandRunner) -> ForgeReleaseReader:
     """A reader for one archive, with the governed repository's identity resolved.
@@ -112,10 +129,17 @@ def forge_release_reader(*, project_root: Path, runner: CommandRunner) -> ForgeR
     discipline this package applies to every other multi-consumer fact, and two
     readings of it taken a moment apart could disagree while both parsed.
     """
+    governed = governed_repository_identity(project_root=project_root, runner=runner)
+    components = (
+        None
+        if isinstance(governed, ForgeReadFailure)
+        else release_components(project_root=project_root, repository=governed.name)
+    )
     return ForgeReleaseReader(
         project_root=project_root,
         runner=runner,
-        governed=governed_repository_identity(project_root=project_root, runner=runner),
+        governed=governed,
+        components=components,
     )
 
 
@@ -197,9 +221,16 @@ def _tags_reading(*, reader: ForgeReleaseReader, repository: str) -> ReleaseRead
     saying a repository carries no tag is the clause's "no release applies"
     condition — the one answer that must stay distinguishable from a failed read.
     """
+    components = (
+        reader.components
+        if isinstance(reader.governed, ExplicitRepository) and repository == reader.governed.name
+        else None
+    )
+    if isinstance(components, InvalidReleaseComponents):
+        return components
     tags = repository_release_tags(
         repository=repository, project_root=reader.project_root, runner=reader.runner
     )
     if isinstance(tags, ForgeReadFailure):
         return UnreadableRelease(repository=repository, failure=tags.detail)
-    return ReleaseTags(repository=repository, tags=tags)
+    return ReleaseTags(repository=repository, tags=tags, components=components)

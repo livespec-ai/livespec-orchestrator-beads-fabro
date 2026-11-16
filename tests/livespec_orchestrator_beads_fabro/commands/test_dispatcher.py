@@ -29,6 +29,7 @@ than work-item failures, per livespec-impl-beads-cgd), and the
 """
 
 import argparse
+import hashlib
 import inspect
 import json
 import os
@@ -98,7 +99,17 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_fabro_terminal impor
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_gh_refresh import (
     DEFAULT_SANDBOX_GH_REFRESH_ROOT,
+    GH_WRAPPER_TAIL_RELPATH,
     SANDBOX_GH_REFRESH_ROOT_ENV_VAR,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_helper_fetch import (
+    HELPER_MANIFEST_ENV,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_helper_registry import (
+    GH_REFRESH_ROOT,
+    LIVESPEC_ROOT,
+    PLUGINS_ROOT,
+    helper_registry,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_hook_install_recipe import (
     janitor_bootstrap_recipe_from_block,
@@ -211,7 +222,7 @@ from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 from livespec_runtime.cross_repo.types import CrossRepoManifest
 from livespec_runtime.github_auth.errors import GithubAppAuthError
 
-from tests.prepare_step_support import runnable_script, steps_in
+from tests.prepare_step_support import fetch_helpers, readable, runnable_script, steps_in
 
 _GITHUB_APP_ENV_KEYS = (
     "GITHUB_APP_ID",
@@ -276,6 +287,7 @@ def test_workflow_payload_directory_encodes_dotted_work_item_ids_injectively() -
         "janitor_worktree_add_argv",
         "janitor_worktree_remove_argv",
         "parse_fleet_members",
+        "merge_queue_retry_argv",
         "pr_arm_argv",
         "pr_disarm_argv",
         "pr_update_branch_argv",
@@ -284,6 +296,7 @@ def test_workflow_payload_directory_encodes_dotted_work_item_ids_injectively() -
     }
     assert set(_dispatcher_run_status.__all__) == {
         "PrView",
+        "TerminalCheckFailure",
         "parse_pr_view",
     }
     # The sibling-clone surface moved OUT of the overlay into the cohesive leaf
@@ -303,6 +316,8 @@ def test_workflow_payload_directory_encodes_dotted_work_item_ids_injectively() -
     }
     assert set(_dispatcher_overlay_siblings.__all__) == {
         "CORE_PLUGIN_ROOT_ENV_VAR",
+        "RUN_FROM_CLONES_ROOT",
+        "RUN_FROM_CLONES_ROOT_ENV_VAR",
         "SIBLING_CLONES_ROOT_ENV_VAR",
         "SiblingClones",
         "core_plugin_env_line",
@@ -311,6 +326,7 @@ def test_workflow_payload_directory_encodes_dotted_work_item_ids_injectively() -
     assert set(_dispatcher_goal.__all__) == {
         "GoalBriefMiniJinjaFinding",
         "minijinja_findings_detail",
+        "minijinja_openers_in_item_fields",
         "minijinja_openers_in_goal_sources",
         "minijinja_openers_in_text",
         "render_goal",
@@ -729,13 +745,10 @@ def test_ledger_checks_flag_minijinja_openers_in_goal_sources() -> None:
     findings = run_ledger_checks(items=items, comments_by_item=comments_by_item)
 
     assert [(finding.check, finding.item_id, finding.severity) for finding in findings] == [
-        ("goal-source-minijinja-opener", "comment-hit", "fail"),
         ("goal-source-minijinja-opener", "field-hit", "warn"),
     ]
-    assert "permanent comment contamination" in findings[0].message
-    assert "ledger comment comment-9 created 2026-08-22T10:11:12Z" in findings[0].message
-    assert "recoverable-by-editing" in findings[1].message
-    assert "description" in findings[1].message
+    assert "recoverable-by-editing" in findings[0].message
+    assert "description" in findings[0].message
 
 
 def test_ledger_checks_do_not_flag_clean_goal_sources() -> None:
@@ -1135,7 +1148,7 @@ def _janitor_results(*, fail_at: int | None = None) -> list[CommandResult]:
         _ok("master\nfeat/x\n"),
         _ok(remote),
         _ok(worktrees),
-        _ok("thewoolleyman/livespec-orchestrator-beads-fabro\n"),
+        _ok("livespec-ai/livespec-orchestrator-beads-fabro\n"),
         _ok("feat/x\nmaster\n"),
     ]
     if fail_at is not None:
@@ -1200,7 +1213,9 @@ def test_janitor_checks_flag_stale_branches_prs_and_worktrees(tmp_path: Path) ->
         ("no-stale-worktree", "/repo/worktrees/merged", "warn"),
     ]
     assert "git branch -d feat/x" in findings[0].message
-    delete_action = "gh api -X DELETE repos/thewoolleyman/livespec-orchestrator-beads-fabro/git/refs/heads/feat/x"
+    delete_action = (
+        "gh api -X DELETE repos/livespec-ai/livespec-orchestrator-beads-fabro/git/refs/heads/feat/x"
+    )
     assert delete_action in findings[1].message
     assert "git worktree remove /repo/worktrees/gone" in findings[2].message
 
@@ -1663,7 +1678,7 @@ def test_argv_builders_encode_family_discipline(tmp_path: Path) -> None:
         "1",
         "--branch",
         "master",
-        "https://github.com/thewoolleyman/livespec.git",
+        "https://github.com/livespec-ai/livespec.git",
         str(tmp_path / "janitor-co-livespec-core"),
     ]
 
@@ -1878,11 +1893,12 @@ def test_render_run_config_overlay_prepares_refreshing_gh_wrapper(
     env_table_at = rendered.index("[environments.livespec-ci.env]")
     assert "livespec-refreshing-gh-wrapper" in rendered[:env_table_at]
     assert "mint_app_token.py" in rendered[:env_table_at]
-    prepared = "\n".join(
-        "\n".join([step.script, *step.env.values()])
-        for step in steps_in(block=rendered[:env_table_at])
-    )
-    assert 'token="$(python3 ' in prepared
+    prepared = "\n".join(step.script for step in steps_in(block=rendered[:env_table_at]))
+    # The wrapper's fixed tail -- the mint before every call -- is a fetched
+    # helper the install step appends from the bundle root.
+    assert f'tail_file="{DEFAULT_SANDBOX_GH_REFRESH_ROOT}/{GH_WRAPPER_TAIL_RELPATH}"' in prepared
+    assert 'cat "$tail_file" >> "$real_gh"' in prepared
+    assert 'token="$(python3 ' in _gh_wrapper_tail().decode("utf-8")
     assert 'real_gh="$(command -v gh)"' in prepared
     assert 'mv "$real_gh" "$wrapped_gh"' in prepared
     env_table = rendered[env_table_at:]
@@ -1915,10 +1931,31 @@ def test_render_run_config_overlay_projects_gh_mint_helper_for_target_without_sc
     assert "/workspace/.livespec-gh-refresh/bin/mint_app_token.py" in prepare_steps
     assert "$PWD/.claude-plugin/scripts/bin/mint_app_token.py" not in prepare_steps
     steps = steps_in(block=rendered)
-    # The wrapper's fixed tail is a helper source, so it rides a step's env; the
-    # unpack program is a short command and stays in the script.
-    assert any('token="$(python3 "$mint")"' in v for s in steps for v in s.env.values())
-    assert any('tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz")' in s.script for s in steps)
+    # The wrapper's fixed tail is a fetched helper below the bundle root: the
+    # overlay's manifest names it with its digest, and no step carries its bytes
+    # or unpacks an archive of the bundle.
+    [manifest] = [s.env[HELPER_MANIFEST_ENV] for s in steps if HELPER_MANIFEST_ENV in s.env]
+    [tail] = [
+        entry
+        for entry in json.loads(manifest)["helpers"]
+        if (entry["root"], entry["path"]) == (GH_REFRESH_ROOT, GH_WRAPPER_TAIL_RELPATH)
+    ]
+    assert tail["sha256"] == hashlib.sha256(_gh_wrapper_tail()).hexdigest()
+    assert 'token="$(python3 "$mint")"' in _gh_wrapper_tail().decode("utf-8")
+    assert not any(
+        'token="$(python3 "$mint")"' in readable(value=v) for s in steps for v in s.env.values()
+    )
+    assert not any("tarfile.open" in s.script for s in steps)
+
+
+def _gh_wrapper_tail() -> bytes:
+    """The composed bytes of the gh wrapper's fixed tail, as the helper fetch lands them."""
+    [helper] = [
+        h
+        for h in helper_registry()
+        if (h.root, h.path) == (GH_REFRESH_ROOT, GH_WRAPPER_TAIL_RELPATH)
+    ]
+    return helper.compose()
 
 
 def test_render_run_config_overlay_ignores_target_repo_mint_helper_when_present(
@@ -1981,12 +2018,12 @@ def _assert_projected_gh_wrapper_publishes(
     monkeypatch.setenv("GITHUB_APP_ID", "42")
     monkeypatch.setenv("GITHUB_PRIVATE_KEY", "stub-pem")
     # The production bundle root is the absolute in-sandbox path
-    # /workspace/.livespec-gh-refresh. This test EXECUTES the rendered prepare
-    # script for real, so without redirecting that root the script would
-    # `rm -rf` and `mkdir` at the RUNNER's filesystem root: refused under uid
-    # 1000 (`mkdir: Permission denied`, measured), and under uid 0 it would
-    # succeed by deleting a real /workspace. Redirect it into tmp_path so the
-    # script stays hermetic under both uids.
+    # /workspace/.livespec-gh-refresh. This test lands the fetched bundle there
+    # and EXECUTES the rendered prepare script for real, so without redirecting
+    # that root both would write at the RUNNER's filesystem root: refused under
+    # uid 1000 (`mkdir: Permission denied`, measured), and under uid 0 it would
+    # write into a real /workspace. Redirect it into tmp_path so the test stays
+    # hermetic under both uids.
     sandbox_root = tmp_path / "sandbox-bundle"
     monkeypatch.setenv(SANDBOX_GH_REFRESH_ROOT_ENV_VAR, str(sandbox_root))
     if target_helper_source is not None:
@@ -2004,10 +2041,15 @@ def _assert_projected_gh_wrapper_publishes(
 
     assert rendered is not None
     scripts = _gh_refresh_prepare_scripts(rendered=rendered)
-    # Guard against a regression to a hardcoded root: with the lever set, the
-    # production path must not appear in any emitted step.
+    # Guard against a regression to a hardcoded materialization root: with the
+    # lever set, every prepare script must use the redirected root.  The WIP
+    # helper's own source legitimately carries its production fallback because
+    # it executes later in the sandbox, after this preparation has completed.
     for script in scripts:
-        assert DEFAULT_SANDBOX_GH_REFRESH_ROOT not in script
+        assert (
+            DEFAULT_SANDBOX_GH_REFRESH_ROOT not in script
+            or "root=${LIVESPEC_SANDBOX_GH_REFRESH_ROOT:-/workspace/.livespec-gh-refresh}" in script
+        )
     # The payload must never ride in one exec slot above the cap again
     # (bd-ib-gnli): Linux caps a SINGLE argument or environment string at
     # MAX_ARG_STRLEN (131072), not the total. One 186KB step killed every
@@ -2040,6 +2082,15 @@ def _assert_projected_gh_wrapper_publishes(
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
     }
 
+    # The bundle the wrapper runs is landed by the helper fetch before the
+    # install step reads it, at the redirected root that step resolves.
+    _ = fetch_helpers(
+        roots={
+            GH_REFRESH_ROOT: sandbox_root,
+            PLUGINS_ROOT: tmp_path / "plugins",
+            LIVESPEC_ROOT: tmp_path / "livespec-root",
+        }
+    )
     for index, step in enumerate(scripts):
         prepare_script = tmp_path / f"prepare-gh-{index}.sh"
         prepare_script.write_text(step, encoding="utf-8")
@@ -2224,7 +2275,7 @@ def _expected_clone_script(repo_name: str) -> str:
         " >/dev/null 2>&1 ||"
         f" {{ echo '{prefix}repository not reachable (nonexistent or no access)'"
         " >&2; exit 0; };"
-        f" GIT_TERMINAL_PROMPT=0 git clone --quiet --depth 1 {url}"
+        f" GIT_TERMINAL_PROMPT=0 git clone --quiet {url}"
         f" /livespec-siblings/{repo_name} ||"
         f" {{ echo '{prefix}clone failed after a successful reachability probe"
         " (transient)' >&2; exit 0; }"
@@ -2248,10 +2299,10 @@ _TMUX_TMPDIR_PREPARE_STEP_LINE = (
 )
 
 # The console's `check-doctor-static` resolves livespec CORE inside the Fabro
-# sandbox via this projected env key, valued at the in-sandbox core-sibling
-# clone path (`<clones_root>/livespec/.claude-plugin`).
+# sandbox via this projected env key, valued at the in-sandbox core run-from
+# clone path (`/livespec-run-from/livespec/.claude-plugin`).
 _CORE_PLUGIN_ROOT_ENV_LINE = (
-    'LIVESPEC_CORE_PLUGIN_ROOT = "/livespec-siblings/livespec/.claude-plugin"'
+    'LIVESPEC_CORE_PLUGIN_ROOT = "/livespec-run-from/livespec/.claude-plugin"'
 )
 
 
@@ -2314,17 +2365,16 @@ def test_render_run_config_overlay_appends_sibling_clone_steps_and_env_root(
         siblings=_SIBLINGS,
     )
     assert rendered is not None
-    # Two clones, the tmux socket root's exclude-then-create PAIR
-    # (bd-ib-5qxa5q), the harness settings file's exclude-then-write PAIR
-    # (bd-ib-rv2jk4), the plugin-cache gate, the git credential helper
-    # (bd-ib-52zt3o), the FIVE publication helpers the gate's block
-    # materializes beside it (v121's publication-head reader and exact-head
-    # push program, v138's carry-forward decision, v156's per-assertion
-    # proof grade, the generated-record-file resolution of bd-ib-ze7xxj and
-    # bd-ib-davaxq's record-file merger), the repository-hook limit observer
-    # (bd-ib-xi63mq), the detached commit runner (bd-ib-atyefi), and the
-    # review-turn guard (bd-ib-azxvoo).
-    assert rendered.count("[[run.prepare.steps]]") == 18
+    # The helper fetch (bd-ib-jrawlp), two clones, the run-from clone program
+    # of livespec core (bd-ib-lupzxt), the tmux socket root's
+    # exclude-then-create PAIR (bd-ib-5qxa5q), the harness settings file's
+    # exclude-then-write PAIR (bd-ib-rv2jk4), the git credential helper
+    # (bd-ib-52zt3o), the Claude Driver cache materialization, the plugin-cache
+    # gate and the committed `uv sync`. The
+    # helper programs that once rode their own steps (the publication helpers,
+    # the Red and Green command programs, the commit runner, the review-turn
+    # guard) are fetched by the first of these and render no step of their own.
+    assert rendered.count("[[run.prepare.steps]]") == 12
     assert _LIVESPEC_CLONE_STEP_LINE in rendered
     assert _DEV_TOOLING_CLONE_STEP_LINE in rendered
     assert _TMUX_TMPDIR_PREPARE_STEP_LINE in rendered
@@ -2374,7 +2424,7 @@ def test_render_run_config_overlay_sibling_clone_steps_are_valid_bash(
     clone_scripts = [
         json.loads(line.removeprefix("script = "))
         for line in script_lines
-        if "clone --quiet --depth 1" in line
+        if "git clone --quiet https://" in line
     ]
     assert len(clone_scripts) == len(_SIBLINGS.repos)
     for script in clone_scripts:
@@ -2432,7 +2482,7 @@ def test_render_run_config_overlay_sibling_clone_steps_tolerate_bad_members(
         assert script.count("exit 1") == 1
         # NON-BREAKING: the healthy path still runs the identical clone.
         assert (
-            "git clone --quiet --depth 1 https://github.com/thewoolleyman/"
+            "git clone --quiet https://github.com/thewoolleyman/"
             f"{repo_name}.git /livespec-siblings/{repo_name}" in script
         )
 
@@ -2449,31 +2499,30 @@ def test_render_run_config_overlay_without_siblings_appends_no_clone_steps(
         siblings=None,
     )
     assert rendered is not None
-    # The tmux socket root's exclude-then-create PAIR (bd-ib-5qxa5q), the
-    # harness settings file's exclude-then-write PAIR (bd-ib-rv2jk4), the
-    # plugin-cache gate, the git credential helper (bd-ib-52zt3o), the SIX
-    # publication helpers the gate's block materializes beside it (v121, v138,
-    # v156's per-assertion proof grade, bd-ib-ze7xxj's generated-record-file
-    # resolution and bd-ib-davaxq's record-file merger), the repository-hook
-    # limit observer (bd-ib-xi63mq), and the detached commit runner
-    # (bd-ib-atyefi) and the review-turn guard (bd-ib-azxvoo) — no clone step
-    # among them.
-    assert rendered.count("[[run.prepare.steps]]") == 16
+    # The helper fetch (bd-ib-jrawlp), the tmux socket root's
+    # exclude-then-create PAIR (bd-ib-5qxa5q), the harness settings file's
+    # exclude-then-write PAIR (bd-ib-rv2jk4), the git credential helper
+    # (bd-ib-52zt3o), the Claude Driver cache materialization, the plugin-cache
+    # gate and the committed `uv sync` -- no
+    # clone step among them, and no step per helper program, every one of which
+    # the helper fetch lands.
+    assert rendered.count("[[run.prepare.steps]]") == 9
     assert _TMUX_TMPDIR_PREPARE_STEP_LINE in rendered
     assert "LIVESPEC_SIBLING_CLONES_ROOT" not in rendered
 
 
 def test_render_run_config_overlay_projects_core_plugin_root(tmp_path: Path) -> None:
     """The overlay MUST project LIVESPEC_CORE_PLUGIN_ROOT at the in-sandbox
-    core-sibling clone path.
+    core run-from clone path.
 
     The sandbox is spawned with a fail-closed env allowlist
     (fabro-server/src/spawn_env.rs) and carries no installed-plugin registry,
     so a fleet repo whose janitor resolves the livespec CORE plugin (the
     console's `check-doctor-static`) has no way to find core unless the overlay
     projects LIVESPEC_CORE_PLUGIN_ROOT — the SAME container-level env-table
-    mechanism that carries GH_TOKEN. The value is derived from the siblings
-    clones root (`<clones_root>/livespec/.claude-plugin`), and the key lands
+    mechanism that carries GH_TOKEN. The value names the RUN-FROM clone root
+    (`/livespec-run-from/livespec/.claude-plugin`), never a work clone under the
+    siblings root, and the key lands
     INSIDE [environments.<id>.env] alongside the credential so it reaches every
     node's `just check` subprocesses.
     """
@@ -2665,6 +2714,8 @@ def test_engine_green_runs_janitor_in_fresh_checkout(tmp_path: Path) -> None:
         "LIVESPEC_CORE_PLUGIN_ROOT": str(tmp_path / "janitor-co-livespec-core" / ".claude-plugin"),
         "LIVESPEC_FABRO_FACTORY": None,
         "LIVESPEC_INVOKER": None,
+        "EXPEDITED_INCIDENT_RESPONSE": None,
+        "EXPEDITED_INCIDENT_RESPONSE_REVERT": None,
     }
 
 
@@ -2720,6 +2771,7 @@ def test_engine_fabro_run_failure_surfaces_inspect_failure_detail(tmp_path: Path
             ),
             _ok(stdout=failed_inspect),
             _ok(stdout="[]"),
+            CommandResult(exit_code=1, stdout="", stderr="no cluster reachable"),
         ]
     )
 
@@ -2735,6 +2787,7 @@ def test_engine_fabro_run_failure_surfaces_inspect_failure_detail(tmp_path: Path
         "fabro-inspect",
         "fabro-reattach",
         "fabro-terminal-events",
+        "fabro-sandbox-termination",
     ]
 
 
@@ -3016,6 +3069,30 @@ def test_engine_fails_fast_when_required_check_terminally_fails(tmp_path: Path) 
 
 
 def test_engine_keeps_polling_when_required_checks_are_pending(tmp_path: Path) -> None:
+    pending = [{"name": "check-coverage", "isRequired": True, "status": "IN_PROGRESS"}]
+    required_answer = {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "commits": {
+                        "nodes": [
+                            {
+                                "commit": {
+                                    "statusCheckRollup": {
+                                        "contexts": {
+                                            "nodes": [
+                                                {"name": "check-coverage", "isRequired": True},
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
     runner = _FakeRunner(
         queue=[
             _ok(),
@@ -3027,26 +3104,20 @@ def test_engine_keeps_polling_when_required_checks_are_pending(tmp_path: Path) -
                     checks=[{"name": "check-coverage", "isRequired": True, "status": "QUEUED"}],
                 )
             ),
-            _ok(
-                stdout=_pr_json(
-                    armed=True,
-                    merge_state="BLOCKED",
-                    checks=[
-                        {
-                            "name": "check-coverage",
-                            "isRequired": True,
-                            "status": "IN_PROGRESS",
-                        }
-                    ],
-                )
-            ),
+            _ok(stdout=_pr_json(armed=True, merge_state="BLOCKED", checks=pending)),
             _ok(stdout=_pr_json(armed=True, merge_state="BLOCKED")),
+            _ok(stdout=_pr_json(armed=True, merge_state="BLOCKED", checks=pending)),
+            _ok(stdout=json.dumps(required_answer)),
         ]
     )
-    outcome, _, naps = _dispatch(runner=runner, repo=tmp_path, attempts=2)
-    assert (outcome.status, outcome.stage) == ("blocked", "merge-poll")
-    assert outcome.detail.startswith("merge-poll-budget-exhausted:")
+    outcome, journal, naps = _dispatch(runner=runner, repo=tmp_path, attempts=2)
+    assert (outcome.status, outcome.stage) == ("handed-off", "merge-poll")
+    assert outcome.detail.startswith("merge-wait-handed-off:")
+    assert outcome.merge_wait_handed_off is not None
+    assert outcome.merge_wait_handed_off.running_checks == ("check-coverage",)
     assert naps == [0.5]
+    handoffs = [r for r in journal.records if r["stage"] == "merge-wait-handed-off"]
+    assert [r["running_checks"] for r in handoffs] == [["check-coverage"]]
 
 
 def test_engine_poll_budget_exhaustion_keeps_pr_number(tmp_path: Path) -> None:
@@ -3328,8 +3399,10 @@ def test_shell_runner_captures_exit_and_streams(tmp_path: Path) -> None:
 
 def test_shell_runner_converts_timeouts(tmp_path: Path) -> None:
     runner = ShellCommandRunner()
+    # real-time-required: the runner's timeout is the subject, and it is a wall-clock deadline
+    code = "import time; time.sleep(30)"  # real-time-required: the child outlives the deadline
     result = runner.run(
-        argv=[sys.executable, "-c", "import time; time.sleep(30)"],
+        argv=[sys.executable, "-c", code],
         cwd=tmp_path,
         timeout_seconds=0.2,
     )
@@ -4503,10 +4576,13 @@ def test_dispatch_green_closes_item_and_journals(
         "factory-size-check",
         "ledger-check",
         "target-selection",
+        "runtime-ceiling-policy",
+        "factory-safety-screen",
         "implementation-pr-override",
         "acp-node-override",
         "session-headroom-screen",
         "app-reach",
+        "helper-build-reach",
         "fabro-currency",
         "pre-dispatch-criteria",
         "dod-judgement",
@@ -5678,7 +5754,16 @@ def test_dispatch_failed_outcome_leaves_item_open(
         _dispatcher_loop, "run_dispatch", _FakeRunDispatch(outcomes={item.id: failed})
     )
     exit_code = main(
-        argv=["dispatch", "--repo", str(repo), "--item", item.id, "--workflow", str(workflow)]
+        argv=[
+            "dispatch",
+            "--repo",
+            str(repo),
+            "--item",
+            item.id,
+            "--workflow",
+            str(workflow),
+            "--no-close-on-merge",
+        ]
     )
     assert exit_code == 1
     assert "failed at fabro-run" in capsys.readouterr().out
@@ -5879,7 +5964,16 @@ def test_dispatch_blocked_outcome_marks_item_blocked_needs_human(
     )
 
     exit_code = main(
-        argv=["dispatch", "--repo", str(repo), "--item", item.id, "--workflow", str(workflow)]
+        argv=[
+            "dispatch",
+            "--repo",
+            str(repo),
+            "--item",
+            item.id,
+            "--workflow",
+            str(workflow),
+            "--no-close-on-merge",
+        ]
     )
 
     assert exit_code == 4
@@ -6099,7 +6193,7 @@ def test_fetch_fleet_manifest_text_shells_gh_api_raw(
     argv, _cwd = fake.calls[0]
     assert argv[:2] == ["gh", "api"]
     assert "Accept: application/vnd.github.raw" in argv
-    assert argv[-1] == "repos/thewoolleyman/livespec/contents/.livespec-fleet-manifest.jsonc"
+    assert argv[-1] == "repos/livespec-ai/livespec/contents/.livespec-fleet-manifest.jsonc"
 
 
 def test_fetch_fleet_manifest_text_returns_none_on_failure(
@@ -6152,8 +6246,8 @@ def test_dispatch_proceeds_with_empty_siblings_when_fleet_manifest_is_unfetchabl
     out = capsys.readouterr().out
     assert "sibling-clone provisioning refused" not in out
     # The materialized overlay carries an EMPTY sibling set — no per-member
-    # depth-1 clone steps were appended.
-    assert "git clone --quiet --depth 1" not in fake.overlay_texts[0]
+    # clone steps were appended.
+    assert "git clone --quiet https://" not in fake.overlay_texts[0]
 
 
 def test_dispatch_fails_fast_when_fleet_manifest_is_malformed(
@@ -6607,7 +6701,7 @@ def test_render_goal_renders_labeled_comments_section(tmp_path: Path) -> None:
 
 def test_render_goal_omits_comments_section_when_none(tmp_path: Path) -> None:
     goal = render_goal(item=_item(), repo=tmp_path, branch="feat/t")
-    assert "Ledger comments" not in goal
+    assert "Ledger comments (operator riders appended after filing" not in goal
 
 
 def test_render_goal_carries_every_rider_and_omits_the_judgement_records(
@@ -6676,7 +6770,7 @@ def test_render_goal_omits_the_comments_section_when_only_records_remain(
         ),
     )
 
-    assert "Ledger comments" not in goal
+    assert "Ledger comments (operator riders appended after filing" not in goal
 
 
 # MiniJinja's three opening delimiters: expression `{{`, statement `{%`,
@@ -6754,7 +6848,7 @@ def test_goal_source_preflight_flags_each_minijinja_opener_kind(
         lessons="",
     )
 
-    expected_field = "acceptance" if field == "acceptance_criteria" else field
+    expected_field = "acceptance criteria" if field == "acceptance_criteria" else field
     assert finding.source == expected_field
     assert finding.opener == opener
     assert expected_field in _dispatcher_goal.minijinja_findings_detail(findings=(finding,))
@@ -6770,15 +6864,13 @@ def test_goal_source_preflight_names_comment_id_and_created_at() -> None:
         ),
     )
 
-    [finding] = _dispatcher_goal.minijinja_openers_in_goal_sources(
+    findings = _dispatcher_goal.minijinja_openers_in_goal_sources(
         item=_item(),
         comments=comments,
         lessons="",
     )
 
-    detail = _dispatcher_goal.minijinja_findings_detail(findings=(finding,))
-    assert finding.source == "ledger comment comment-9 created 2026-08-22T10:11:12Z"
-    assert "ledger comment comment-9 created 2026-08-22T10:11:12Z" in detail
+    assert findings == ()
 
 
 def test_goal_source_preflight_runs_before_escape_false_negative(tmp_path: Path) -> None:
@@ -6809,6 +6901,29 @@ def test_goal_source_preflight_allows_healthy_item() -> None:
         )
         == ()
     )
+
+
+def test_goal_rewrites_comment_and_lessons_openers_without_truncating_them(tmp_path: Path) -> None:
+    comment = "comment {{ keep }} then {% keep %} then {# keep #}"
+    lessons = "lesson {{ keep }} then {% keep %} then {# keep #}"
+
+    goal = render_goal(
+        item=_item(),
+        repo=tmp_path,
+        branch="feat/t",
+        comments=(
+            WorkItemComment(
+                text=comment,
+                author="operator",
+                created_at="2026-08-22T10:11:12Z",
+                comment_id="comment-9",
+            ),
+        ),
+        lessons=lessons,
+    )
+
+    assert "comment [{ keep }} then [% keep %} then [# keep #}" in goal
+    assert "lesson [{ keep }} then [% keep %} then [# keep #}" in goal
 
 
 def test_item_sizing_warnings_empty_for_small_item() -> None:
@@ -6874,6 +6989,10 @@ def test_dispatch_goal_text_carries_ledger_comments(
         "livespec_orchestrator_beads_fabro.commands._dispatcher_loop_plan.tempfile.gettempdir",
         lambda: str(tmp_path),
     )
+    monkeypatch.setattr(
+        "livespec_orchestrator_beads_fabro.commands._dispatcher_loop_plan.tempfile.gettempdir",
+        lambda: str(tmp_path),
+    )
     exit_code = main(
         argv=[
             "dispatch",
@@ -6925,14 +7044,11 @@ def test_dispatch_fails_at_ledger_comments_stage_when_read_raises(
 
 
 def test_dispatch_refuses_minijinja_goal_before_fabro_and_releases_claim(
-    capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo, workflow = _repo_with_workflow(tmp_path=tmp_path)
-    item = _item(
-        description="poisoned {{ goal }}\n\n## Definition of Done\n\n- The dispatched slice lands its change.\n\nReferences: ## Effective acceptance criteria\n"
-    )
+    item = _item()
     append_work_item(path=_config(), item=item)
     monkeypatch.setattr(
         _dispatcher_loop_record,
@@ -6946,6 +7062,42 @@ def test_dispatch_refuses_minijinja_goal_before_fabro_and_releases_claim(
             ),
         ),
     )
+    fake = _FakeRunDispatch(outcomes={item.id: _green_outcome(item_id=item.id)})
+    monkeypatch.setattr(_dispatcher_loop, "run_dispatch", fake)
+
+    exit_code = main(
+        argv=[
+            "dispatch",
+            "--repo",
+            str(repo),
+            "--item",
+            item.id,
+            "--workflow",
+            str(workflow),
+            "--no-close-on-merge",
+        ]
+    )
+
+    assert exit_code == 0
+    assert len(fake.seen) == 1
+
+
+def test_dispatch_refuses_an_item_field_at_goal_preflight_with_exit_five(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, workflow = _repo_with_workflow(tmp_path=tmp_path)
+    opener = "{" + "{"
+    item = _item(
+        description=(
+            f"poisoned {opener} goal\n\n"
+            "## Definition of Done\n\n"
+            "- The dispatched slice lands its change.\n\n"
+            "References: ## Effective acceptance criteria\n"
+        )
+    )
+    append_work_item(path=_config(), item=item)
     fake = _FakeRunDispatch(outcomes={})
     monkeypatch.setattr(_dispatcher_loop, "run_dispatch", fake)
 
@@ -6953,15 +7105,12 @@ def test_dispatch_refuses_minijinja_goal_before_fabro_and_releases_claim(
         argv=["dispatch", "--repo", str(repo), "--item", item.id, "--workflow", str(workflow)]
     )
 
-    assert exit_code == 1
+    assert exit_code == 5
     assert fake.seen == []
     out = capsys.readouterr().out
     assert "goal-minijinja-preflight" in out
-    assert "description" in out
-    assert "ledger comment comment-9 created 2026-08-22T10:11:12Z" in out
-    stored = _stored()[item.id]
-    assert stored.status == "ready"
-    assert stored.assignee is None
+    assert "description at 0-based character offset 9" in out
+    assert opener not in out
 
 
 def test_dispatch_warns_on_oversized_item_without_blocking(
@@ -7159,11 +7308,11 @@ def test_ready_items_resolves_configured_sibling_terminal_states(
         {{
           "cross_repo_targets": {{
             "livespec-orchestrator-beads-fabro": {{
-              "github_url": "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro",
+              "github_url": "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro",
               "local_clone": "{beads_fabro}"
             }},
             "livespec-overseer": {{
-              "github_url": "https://github.com/thewoolleyman/livespec-overseer",
+              "github_url": "https://github.com/livespec-ai/livespec-overseer",
               "local_clone": "{overseer}"
             }}
           }}

@@ -21,7 +21,7 @@ one offending property removed.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done import (
     PROOF_MODE_HOST_CAPTURED,
@@ -57,6 +57,7 @@ from livespec_orchestrator_beads_fabro.commands._plan_proof_record import (
     plan_proof_entries,
 )
 from livespec_orchestrator_beads_fabro.commands._plan_release_repository import (
+    ReleaseComponent,
     ReleaseReading,
     ReleaseTags,
     UnreadableRelease,
@@ -66,7 +67,7 @@ _HOST = "The released build runs in a real operator session."
 _HUMAN = "The maintainer agrees the console reads well."
 _TAG = "v0.167.0"
 _TAGS = frozenset({_TAG, "v0.166.0"})
-_REPOSITORY = "thewoolleyman/livespec"
+_REPOSITORY = "livespec-ai/livespec"
 
 _ASSERTIONS = (
     DefinitionOfDoneAssertion(text=_HOST, proof_mode=PROOF_MODE_HOST_CAPTURED),
@@ -79,10 +80,18 @@ class _Reader:
     """A stub release reader: one reading for every record body it is handed."""
 
     answer: ReleaseReading
+    tree_difference: str | None = None
+    tree_calls: list[tuple[str, str, str]] = field(default_factory=list)
 
     def reading(self, *, body: str) -> ReleaseReading:
         del body
         return self.answer
+
+    def component_tree_difference(
+        self, *, commit: str, tag: str, component: ReleaseComponent
+    ) -> str | None:
+        self.tree_calls.append((commit, tag, component.name))
+        return self.tree_difference
 
 
 def _record(
@@ -92,6 +101,7 @@ def _record(
     assertion: str = _HOST,
     reproduced: bool | None = True,
     release: str | None = _TAG,
+    imported_components: tuple[str, ...] | None = None,
 ) -> dict[str, object]:
     """One plan record comment, rendered through the production renderer."""
     return {
@@ -100,7 +110,12 @@ def _record(
             verdict=verdict,
             identity=f"session {identity}",
             timestamp="2026-10-05T00:00:00Z",
-            build=BuildIdentity(release_tag=release, installed_build=None, commit="c0ffee1"),
+            build=BuildIdentity(
+                release_tag=release,
+                installed_build=None,
+                commit="c0ffee1",
+                imported_components=imported_components,
+            ),
             assertions=(
                 RecordAssertion(
                     text=assertion,
@@ -119,14 +134,21 @@ def _leg(
     *,
     comments: list[dict[str, object]],
     reading: ReleaseReading | None = None,
+    reader: _Reader | None = None,
     assertions: tuple[DefinitionOfDoneAssertion, ...] = _ASSERTIONS,
 ) -> object:
     return plan_proof_leg(
         assertions=assertions,
         entries=plan_proof_entries(comments=comments),
         carrier_map_position=last_carrier_map_position(comments=comments),
-        release_reader=_Reader(
-            answer=ReleaseTags(repository=_REPOSITORY, tags=_TAGS) if reading is None else reading
+        release_reader=(
+            _Reader(
+                answer=ReleaseTags(repository=_REPOSITORY, tags=_TAGS)
+                if reading is None
+                else reading
+            )
+            if reader is None
+            else reader
         ),
     )
 
@@ -141,6 +163,15 @@ def _proved() -> list[dict[str, object]]:
         _record(verdict=VERDICT_VERIFIED, identity="replaying"),
         _record(verdict=VERDICT_HUMAN_ATTESTED, identity="maintainer", assertion=_HUMAN),
     ]
+
+
+def _with_artifact_paths(*, record: dict[str, object], paths: str) -> dict[str, object]:
+    """Add the record-owned artifact evidence line to a rendered plan record."""
+    body = record["text"]
+    assert isinstance(body, str)
+    return {
+        "text": body.replace("- Commit: c0ffee1", f"- Commit: c0ffee1\n- Artifact paths: {paths}")
+    }
 
 
 def test_an_independent_verified_replay_and_an_attestation_prove_both_legs() -> None:
@@ -252,6 +283,123 @@ def test_a_record_naming_an_unknown_tag_is_rejected() -> None:
     # Both halves the clause requires: the missing release identity, and the
     # release repository the gate judged it against.
     assert [("v9.9.9" in one and _REPOSITORY in one) for one in leg.rejected] == [True]
+
+
+def test_a_component_release_rule_applies_only_to_the_recorded_artifact_paths() -> None:
+    components = (
+        ReleaseComponent(
+            name="shared-credentials",
+            tag_prefix="v",
+            paths=("tools/shared_credentials/",),
+        ),
+    )
+    reading = ReleaseTags(
+        repository=_REPOSITORY,
+        tags=_TAGS,
+        components=components,
+    )
+    release_none = _proved()
+    release_none[2] = _with_artifact_paths(
+        record=_record(verdict=VERDICT_VERIFIED, identity="replaying", release=None),
+        paths="tools/shared_credentials/seal.py",
+    )
+
+    rejected = _leg(comments=release_none, reading=reading)
+
+    assert rejected.unproved == (_HOST,)
+    assert ["component shared-credentials" in one for one in rejected.rejected] == [True]
+    # The matching component tag is the control: it proves the same artifact.
+    matching = _proved()
+    matching[2] = _with_artifact_paths(
+        record=_record(
+            verdict=VERDICT_VERIFIED,
+            identity="replaying",
+            release=_TAG,
+        ),
+        paths="tools/shared_credentials/seal.py",
+    )
+    assert _leg(comments=matching, reading=reading).unproved == ()
+
+    wrong_tag = _proved()
+    wrong_tag[2] = _with_artifact_paths(
+        record=_record(verdict=VERDICT_VERIFIED, identity="replaying", release="other-v0.1.0"),
+        paths="tools/shared_credentials/seal.py",
+    )
+    refusal = _leg(comments=wrong_tag, reading=reading)
+    assert refusal.unproved == (_HOST,)
+    assert ["other-v0.1.0" in one for one in refusal.rejected] == [True]
+
+
+def test_imported_code_with_an_owned_release_tag_is_proved_by_an_identical_component_tree() -> None:
+    """A component reached only through imported code is compared to its release tag."""
+    component = ReleaseComponent(
+        name="shared-credentials",
+        tag_prefix="shared-v",
+        paths=("tools/shared_credentials/",),
+    )
+    reader = _Reader(
+        answer=ReleaseTags(
+            repository=_REPOSITORY,
+            tags=frozenset({"shared-v1.0.0"}),
+            components=(component,),
+        )
+    )
+    timeline = _proved()
+    timeline[1] = _record(
+        verdict=VERDICT_CAPTURED,
+        identity="capturing",
+        reproduced=None,
+        release="shared-v1.0.0",
+    )
+    timeline[2] = _record(
+        verdict=VERDICT_VERIFIED,
+        identity="replaying",
+        release="shared-v1.0.0",
+        imported_components=(component.name,),
+    )
+    timeline[3] = _record(
+        verdict=VERDICT_HUMAN_ATTESTED,
+        identity="maintainer",
+        assertion=_HUMAN,
+        release="shared-v1.0.0",
+    )
+
+    leg = _leg(comments=timeline, reader=reader)
+
+    assert leg.met is True
+    assert reader.tree_calls == [("c0ffee1", "shared-v1.0.0", component.name)]
+
+
+def test_imported_code_is_judged_even_when_the_record_names_an_unowned_tag() -> None:
+    """An unrelated repository tag does not exempt an imported component from its rule."""
+    component = ReleaseComponent(
+        name="shared-credentials",
+        tag_prefix="shared-v",
+        paths=("tools/shared_credentials/",),
+    )
+    reader = _Reader(
+        answer=ReleaseTags(
+            repository=_REPOSITORY,
+            tags=frozenset({"shared-v1.0.0", _TAG}),
+            components=(component,),
+        )
+    )
+    timeline = _proved()
+    timeline[2] = _record(
+        verdict=VERDICT_VERIFIED,
+        identity="replaying",
+        release=_TAG,
+        imported_components=(component.name,),
+    )
+
+    leg = _leg(comments=timeline, reader=reader)
+
+    assert _HOST in leg.unproved
+    assert [
+        f"names no release tag owned by imported component {component.name}" in one
+        for one in leg.rejected
+    ] == [True]
+    assert reader.tree_calls == []
 
 
 def test_a_release_repository_the_gate_could_not_read_rejects_every_record_on_it() -> None:

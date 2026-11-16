@@ -51,7 +51,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
@@ -119,20 +119,26 @@ def _post_oversized_content_length(*, host: str, port: int, path: str) -> int:
         conn.close()
 
 
-def _send_raw_http(*, host: str, port: int, payload: bytes) -> bytes:
+def _real_clock() -> float:
+    return time.monotonic()  # real-time-required: an unfaked close arrives in real time
+
+
+def _send_raw_http(
+    *, host: str, port: int, payload: bytes, clock: Callable[[], float] = _real_clock
+) -> bytes:
     """Send a raw HTTP payload and await its close or the explicit deadline."""
     with create_connection((host, port), timeout=_RAW_HTTP_CONNECT_TIMEOUT_SECONDS) as conn:
         conn.settimeout(None)
         conn.sendall(payload)
         conn.shutdown(1)
-        return _receive_until_close(conn=conn)
+        return _receive_until_close(conn=conn, clock=clock)
 
 
-def _receive_until_close(*, conn: socket) -> bytes:
+def _receive_until_close(*, conn: socket, clock: Callable[[], float]) -> bytes:
     """Return the first response bytes or end-of-stream before the close deadline."""
-    deadline = time.monotonic() + _RAW_HTTP_CLOSE_DEADLINE_SECONDS
+    deadline = clock() + _RAW_HTTP_CLOSE_DEADLINE_SECONDS
     while True:
-        remaining = deadline - time.monotonic()
+        remaining = deadline - clock()
         if remaining <= 0:
             raise TimeoutError("receiver did not close the malformed request before its deadline")
         readable, _writable, _exceptional = select.select([conn], [], [], remaining)
@@ -980,8 +986,15 @@ def test_receiver_malformed_request_line_closes_without_response(
 
     monkeypatch.setattr(SocketHttpPostHandler, "_cleanup", _hold_cleanup)
     monkeypatch.setattr(select, "select", _release_after_ten_seconds)
-    monkeypatch.setattr(time, "monotonic", lambda: next(clock_values))
-    assert _send_raw_http(host="127.0.0.1", port=receiver.bound_port, payload=b"\r\n") == b""
+    assert (
+        _send_raw_http(
+            host="127.0.0.1",
+            port=receiver.bound_port,
+            payload=b"\r\n",
+            clock=lambda: next(clock_values),
+        )
+        == b""
+    )
     assert receiver.is_running() is True
 
 
@@ -1028,10 +1041,14 @@ def test_receiver_malformed_request_line_times_out_when_left_open(
 
     monkeypatch.setattr(SocketHttpPostHandler, "_cleanup", _leave_open)
     monkeypatch.setattr(select, "select", _nothing_readable)
-    monkeypatch.setattr(time, "monotonic", lambda: next(clock_values))
     try:
         with pytest.raises(TimeoutError, match="did not close"):
-            _send_raw_http(host="127.0.0.1", port=receiver.bound_port, payload=b"\r\n")
+            _send_raw_http(
+                host="127.0.0.1",
+                port=receiver.bound_port,
+                payload=b"\r\n",
+                clock=lambda: next(clock_values),
+            )
     finally:
         release_close.set()
 
@@ -1055,8 +1072,27 @@ def test_receiver_oversized_body_is_bad_request(
     assert status == _HTTP_BAD_REQUEST
 
 
-def test_receiver_internal_exporter_error_surfaces_to_connection(tmp_path: Path) -> None:
-    """An exporter that raises is an unexpected implementation error."""
+def test_receiver_internal_exporter_error_surfaces_to_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An exporter that raises is an unexpected implementation error.
+
+    The receiver holds no blanket catch (Supervisor discipline: a bug
+    propagates), so the error surfaces twice: the connection closes with no
+    reply, and the serving thread's uncaught exception reaches
+    `threading.excepthook` with its full traceback. The test owns that hook
+    for its duration and waits for the exception to arrive, so the expected
+    bug is asserted rather than leaked as an unhandled-thread-exception
+    warning on whatever schedule the thread happens to finish (bd-ib-aspezw).
+    """
+    surfaced: list[threading.ExceptHookArgs] = []
+    thread_failed = threading.Event()
+
+    def _record_thread_failure(args: threading.ExceptHookArgs) -> None:
+        surfaced.append(args)
+        thread_failed.set()
+
+    monkeypatch.setattr(threading, "excepthook", _record_thread_failure)
     receiver = OtelReceiver(
         config=ReceiverConfig(host="127.0.0.1", port=0),
         exporter=_RaisingExporter(),
@@ -1068,9 +1104,15 @@ def test_receiver_internal_exporter_error_surfaces_to_connection(tmp_path: Path)
         body = _trace_request(attrs=[_attr_entry(key="work.item.id", string_value="li-x")])
         with pytest.raises(http.client.RemoteDisconnected):
             _post_raw(url=url, body=json.dumps(body).encode("utf-8"))
+        assert thread_failed.wait(timeout=5.0)
         assert receiver.is_running() is True
     finally:
         receiver.stop()
+    assert len(surfaced) == 1
+    assert isinstance(surfaced[0].exc_value, RuntimeError)
+    assert str(surfaced[0].exc_value) == "boom"
+    assert surfaced[0].thread is not None
+    assert "_serve_connection" in surfaced[0].thread.name
 
 
 def test_receiver_does_not_double_reply_after_response_write_failure(tmp_path: Path) -> None:
@@ -1447,4 +1489,30 @@ def test_receiver_forwards_petri_acp_turn_attributes_intact(
 
     assert _attrs_of(span=forwarded[0]) == {
         key: {"stringValue": value} for key, value in expected.items()
+    }
+
+
+def test_receiver_preserves_codex_handle_responses_cache_token_counts(
+    receiver_factory: tuple[OtelReceiver, _FakeExporter, HeartbeatSink, str],
+) -> None:
+    """Codex cache-read/write counts remain integer attributes after forwarding."""
+    _receiver, exporter, _heartbeat, base = receiver_factory
+    expected = {
+        "gen_ai.usage.cache_read.input_tokens": "2097152",
+        "gen_ai.usage.cache_write.input_tokens": "131072",
+    }
+
+    status = _post_json(
+        url=f"{base}/v1/traces",
+        body=_trace_request(
+            span_name="handle_responses",
+            attrs=[{"key": key, "value": {"intValue": value}} for key, value in expected.items()],
+        ),
+    )
+
+    assert status == _HTTP_OK
+    forwarded = tuple(span for spans, _dataset in exporter.calls for span in spans)
+    assert len(forwarded) == 1
+    assert _attrs_of(span=forwarded[0]) == {
+        key: {"intValue": value} for key, value in expected.items()
     }

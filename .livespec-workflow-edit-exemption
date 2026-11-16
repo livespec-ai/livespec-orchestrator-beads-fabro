@@ -1,4 +1,2 @@
-work_item=bd-ib-43abuz
-reason=Coalesce releases into a four-hour window, adopting livespec core v235's release window: release-please opens or updates its release PR only on a schedule (every 4 h) or workflow_dispatch, and a push runs it only to tag a just-merged release PR (skip-github-pull-request). Release mechanics were 34% of fleet k3s CI time over 7 days (plan ci-runtime-and-cost). legacy-coordinator-agent ruling 2026-11-03 ~20:20Z under the maintainer's 15:00:49Z 'I approve all workflow edits'.
-change=additive
-ci_runtime=no-significant-increase
+work_item=bd-ib-bcxyfa
+reason=Restores the merge_group trigger on ci.yml in livespec-dev-tooling's guarded shape (merge-group-guard job, trusted routing) so ci-green reports on a merge_group run before the merge queue is required on the orchestrator (o6eytb). Logically additive: the workflow runs more, nothing is removed from the gate; the line-diff guard reads the rewritten stale comment and runner expressions as modified lines.

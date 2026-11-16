@@ -73,8 +73,8 @@ cat /etc/systemd/system/doltdb.service
 go version -m /usr/local/bin/dolt
 git -C /data/projects/beads show 6c124203e771:internal/storage/dolt/store.go
 # Run separately from each target repository root:
-/data/projects/1password-env-wrapper/with-livespec-env.sh -- bd list --status all --limit 0 --json
-/data/projects/1password-env-wrapper/with-livespec-env.sh -- bd show <relevant-id>
+/usr/local/bin/with-livespec-env.sh -- bd list --status all --limit 0 --json
+/usr/local/bin/with-livespec-env.sh -- bd show <relevant-id>
 ```
 
 Journal classifications counted literal `msg=NewConnection`, `msg=ConnectionClosed`, and warning/error messages; normalized errors replaced quoted identities and numbers before grouping. Results:

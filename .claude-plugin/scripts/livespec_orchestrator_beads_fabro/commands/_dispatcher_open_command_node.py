@@ -43,6 +43,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_setup_nodes import is_setup_node
 from livespec_orchestrator_beads_fabro.commands._dispatcher_watchdog import OpenCommandNode
 from livespec_orchestrator_beads_fabro.commands._fabro_port_events import (
     fabro_event_records_from_stdout,
@@ -57,6 +58,9 @@ __all__: list[str] = [
 
 # Every COMMAND node of the `implement-work-item` workflow — the nodes the
 # graph declares with a `script` attribute rather than an `acp.command` one.
+# The numbered `run_prepare_<N>` setup nodes are command nodes too and are matched
+# by shape in `_is_command_node` rather than listed here; `setup_failed`, the
+# terminal they route a failure to, is listed.
 # The ACP nodes are deliberately absent: a healthy run inside one emits agent
 # events throughout, so the stall window already bounds it correctly, and
 # widening every node's bound to its own timeout would retire the backstop.
@@ -68,16 +72,27 @@ __all__: list[str] = [
 # not running, and `tests/.../test_dispatcher_open_command_node.py` asserts
 # this tuple against the committed graph so the set cannot drift away from it.
 COMMAND_NODES: tuple[str, ...] = (
+    "already_satisfied",
+    "already_satisfied_route",
+    "commit_green",
+    "commit_red",
     "dead_implementer",
     "dod_gate_mutation_guard",
     "fix_commit_settle",
+    "fix_open_red_route",
+    "fix_progress_route",
+    "green_admission",
+    "green_amendment_route",
+    "green_incomplete_route",
+    "green_needs_human_route",
+    "green_unknown_label_route",
     "implement_amendment_route",
-    "implement_commit_settle",
     "implement_completion",
-    "implement_hook_route",
     "implementation_diff",
     "janitor",
     "janitor_admission",
+    "janitor_failure_route",
+    "janitor_refresh_route",
     "needs_human",
     "non_converged",
     "pr",
@@ -90,9 +105,15 @@ COMMAND_NODES: tuple[str, ...] = (
     "publish_draft",
     "publish_merged_reconcile_route",
     "recapture_route",
+    "red_admission",
+    "red_needs_human_route",
+    "red_unknown_label_route",
     "refresh_repair",
     "review_fix_admission",
     "review_fix_commit_settle",
+    "review_fix_open_red_route",
+    "setup_failed",
+    "test_wrong_reset",
     "verify_pr",
 )
 
@@ -196,15 +217,26 @@ def _command_node_id(*, event: dict[str, Any]) -> str | None:
     """
     for source in (event, _properties(event=event)):
         value: object = source.get(_NODE_ID_KEY)
-        if isinstance(value, str) and value in COMMAND_NODES:
+        if isinstance(value, str) and _is_command_node(name=value):
             return value
     node = _petri_node(event=event)
     if node is None or node.get(_PETRI_NODE_KIND_KEY) != _PETRI_COMMAND_KIND:
         return None
     value = node.get(_PETRI_NODE_NAME_KEY)
-    if isinstance(value, str) and value in COMMAND_NODES:
+    if isinstance(value, str) and _is_command_node(name=value):
         return value
     return None
+
+
+def _is_command_node(*, name: str) -> bool:
+    """Whether `name` is a command node: a listed one, or a numbered setup node.
+
+    The setup nodes are matched by their `run_prepare_<N>` shape and not listed,
+    because how many of them a dispatch carries depends on what the Dispatcher
+    materializes into it, and a step such as `uv sync` runs far longer than the
+    stall window with no event between its start and its completion.
+    """
+    return name in COMMAND_NODES or is_setup_node(name=name)
 
 
 def _properties(*, event: dict[str, Any]) -> dict[str, object]:

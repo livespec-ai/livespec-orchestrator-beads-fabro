@@ -61,10 +61,11 @@ references passes with its guidance orphaned.
   `factory-integration`). The fork has no ledger tenant, so neither the
   factory sandbox nor the execution-mirror convention can carry it; the file
   records the host-routed door (`driver-dispatch` in, `close-work-item` with
-  the merge SHA out), the shared build cache, the pinned nightly the fork's
-  own CI uses, and the fact that a fork pull request against the carrier
-  branch shows NO checks — the merge gate is local and must be recorded before
-  merging. It also records that merging into the carrier deploys nothing.
+  the merge SHA out), the `fabro-k3s` ARC scale set that runs the merge gate
+  (fork-gates checks in the pull request's rollup) and the carrier build
+  (`carrier-build.yml`), the throttled dev-host fallback and when it is
+  allowed, and the pinned nightly the fork's own CI uses. It also records that
+  merging into the carrier deploys nothing.
 - Read `.ai/herdr-plan-tabs.md` BEFORE opening a plan session as a herdr tab,
   moving one out of tmux, or placing or moving any herdr tab. Tab label, Claude
   session name and plan slug are identical by maintainer direction, and a herdr
@@ -109,11 +110,23 @@ references passes with its guidance orphaned.
   also BEFORE messaging any other session: inter-session messages go through
   Claude's `SendMessage`, never `herdr agent prompt` into another session's
   pane (maintainer ruling 2026-10-14).
+- Read the fleet's distributed SendMessage protocol,
+  https://github.com/livespec-ai/livespec-dev-tooling/blob/master/%2Eai/distributed-sendmessage-protocol.md,
+  BEFORE messaging, asking, directing or answering another agent session on any
+  host, and before running `herdr pane send-text`, `herdr pane run`,
+  `herdr agent prompt` or `tmux send-keys` against a pane you did not create.
+  Prefer `SendMessage` (across machines via Remote Control) to message another
+  Claude session, because text typed into its pane can interrupt the
+  maintainer (maintainer ruling 2026-11-14). Typing into a pane is still
+  allowed and nothing blocks it; use it when necessary, such as for a slash
+  command, a picker, a session `SendMessage` cannot reach, or a Codex or pi
+  seat.
 - Read `.ai/factory-dispatch-preflight-and-triage.md` BEFORE dispatching a
   work-item or triaging a dispatch that ended badly — `filing_display`
   passing does not mean `dod_gate` will, a primary behind origin fails every
-  dispatch at 0 ms, a workflow fix ships only through a `fix:` release, and a
-  post-merge janitor red names no failing target.
+  dispatch at 0 ms, a workflow fix ships only through a `fix:` release, a
+  seeded relaunch starts from the item's seed ruling and never from a rider,
+  and a post-merge janitor red names no failing target.
 - Read `.ai/factory-working-method.md` BEFORE starting a canary, test
   campaign or local build, proposing an upstream Fabro change, designing a
   measurement, or retracting a claim — the maintainer's throughput,

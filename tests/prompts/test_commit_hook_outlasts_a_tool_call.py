@@ -16,16 +16,15 @@ rather than inferred from a Codex-specific symptom. Claude's tool tolerates the
 long hook today, so Claude implement turns do not show this; an adapter change or
 a slower host reproduces it anywhere.
 
-THE PROMPTS UNDER TEST ARE DERIVED from the committed graph's `implement` and
-`fix` node blocks rather than named by path: a literal path keeps passing after a
-node is re-pointed at a different prompt, which is an instrument that cannot
-return the hit it exists to find. The sibling control asserts the derivation named
-exactly one prompt per node and that both are on disk.
+THE PROMPT UNDER TEST IS DERIVED from the committed graph's `fix` node block
+rather than named by path: a literal path keeps passing after a node is
+re-pointed at a different prompt, which is an instrument that cannot return the
+hit it exists to find. The sibling control asserts the derivation named exactly
+one prompt and that it is on disk. Red and Green do not commit: their adjacent
+command nodes own the repository commits.
 
-ONE WORDING ACROSS BOTH PROMPTS, asserted by comparing the two sections' bytes.
-The item's Definition of Done requires the fix prompt to carry "the same four
-commit-hook directions as the implement stage prompt", and two paraphrases drift
-apart while each still satisfies a per-prompt needle list.
+The command-node split means only `fix` remains an agent stage that commits. Its
+prompt therefore remains the single source for these waiting directions.
 
 POLARITY IS PINNED POSITIVELY throughout. Every needle is a sentence that must be
 PRESENT; none probes for the absence of a phrase, because an absence probe reads
@@ -61,7 +60,7 @@ _NODE_BLOCK = re.compile(
     re.DOTALL | re.MULTILINE,
 )
 _PROMPT_ATTR = re.compile(r'prompt="@prompts/(?P<file>[\w.-]+\.md)"')
-_COMMITTING_STAGE_NODES = ("implement", "fix")
+_COMMITTING_STAGE_NODES = ("fix",)
 
 _HEADING = "## A commit hook outlasts a tool call — a return is not a verdict"
 # One regex rather than a find-the-next-heading walk: the lookahead ends the
@@ -91,8 +90,22 @@ _WAIT_WITHOUT_KILLING = (
     "DO NOT START ANOTHER `git commit` WHILE ONE IS STILL LIVE.",
 )
 
-# Direction 4 — the turn does not end while a hook it started is still running.
-_NO_TURN_END_MID_HOOK = ("DO NOT END YOUR TURN WHILE A COMMIT HOOK YOU STARTED IS STILL RUNNING.",)
+# Direction 4 — the fix turn limits its rule to a commit made inside its own
+# foreground `git commit` tool call (bd-ib-oueyxf). Red and Green do not commit.
+_FOREGROUND_TURN_END_BOUND = (
+    "DO NOT END YOUR TURN WHILE A COMMIT HOOK IS STILL RUNNING INSIDE YOUR OWN",
+    "FOREGROUND `git commit` TOOL CALL. That commit is waited out in the",
+)
+
+# bd-ib-oueyxf — a fix turn whose only remaining work is a runner-started commit
+# the runner still reports as running ends succeeded and names the commit run, so
+# the graph's `fix_commit_settle` node waits it out instead of the turn being cut.
+_LEAVE_RUNNING_COMMIT_FOR_SETTLE = (
+    "A COMMIT RUN THAT YOU STARTED THROUGH THE COMMIT RUNNER AND THAT THE RUNNER",
+    "STILL REPORTS AS RUNNING IS LEFT FOR `fix_commit_settle`.",
+    "end the turn as SUCCEEDED, not failed,",
+    "and name that commit run's id in your final message.",
+)
 
 # The waiting direction must hold for the detached commit runner's bounded waits
 # too, so bd-ib-sufca7 can ship that runner without contradicting this prose.
@@ -125,7 +138,7 @@ def _section(*, node: str) -> str:
     return str(sections[0])
 
 
-def test_the_graph_names_one_prompt_per_committing_stage_and_both_are_on_disk() -> None:
+def test_the_graph_names_one_prompt_per_committing_stage_and_it_is_on_disk() -> None:
     """Control: the derivation can return a hit, and the files it names exist."""
     prompts = _committing_stage_prompts()
 
@@ -161,12 +174,18 @@ def test_the_prompt_directs_waiting_without_killing_or_a_second_commit(node: str
         assert phrase in section, f"the {node} prompt's commit-hook section omits {phrase!r}"
 
 
-@pytest.mark.parametrize("node", _COMMITTING_STAGE_NODES)
-def test_the_prompt_forbids_ending_the_turn_while_a_commit_hook_runs(node: str) -> None:
-    section = _section(node=node)
+def test_the_fix_prompt_limits_the_turn_end_rule_to_its_own_foreground_commit() -> None:
+    section = _section(node="fix")
 
-    for phrase in _NO_TURN_END_MID_HOOK:
-        assert phrase in section, f"the {node} prompt's commit-hook section omits {phrase!r}"
+    for phrase in _FOREGROUND_TURN_END_BOUND:
+        assert phrase in section, f"the fix prompt's commit-hook section omits {phrase!r}"
+
+
+def test_the_fix_prompt_leaves_a_still_running_runner_commit_for_fix_commit_settle() -> None:
+    section = _section(node="fix")
+
+    for phrase in _LEAVE_RUNNING_COMMIT_FOR_SETTLE:
+        assert phrase in section, f"the fix prompt's commit-hook section omits {phrase!r}"
 
 
 @pytest.mark.parametrize("node", _COMMITTING_STAGE_NODES)
@@ -178,14 +197,54 @@ def test_the_waiting_direction_holds_for_a_commit_runner_s_bounded_waits(node: s
         assert phrase in section, f"the {node} prompt's commit-hook section omits {phrase!r}"
 
 
-def test_the_fix_prompt_carries_the_same_directions_as_the_implement_prompt() -> None:
-    """One wording, not two: a per-prompt paraphrase drifts and cannot be audited."""
-    distinct = {_section(node=node) for node in _COMMITTING_STAGE_NODES}
+_NON_COMMITTING_IMPLEMENT_NODES = ("red", "green")
+_NO_COMMIT_DIRECTION = "Do not make a commit."
 
-    assert len(distinct) == 1, (
-        f"{len(distinct)} distinct commit-hook wordings across "
-        f"{len(_COMMITTING_STAGE_NODES)} prompts; expected one"
-    )
+
+def _graph_prompts(*, nodes: tuple[str, ...]) -> dict[str, Path]:
+    """The committed graph's prompt file for each named node, derived as above."""
+    found: dict[str, Path] = {}
+    for block in _NODE_BLOCK.finditer(_GRAPH.read_text(encoding="utf-8")):
+        name = block.group("name")
+        if name not in nodes:
+            continue
+        attr = _PROMPT_ATTR.search(block.group("body"))
+        assert attr is not None, f"node {name} declares no prompt"
+        assert name not in found, f"graph declares more than one {name} node prompt"
+        found[name] = _PROMPTS_DIR / attr.group("file")
+    return found
+
+
+def test_red_and_green_carry_one_no_commit_wording_where_implement_carried_the_hook_section() -> (
+    None
+):
+    """One wording across both implement-stage prompts, stated positively.
+
+    The single `implement` prompt carried the commit-hook waiting directions; the
+    red/green split moves every implement commit into `commit_red` and
+    `commit_green` (Scenario 285), so both agent prompts must carry the same
+    "do not commit" direction instead, word for word, in the run step that
+    used to end in a commit.
+    """
+    prompts = _graph_prompts(nodes=_NON_COMMITTING_IMPLEMENT_NODES)
+    assert tuple(sorted(prompts)) == tuple(sorted(_NON_COMMITTING_IMPLEMENT_NODES))
+
+    steps = {}
+    for node, prompt in prompts.items():
+        lines = [
+            line
+            for line in prompt.read_text(encoding="utf-8").splitlines()
+            if _NO_COMMIT_DIRECTION in line
+        ]
+        assert (
+            len(lines) == 1
+        ), f"the {node} prompt states {_NO_COMMIT_DIRECTION!r} on {len(lines)} lines; expected one"
+        steps[node] = lines[0]
+    for node, line in steps.items():
+        assert line.rstrip().endswith(
+            _NO_COMMIT_DIRECTION
+        ), f"the {node} prompt's no-commit direction is not the end of its run step: {line!r}"
+        assert "Run only" in line, f"the {node} prompt's no-commit direction is not in a run step"
 
 
 @pytest.mark.parametrize("node", _COMMITTING_STAGE_NODES)

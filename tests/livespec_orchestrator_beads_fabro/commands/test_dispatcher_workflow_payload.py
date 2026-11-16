@@ -12,11 +12,14 @@ resolve its prompts nowhere), and every refusal happens BEFORE any run.
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dot_graph import parse_dot_graph
 from livespec_orchestrator_beads_fabro.commands._dispatcher_overlay import (
     render_run_config_overlay,
     workflow_graph_path,
@@ -27,7 +30,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_payload import (
     prepare_workflow_payload,
     remove_workflow_payload,
 )
-from livespec_orchestrator_beads_fabro.commands._node_timeouts import default_node_timeouts
+from livespec_orchestrator_beads_fabro.commands._node_timeouts import (
+    default_node_timeouts,
+    derive_fabro_timeout_seconds,
+)
 
 _CONFIG_NAME = ".livespec.jsonc"
 _FAKE_TOKEN = "test-oauth-token"
@@ -62,6 +68,18 @@ _GRAPH = (
 _TOKEN = "{" + "{ inputs.implement_adapter }" + "}"
 _ACP_NODE_ATTRS = f'        backend="acp"\n        acp.command="{_TOKEN}"\n'
 _ACP_NODE_ATTRS += '        timeout="14400s"\n'
+
+_SETUP_GRAPH = (
+    "digraph ImplementWorkItem {\n"
+    '    graph [stall_timeout="7200s"]\n'
+    '    start [shape=Mdiamond, label="Start"]\n'
+    '    run_prepare_2 [shape=parallelogram, timeout="1800s", '
+    'script="set -- {{ inputs.prepare_toolchain_mise }}; test $# -eq 0 || \\"$@\\""]\n'
+    '    dod_gate [shape=parallelogram, timeout="1800s", script="true"]\n'
+    "    start -> run_prepare_2\n"
+    "    run_prepare_2 -> dod_gate\n"
+    "}\n"
+)
 
 
 class _RecordingJournal:
@@ -103,9 +121,9 @@ def test_payload_renders_the_graph_and_carries_its_prompts(tmp_path: Path) -> No
     )
     assert isinstance(payload, WorkflowPayload)
     assert payload.graph == tmp_path / "payload" / "workflow.fabro"
-    assert 'timeout="1800s"' in payload.graph.read_text(encoding="utf-8")
+    assert 'timeout="14400s"' in payload.graph.read_text(encoding="utf-8")
     assert (payload.graph.parent / "prompts" / "implement.md").is_file()
-    assert payload.node_seconds == {"implement": 1800}
+    assert payload.node_seconds == {"implement": 14400}
     # The committed source is left exactly as it was.
     assert 'timeout="14400s"' in (committed.parent / "workflow.fabro").read_text(encoding="utf-8")
 
@@ -146,6 +164,38 @@ def test_prepare_journals_the_resolved_timeouts_with_their_layers(tmp_path: Path
     assert record["stage"] == "node-timeouts"
     assert record["work_item_id"] == "bd-ib-test"
     assert record["node_timeouts"] == {"implement": {"seconds": 7200, "layer": "repository"}}
+
+
+def test_prepare_journals_the_workflow_layer_for_every_declared_value(tmp_path: Path) -> None:
+    """A node declared at exactly the default still reads as workflow-supplied."""
+    graph = (
+        "digraph ImplementWorkItem {\n"
+        '    graph [stall_timeout="7200s"]\n'
+        '    pr_route [shape=parallelogram, timeout="1800s", script="true"]\n'
+        '    fix_commit_settle [shape=parallelogram, timeout="3900s", script="true"]\n'
+        '    undeclared_node [shape=parallelogram, script="true"]\n'
+        "}\n"
+    )
+    committed = _committed_workflow(root=tmp_path, graph_text=graph)
+    journal = _RecordingJournal()
+    payload = prepare_workflow_payload(
+        repo=tmp_path,
+        committed=committed,
+        payload_dir=tmp_path / "payload",
+        journal=journal,
+        work_item_id="bd-ib-test",
+        adapters={},
+    )
+    assert isinstance(payload, WorkflowPayload)
+    record = journal.records[0]
+    assert record["node_timeouts"] == {
+        "fix_commit_settle": {"seconds": 3900, "layer": "workflow"},
+        "pr_route": {"seconds": 1800, "layer": "workflow"},
+        "undeclared_node": {"seconds": 1800, "layer": "default"},
+    }
+    assert record["fabro_timeout_seconds"] == derive_fabro_timeout_seconds(
+        timeouts=payload.timeouts
+    )
 
 
 def test_prepare_refuses_an_invalid_timeout_before_materializing(tmp_path: Path) -> None:
@@ -320,6 +370,35 @@ def test_payload_renders_each_acp_node_command_as_a_literal(tmp_path: Path) -> N
     )
 
 
+def test_payload_executes_a_declared_toolchain_argv_as_separate_words(tmp_path: Path) -> None:
+    """A materialized setup node must not hand Petri one shell-quoted argv word."""
+    committed_graph = (
+        Path(__file__).resolve().parents[3]
+        / ".claude-plugin"
+        / ".fabro"
+        / "workflows"
+        / "implement-work-item"
+        / "workflow.fabro"
+    )
+    assert "run_prepare_2" in committed_graph.read_text(encoding="utf-8")
+    marker = tmp_path / "toolchain-ran"
+    command = ("sh", "-c", f"printf succeeded > {shlex.quote(str(marker))}")
+    payload = materialize_workflow_payload(
+        committed=_committed_workflow(root=tmp_path, graph_text=_SETUP_GRAPH),
+        payload_dir=tmp_path / "payload",
+        timeouts=default_node_timeouts(),
+        adapters={},
+        prepare_inputs={"prepare_toolchain_mise": shlex.join(command)},
+    )
+    assert isinstance(payload, WorkflowPayload)
+    parsed = parse_dot_graph(text=payload.graph.read_text(encoding="utf-8"))
+    assert not isinstance(parsed, str), parsed
+    script = parsed.nodes["run_prepare_2"]["script"]
+    result = subprocess.run(["/bin/sh", "-c", script], check=False)
+    assert result.returncode == 0
+    assert marker.read_text(encoding="utf-8") == "succeeded"
+
+
 def test_payload_refuses_an_acp_node_whose_adapter_did_not_resolve(tmp_path: Path) -> None:
     """A half-rendered graph never reaches the engine: the materializer refuses."""
     graph = _GRAPH.replace(
@@ -384,7 +463,7 @@ def test_payload_skips_a_file_removed_before_its_read(
     )
     assert rendered is not None
     assert f'graph = "{payload.graph}"' in rendered
-    assert 'timeout="1800s"' in payload.graph.read_text()
+    assert 'timeout="14400s"' in payload.graph.read_text()
 
 
 def test_present_unreadable_payload_file_is_refused(*, tmp_path: Path) -> None:

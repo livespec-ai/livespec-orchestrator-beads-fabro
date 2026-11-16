@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pytest
 from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done import (
     PROOF_MODE_HOST_CAPTURED,
 )
@@ -50,16 +51,19 @@ from livespec_orchestrator_beads_fabro.commands._plan_release_forge import (
     repository_tags_argv,
 )
 from livespec_orchestrator_beads_fabro.commands._plan_release_reader import (
+    ForgeReleaseReader,
     forge_release_reader,
 )
 from livespec_orchestrator_beads_fabro.commands._plan_release_repository import (
+    ExplicitRepository,
+    ReleaseComponent,
     ReleaseTags,
     UnreadableRelease,
 )
 
 _ROOT = Path("/governed/livespec")
-_GOVERNED = "thewoolleyman/livespec"
-_SIBLING = "thewoolleyman/livespec-dev-tooling"
+_GOVERNED = "livespec-ai/livespec"
+_SIBLING = "livespec-ai/livespec-dev-tooling"
 _GOVERNED_TAGS = frozenset({"v0.1.0"})
 _SIBLING_TAGS = frozenset({"v1.95.12", "v1.96.1"})
 _ASSERTION = "The released build runs in a real operator session."
@@ -180,7 +184,7 @@ def test_a_bare_name_the_forge_reports_is_no_repository_falls_back_to_the_govern
     assert reading == ReleaseTags(repository=_GOVERNED, tags=_GOVERNED_TAGS)
     # The probe DID run and answered 404: that answer is what elected the
     # governed repository, rather than the word's shape.
-    assert tuple(repository_probe_argv(repository="thewoolleyman/v1.96.1")) in forge.calls
+    assert tuple(repository_probe_argv(repository="livespec-ai/v1.96.1")) in forge.calls
 
 
 def test_a_record_naming_no_installed_build_identifier_is_judged_against_the_governed_one() -> None:
@@ -200,7 +204,7 @@ def test_a_record_naming_no_installed_build_identifier_is_judged_against_the_gov
 def test_an_explicit_repository_the_forge_denies_is_rejected_and_never_falls_back() -> None:
     forge = _forge(existing=frozenset({_GOVERNED}))
 
-    reading = _reading(forge=forge, installed_build="thewoolleyman/livespec-dev-tooling v1.96.1")
+    reading = _reading(forge=forge, installed_build="livespec-ai/livespec-dev-tooling v1.96.1")
 
     assert isinstance(reading, UnreadableRelease)
     assert reading.repository == _SIBLING
@@ -213,7 +217,7 @@ def test_an_explicit_repository_the_forge_denies_is_rejected_and_never_falls_bac
 def test_an_explicit_repository_the_forge_reports_is_judged_against_its_own_tags() -> None:
     # The control for the case above: a ladder that rejected every explicit name
     # would satisfy it on its own.
-    reading = _reading(forge=_forge(), installed_build="thewoolleyman/livespec-dev-tooling v1.96.1")
+    reading = _reading(forge=_forge(), installed_build="livespec-ai/livespec-dev-tooling v1.96.1")
 
     assert reading == ReleaseTags(repository=_SIBLING, tags=_SIBLING_TAGS)
 
@@ -278,6 +282,76 @@ def test_every_record_naming_one_build_identifier_costs_one_resolution() -> None
     # build identifier, so the resolution is taken once and the forge is asked
     # three times rather than three times per record.
     assert len(forge.calls) == 3
+
+
+@dataclass(frozen=True, kw_only=True)
+class _TreeRunner:
+    """One controlled git-diff result for the component-tree reader seam."""
+
+    result: CommandResult
+    calls: list[tuple[str, ...]] = field(default_factory=list)
+
+    def run(
+        self,
+        *,
+        argv: list[str],
+        cwd: Path,
+        timeout_seconds: float,
+        env: dict[str, str] | None = None,
+        stdin: int | None = None,
+    ) -> CommandResult:
+        del cwd, timeout_seconds, env, stdin
+        self.calls.append(tuple(argv))
+        return self.result
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        (CommandResult(exit_code=0, stdout="", stderr=""), None),
+        (
+            CommandResult(exit_code=0, stdout="tools/shared_credentials/changed.py\n", stderr=""),
+            "tools/shared_credentials/changed.py",
+        ),
+        (
+            CommandResult(exit_code=1, stdout="", stderr="unknown revision"),
+            "could not compare trees: unknown revision",
+        ),
+    ],
+)
+def test_component_tree_difference_reports_the_first_changed_or_one_sided_path(
+    *, result: CommandResult, expected: str | None
+) -> None:
+    """The comparison is limited to component paths and exposes git's first path."""
+    component = ReleaseComponent(
+        name="shared-credentials",
+        tag_prefix="shared-v",
+        paths=("tools/shared_credentials/",),
+    )
+    runner = _TreeRunner(result=result)
+    reader = ForgeReleaseReader(
+        project_root=_ROOT,
+        runner=runner,
+        governed=ExplicitRepository(owner="livespec-ai", repository="livespec"),
+        components=None,
+    )
+
+    difference = reader.component_tree_difference(
+        commit="c0ffee1", tag="shared-v1.0.0", component=component
+    )
+
+    assert difference == expected
+    assert runner.calls == [
+        (
+            "git",
+            "diff",
+            "--name-only",
+            "c0ffee1",
+            "shared-v1.0.0",
+            "--",
+            "tools/shared_credentials/",
+        )
+    ]
 
 
 def test_two_records_naming_different_repositories_are_resolved_separately() -> None:

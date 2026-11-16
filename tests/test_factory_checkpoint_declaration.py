@@ -303,6 +303,57 @@ figures so a reviewer still sees the move:
   credential-use window plus the margin, so an allowance past a fresh
   credential's lifetime cannot reach the requirement.
 
+SANDBOX SETUP BECAME GRAPH NODES (work-item bd-ib-dpsiwz), and that moved the
+allowance for the same reason every earlier node did. Upstream Fabro refuses the
+run-config prepare table from v0.396.0-nightly.0, so the nine committed setup
+steps are now `run_prepare_<N>` command nodes of the committed graph, beside the
+terminal `setup_failed` node they route a failure to. Each is a TIMED node the
+derivation sums, entered once and billed its 1800-second default timeout plus the
+checkpoint budget (the terminal node its 600). Re-measured against the tree that
+carries them, the shipped five-minute allowance is 1376805 seconds, past the old
+1350000 bound, and the retired fifteen-minute control is 2131005. The bound moves
+to 1400000 to stay strictly between the two, with 23195 seconds of shipped
+headroom. The Dispatcher's own materialized setup steps are added to each
+dispatch's graph and are NOT in this committed-graph derivation. Nothing that
+matters here moved: the freshness requirement is still governed by the bounded
+credential-use window, and `credential_deadline_epoch` still caps every run at the
+token's observed expiry minus its margin.
+
+THE RED/GREEN COMMAND SPLIT (work-item bd-ib-vy75ws) replaces the single
+`implement` ACP node with `red`, `commit_red`, `green` and `commit_green`, plus
+their admission, completion, amendment, incomplete and test-wrong routes. Each
+term below is visits x attempts x (resolved timeout + the 1095-second per-attempt
+overhead), measured on master 7ad0adbdd and on this change:
+
+* the ACP turns: `implement` (3 x 2 x 14400) = 92970 retired; `red` and `green`
+  (4 x 2 x 14400 each) = 123960 each. Net +154950.
+* the commit command nodes `commit_red` and `commit_green` (4 x 1 x 7200 each,
+  the released 7200-second commit timeout kept): +33180 each, +66360.
+* the admission routes `red_admission` and `green_admission` (4 x 1 x 1800):
+  +11580 each, +23160; `green_amendment_route` +11580; `green_incomplete_route`
+  (2 visits) +5790; `test_wrong_reset` (3 visits) +8685; `already_satisfied`
+  (1 visit) +2895.
+* nodes whose visit bound moved: `implementation_diff` and
+  `implement_amendment_route` 3 to 4 visits, +2895 each; `implement_completion`
+  3 to 4, +1695; the now-unreachable single-node `implement_hook_route` and
+  `implement_commit_settle` fall to 1 visit, -5790 and -9990.
+
+The sum is +265125, taking the shipped allowance from 1376805 to 1641930
+seconds, exactly as re-measured. The four-visit bounds are the 3+1 derivation
+of the change's pull request: three admitted `green` visits plus one
+incomplete-turn re-entry, declared as `max_visits` backstops. Without them the
+derivation reached 1934985. The bound moves from 1400000 to 1700000, which sits
+above the shipped 1641930 and below the retired fifteen-minute control's
+2459130. That keeps the discriminating relation this module owns: the
+five-minute checkpoint budget is still what holds the allowance under the bound.
+
+THE TWO UNREACHABLE NODES WERE REMOVED (work-item bd-ib-vvzd3v). The split left
+`implement_hook_route` and `implement_commit_settle` in the graph with no edge
+entering either, which the engine refuses as `attractor.unreachable_node`, so
+every v0.329.0 implement dispatch was refused at `fabro run`. Removing them
+takes their one billed visit each out of the derivation: the shipped allowance
+re-measures at 1634040 seconds, down from 1641930, still under the same bound.
+
 The v175 lesson is kept: crossing the credential line fails loudly and cannot
 pass behind a bound the repository can move, because the fresh-credential
 lifetime is a constant of the host and not a bound.
@@ -331,7 +382,7 @@ _SHIPPED_WORKFLOW = _PAYLOAD / "workflow.toml"
 # nothing. The bound is the only figure here this repository chooses, and no
 # derived figure is pinned beside it: a node-timeout edit that keeps the
 # allowance under the bound needs no edit to this module.
-_ALLOWANCE_BOUND_SECONDS = 1_350_000
+_ALLOWANCE_BOUND_SECONDS = 1_700_000
 
 # The lifetime of a FRESH Codex credential. Not this repository's to choose: it
 # is what the host mints at renewal, so a requirement past it is a fact about

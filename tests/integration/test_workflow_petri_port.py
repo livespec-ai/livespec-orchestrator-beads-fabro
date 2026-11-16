@@ -118,39 +118,82 @@ _RECAPTURE_LOOP = _RECAPTURE_ADDED | {
     "proof_verify",
     "proof_grade",
 }
-# The hook-refusal route (v208, Scenario 204; work-item bd-ib-y7372n), kept as
-# its own constant for the same reason. It closes a NEW cycle --
-# `implement -> implement_completion -> implement_hook_route -> implement` --
-# so the nodes it moves are that cycle's members plus the diff breaker the
-# second visit's completion re-earns; everything below the breaker is already
-# attributed to a loop above.
-_HOOK_ROUTE_ADDED = {"implement_hook_route"}
-_HOOK_ROUTE_LOOP = _HOOK_ROUTE_ADDED | {
+# The hook-refusal route (v208, Scenario 204; work-item bd-ib-y7372n) once closed
+# the cycle `implement -> implement_completion -> implement_hook_route ->
+# implement`. The red/green split left it and `implement_commit_settle`
+# unreachable and bd-ib-vvzd3v removed both, so neither is an ADDED node any more;
+# the loop's surviving members stay allowed to move, since the pre-port graph
+# budgets them under that cycle and the ported one under the split's own.
+_HOOK_ROUTE_LOOP = {
     "implement",
     "implement_completion",
     "implementation_diff",
 }
 # The commit-run settles (bd-ib-xj3qqb), kept as their own constant for the same
-# reason. `implement_commit_settle` sits on `implement`'s fallthrough, and the
-# settled-commit re-entry it informs raises the hook-route cycle from two visits
-# to three (so `_HOOK_ROUTE_LOOP` is the set it moves); `review_fix_commit_settle`
-# sits on `review_fix`'s fallthrough and closes no cycle of its own.
+# reason. `review_fix_commit_settle` sits on `review_fix`'s fallthrough and
+# `fix_commit_settle` on `fix`'s, and neither closes a cycle of its own. The
+# single-turn `implement_commit_settle` was removed with the red/green split.
 _COMMIT_SETTLE_ADDED = {
-    "implement_commit_settle",
     "fix_commit_settle",
     "review_fix_commit_settle",
 }
 _JANITOR_ADMISSION_ADDED = {"janitor_admission"}
+# The red-janitor brief route (Scenario 305) sits on the janitor's red edge ahead of
+# `fix`, and closes no cycle of its own.
+_JANITOR_REFRESH_ROUTE_ADDED = {"janitor_refresh_route"}
+# The no-progress classifier runs after the established janitor refresh route
+# and before the established fix settle path. Both nodes close no cycle: they
+# turn one repeated unchanged-head failure into the existing terminal.
+_FIX_NO_PROGRESS_ROUTE_ADDED = {"fix_progress_route", "janitor_failure_route"}
+# The open-Red route (work-item bd-ib-7fdesc) sits on `fix_commit_settle`'s
+# fallthrough and closes the cycle back to `fix` for an open Red's Green, whose
+# members are all already attributed to the loops above.
+_FIX_OPEN_RED_ROUTE_ADDED = {"fix_open_red_route"}
+# The review_fix twin (work-item bd-ib-czhqoq) sits on `review_fix_commit_settle`'s
+# fallthrough and closes the cycle back to `review_fix` for an open Red's Green.
+_REVIEW_FIX_OPEN_RED_ROUTE_ADDED = {"review_fix_open_red_route"}
 # This command node sits before `disposition`, preserving its three-visit
 # review-fix budget while converting a fourth request into a named terminal
 # route instead of the engine's unroutable entry abort.
 _REVIEW_FIX_ADMISSION_ADDED = {"review_fix_admission"}
 _IMPLEMENT_AMENDMENT_ROUTE_ADDED = {"implement_amendment_route"}
+_RED_GREEN_SPLIT_ADDED = {
+    "already_satisfied",
+    "commit_green",
+    "commit_red",
+    "green",
+    "red",
+    "test_wrong_reset",
+    "red_admission",
+    "green_admission",
+    # The completion gate's split-graph routes: a failed Green turn's amendment
+    # classifier and the incomplete-turn re-entry (bd-ib-vy75ws).
+    "green_amendment_route",
+    "green_incomplete_route",
+}
+# The label routes (work-item bd-ib-crvt34): a needs-human label rests the run,
+# and every label the node does not route is refused back through the stage's
+# admission bound, which is a cycle the admission's own `max_visits` already
+# bounds, so the routes close no new budget of their own. The seeded
+# already-satisfied route (work-item bd-ib-zji6m3) is the same shape: a tree that
+# differs from the dispatch base re-enters Red through `red_admission`, and an
+# unchanged tree falls through to the terminal.
+_LABEL_ROUTES_ADDED = {
+    "already_satisfied_route",
+    "red_needs_human_route",
+    "red_unknown_label_route",
+    "green_needs_human_route",
+    "green_unknown_label_route",
+}
 # The `dod_gate` post-turn mutation guard (work-item bd-ib-al54tl), kept as its
 # own constant for the reason every set above gives. It sits on `dod_gate`'s
 # single fallthrough, closes no cycle and is reached once, so it moves no other
 # node's count.
 _DOD_GATE_GUARD_ADDED = {"dod_gate_mutation_guard"}
+# The sandbox setup, as explicit command nodes (work-item bd-ib-dpsiwz): the nine
+# committed steps and the terminal node a failed one routes to. Upstream Fabro
+# refuses the run-config prepare table, so these are graph nodes now.
+_SETUP_ADDED = {f"run_prepare_{index}" for index in range(1, 10)} | {"setup_failed"}
 _IMPLEMENT_AMENDMENT_ROUTE_LOOP = _IMPLEMENT_AMENDMENT_ROUTE_ADDED | {
     "implement",
     "implement_completion",
@@ -595,9 +638,13 @@ def test_the_janitor_fix_loop_routes_on_outcome_and_is_bounded_by_max_visits() -
     """Outcome routing works on both engines; `max_visits` is what bounds the loop."""
     text = _graph_text()
     conditions = _conditions(text=text)
-    assert conditions["janitor", "fix"] == "outcome!=succeeded"
+    assert conditions["janitor", "janitor_refresh_route"] == "outcome!=succeeded"
+    assert conditions["janitor_refresh_route", "refresh_repair"] == "preferred_label=refresh_repair"
     assert conditions["janitor", "publish_draft"] == "outcome=succeeded"
     assert ("fix", "fix_commit_settle") in {
+        (edge.group("src"), edge.group("dst")) for edge in _EDGE_RE.finditer(text)
+    }
+    assert ("janitor_refresh_route", "fix") in {
         (edge.group("src"), edge.group("dst")) for edge in _EDGE_RE.finditer(text)
     }
     assert "max_visits=" in _node_bodies(text=text)["fix"]
@@ -733,7 +780,7 @@ def test_the_ported_graph_derives_the_same_execution_budget_as_the_pre_port_one(
 
     # The two new stages, the v134 refresh-repair classifier, the v145 refresh
     # route, the v156 per-assertion grade, the v165 completion gate, the v175
-    # recapture route and the v208 hook-refusal route are the ONLY nodes added,
+    # recapture route and the red/green split's nodes are the ONLY nodes added,
     # and nothing was dropped: a node
     # the ported graph lost would be an executable path missing from a figure
     # still presented as an allowance.
@@ -745,14 +792,20 @@ def test_the_ported_graph_derives_the_same_execution_budget_as_the_pre_port_one(
         | _PROOF_GRADE_ADDED
         | _IMPLEMENT_COMPLETION_ADDED
         | _RECAPTURE_ADDED
-        | _HOOK_ROUTE_ADDED
         | _IMPLEMENT_AMENDMENT_ROUTE_ADDED
+        | _RED_GREEN_SPLIT_ADDED
+        | _LABEL_ROUTES_ADDED
         | _COMMIT_SETTLE_ADDED
         | _JANITOR_ADMISSION_ADDED
+        | _JANITOR_REFRESH_ROUTE_ADDED
+        | _FIX_NO_PROGRESS_ROUTE_ADDED
+        | _FIX_OPEN_RED_ROUTE_ADDED
+        | _REVIEW_FIX_OPEN_RED_ROUTE_ADDED
         | _REVIEW_FIX_ADMISSION_ADDED
         | _DOD_GATE_GUARD_ADDED
+        | _SETUP_ADDED
     )
-    assert set(pre_port.node_visits) - set(ported.node_visits) == set()
+    assert set(pre_port.node_visits) - set(ported.node_visits) == {"implement"}
 
     # The visit TABLE, not just its sum: two different tables can total the same
     # seconds, and it is the per-node figure the credential deadline and the
@@ -775,10 +828,17 @@ def test_the_ported_graph_derives_the_same_execution_budget_as_the_pre_port_one(
         | _RECAPTURE_LOOP
         | _HOOK_ROUTE_LOOP
         | _IMPLEMENT_AMENDMENT_ROUTE_LOOP
+        | _RED_GREEN_SPLIT_ADDED
+        | _LABEL_ROUTES_ADDED
         | _COMMIT_SETTLE_ADDED
         | _JANITOR_ADMISSION_ADDED
+        | _JANITOR_REFRESH_ROUTE_ADDED
+        | _FIX_NO_PROGRESS_ROUTE_ADDED
+        | _FIX_OPEN_RED_ROUTE_ADDED
+        | _REVIEW_FIX_OPEN_RED_ROUTE_ADDED
         | _REVIEW_FIX_ADMISSION_ADDED
         | _DOD_GATE_GUARD_ADDED
+        | _SETUP_ADDED
     )
     assert moved <= reachable, sorted(moved - reachable)
     # And the direction is the honest one: the graph grew, so the allowance grew.

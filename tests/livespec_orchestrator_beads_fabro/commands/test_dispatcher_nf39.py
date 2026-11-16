@@ -122,6 +122,7 @@ def test_failed_dispatch_reinspects_when_terminal_inspect_has_no_failure_yet(
                 stderr="",
             ),
             CommandResult(exit_code=0, stdout="[]", stderr=""),
+            CommandResult(exit_code=1, stdout="", stderr="no cluster reachable"),
             CommandResult(
                 exit_code=0,
                 stdout=json.dumps(
@@ -171,14 +172,20 @@ def test_failed_dispatch_reinspects_when_terminal_inspect_has_no_failure_yet(
     # client's stderr nor the run conclusion. Two reads appear because
     # `inspect_after_run` observes this run twice: a provider ceiling leaves the
     # first observation with no failure block, so it re-inspects.
+    #
+    # `fabro-sandbox-termination` closes each observation of a failed run: the
+    # sandbox provider's report is read after the run is confirmed failed, and
+    # this fake cluster answers nothing a pod listing could be read from.
     assert [record["stage"] for record in journal.records] == [
         "fabro-run",
         "fabro-inspect",
         "fabro-reattach",
         "fabro-terminal-events",
+        "fabro-sandbox-termination",
         "fabro-inspect",
         "fabro-run-labels",
         "fabro-terminal-events",
+        "fabro-sandbox-termination",
     ]
 
 
@@ -317,7 +324,7 @@ def _plan(*, tmp_path: Path) -> DispatchPlan:
         janitor=("just", "check"),
         janitor_checkout=tmp_path / ".janitor",
         janitor_core_checkout=tmp_path / ".janitor" / ".livespec-core",
-        janitor_core_repo_url="https://github.com/thewoolleyman/livespec.git",
+        janitor_core_repo_url="https://github.com/livespec-ai/livespec.git",
         janitor_core_ref="master",
         review_fix_visit_cap=3,
         merge_on_review_cap_outcome="succeeded",

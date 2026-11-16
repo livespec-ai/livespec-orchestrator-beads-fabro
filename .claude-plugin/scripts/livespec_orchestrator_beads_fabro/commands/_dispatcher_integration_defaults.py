@@ -62,6 +62,10 @@ __all__: list[str] = [
     "MASTER_CI_WORKFLOW_DEFAULT",
     "MERGE_MODES",
     "MERGE_MODE_DEFAULT",
+    "ORCHESTRATOR_BUILD_ADOPT_REMEDY",
+    "ORIGIN_DEFAULT_FETCH_REFSPEC",
+    "ORIGIN_DEFAULT_REMOTE_REF",
+    "ORIGIN_DEFAULT_REVISION",
     "RELEASE_REPOSITORY_MASTER_REF",
     "RELEASE_REPOSITORY_RELEASE_REF",
     "RELEASE_REPOSITORY_URL",
@@ -176,23 +180,18 @@ JANITOR_CLUSTER_GATE_DEFAULT: tuple[str, ...] = (
 # post-merge outcome for a premise nobody asked for.
 JANITOR_TRUST_DEFAULT: tuple[str, ...] = (FLEET_TOOL_RUNNER, "trust")
 
-# The IN-SANDBOX-GATE venue's check-suite. It is the same declared check-suite
-# with the host-venue provisioning dropped -- NOT because the sandbox needs none,
-# but because the sandbox provisions the pack in its PREPARE CHAIN instead, through
-# `SANDBOX_CHECKOUT_PROVISION_DEFAULT` below. This comment used to say the sandbox
-# is "a fresh full clone whose own prepare chain has already run, so the
-# worktree-pack provisioning the host janitor needs is not a premise there"; the
-# premise was real all along and nothing satisfied it, which is the defect
-# `bd-ib-tlmq3m` closes. The two venues differing ONLY in their fleet default is
-# what the ratified venue dimension buys -- before it, this argv lived as a bare
-# literal in the publish prompts with nothing binding it to the host one.
-#
-# The host venue provisions INSIDE its suite and the sandbox venue provisions
-# BEFORE it, and that asymmetry is deliberate: the host janitor's suite is the only
-# thing that runs in its fresh worktree, while a sandbox runs a whole implement
-# stage -- whose own in-session `just check`, and whose `pr_refresh` gate, both read
-# the pack long before the janitor node does.
-SANDBOX_CHECK_SUITE_DEFAULT: tuple[str, ...] = (*_FLEET_RECIPE_INVOCATION, "check")
+# The IN-SANDBOX-GATE venue's fleet-default check-suite mirrors the host janitor:
+# it reinstalls the ignored worktree-discipline pack immediately before `check`.
+# A sandbox refresh can sync a newer livespec-dev-tooling pin after the prepare
+# chain installed the old pack bodies, so the suite itself must converge the pack
+# it verifies. `SANDBOX_CHECKOUT_PROVISION_DEFAULT` remains necessary for the
+# implement stage's first reads, before this suite is reached. A governed
+# repository's declared suite is still resolved and rendered unchanged.
+SANDBOX_CHECK_SUITE_DEFAULT: tuple[str, ...] = (
+    *_FLEET_RECIPE_INVOCATION,
+    "install-worktree-pack",
+    "check",
+)
 
 # The IN-SANDBOX venue's PER-CLONE provisioning recipe -- the twin of the
 # host-janitor one above, and the correction of the paragraph beside it. That
@@ -241,7 +240,7 @@ JANITOR_BOOTSTRAP_RECIPE_DEFAULT: tuple[str, ...] = (
 # There is deliberately NO companion default for `compat.pinned`: the only
 # substitutable ref would be the moving branch tip its own clause forbids, so
 # that field is REQUIRED and an absent declaration resolves to `Defective`.
-FLEET_CORE_REPO_URL = "https://github.com/thewoolleyman/livespec.git"
+FLEET_CORE_REPO_URL = "https://github.com/livespec-ai/livespec.git"
 
 # THIS PLUGIN'S OWN release repository and the two refs the currency gate probes
 # on it. Not an integration point at all: a governed repository cannot declare
@@ -251,9 +250,25 @@ FLEET_CORE_REPO_URL = "https://github.com/thewoolleyman/livespec.git"
 # ban admits in exactly one module -- and because splitting the URL from its refs
 # would leave the plugin's own identity spelled in two places, which is the
 # drift the defaults module exists to stop.
-RELEASE_REPOSITORY_URL = "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro.git"
+RELEASE_REPOSITORY_URL = "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro.git"
 RELEASE_REPOSITORY_RELEASE_REF = "refs/heads/release"
 RELEASE_REPOSITORY_MASTER_REF = "refs/heads/master"
+
+# The remote revision of a GOVERNED repository's default branch that the
+# Definition-of-Done wall resolves References headings against (bd-ib-ahtcng), in
+# the three spellings its git steps need: the name an operator and a finding use,
+# the remote-tracking ref the tree is read out of, and the refspec that brings
+# that ref up to date. They live here for the reason the release refs above do --
+# each is a bare default-branch name used AS A REF.
+ORIGIN_DEFAULT_REVISION = "origin/master"
+ORIGIN_DEFAULT_REMOTE_REF = "refs/remotes/origin/master"
+ORIGIN_DEFAULT_FETCH_REFSPEC = "+refs/heads/master:refs/remotes/origin/master"
+
+# The named-build adopt step livespec-dev-tooling owns, which every currency
+# surface names as its remedy. A fleet clone's session reconcile holds its
+# installed orchestrator build, so a raw plugin update would route around the
+# step; it lives here because it is spelled with the recipe runner's name.
+ORCHESTRATOR_BUILD_ADOPT_REMEDY = f"{FLEET_RECIPE_RUNNER} adopt-orchestrator-build <clone> <build>"
 
 # The explicit no-op VALUE a prepare-toolchain premise resolves to for a
 # repository that carries no such premise. Never an absent key -- see the module

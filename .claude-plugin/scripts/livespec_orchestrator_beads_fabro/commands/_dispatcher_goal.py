@@ -12,19 +12,22 @@ in, for the cohesion reason that module's docstring gives: it is authored by the
 Dispatcher from the invocation's resume attributes rather than read off the item,
 so it shares neither input nor provenance with anything assembled here.
 
-WHICH COMMENTS ARE BRIEF, AND WHICH ARE RECEIPTS. Every ledger comment reaches
-the brief EXCEPT the Dispatcher's own Definition-of-Done judgement records, which
-`contracts.md`'s one-rubric-one-subject clause excludes from the node's rendered
-goal for the same reason it excludes them from the subject the host takings
-grade: a receipt is what the Dispatcher wrote ABOUT the brief, so a node that
-read one would grade a brief growing by a paragraph every time a verdict was
-recorded — and would meet, among its riders, a verdict about itself.
+WHICH COMMENTS ARE BRIEF, WHICH ARE RECEIPTS, AND WHICH ARE LEFT OUT. A ledger
+comment other than the Dispatcher's own Definition-of-Done judgement records
+(`contracts.md`'s one-rubric-one-subject clause excludes those from the node's
+rendered goal for the same reason it excludes them from the subject the host
+takings grade) is a rider, and the goal carries the riders `_dispatcher_rider_bound`
+says are CARRIED: those appended after the item's previous dispatch claim, the
+`STANDING RIDER:` ones and the `FOR <stage> ONLY:` ones. A rider that is not carried
+stays on the ledger and is counted in one left-out line instead (bd-ib-l2poch).
 
-The predicate is `_dispatcher_dod_judgement_markers.is_receipt_comment`, the
-same one the subject uses. One spelling of the marker is the whole point: two
-would make the subject and the goal disagree about which comments the item's
-brief consists of, which is the disagreement between host and in-run takings
-that the clause exists to close.
+A receipt is what the Dispatcher wrote ABOUT the brief, so a node that read one
+would grade a brief growing by a paragraph every time a verdict was recorded.
+The receipt predicate is `_dispatcher_dod_judgement_markers.is_receipt_comment`,
+the same one the subject uses, and the carried-rider predicate is likewise the
+subject's: two spellings would make the subject and the goal disagree about which
+comments the item's brief consists of, which is the disagreement between host and
+in-run takings that the clause exists to close.
 """
 
 from __future__ import annotations
@@ -37,8 +40,8 @@ from typing import TYPE_CHECKING
 from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done import (
     definition_of_done_source,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_markers import (
-    is_receipt_comment,
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_governing_reuse import (
+    reusable_governing_heading_verdict,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_record import (
     recorded_governing_heading,
@@ -55,6 +58,11 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_goal_recovery import
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_minijinja_escape import (
     escape_minijinja_literal,
+    rewrite_minijinja_openers_for_goal,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_rider_bound import (
+    bound_riders,
+    left_out_line,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_workflow_guard import (
     FACTORY_WORKFLOW_BOUNDARY_TEXT,
@@ -75,6 +83,7 @@ __all__: list[str] = [
     "GoalBriefMiniJinjaFinding",
     "minijinja_findings_detail",
     "minijinja_openers_in_goal_sources",
+    "minijinja_openers_in_item_fields",
     "minijinja_openers_in_text",
     "render_goal",
 ]
@@ -93,6 +102,21 @@ class GoalBriefMiniJinjaFinding:
 
     source: str
     opener: str
+    offset: int
+
+
+def minijinja_openers_in_item_fields(*, item: WorkItem) -> tuple[GoalBriefMiniJinjaFinding, ...]:
+    """Find goal-template openers in the item's editable goal-source fields."""
+    fields: list[tuple[str, str | None]] = [
+        ("title", item.title),
+        ("description", item.description),
+        ("acceptance criteria", item.acceptance_criteria),
+        ("notes", item.notes),
+    ]
+    findings: list[GoalBriefMiniJinjaFinding] = []
+    for source, text in fields:
+        findings.extend(minijinja_openers_in_text(source=source, text=text)[:1])
+    return tuple(findings)
 
 
 def minijinja_openers_in_goal_sources(
@@ -101,24 +125,13 @@ def minijinja_openers_in_goal_sources(
     comments: tuple[WorkItemComment, ...],
     lessons: str,
 ) -> tuple[GoalBriefMiniJinjaFinding, ...]:
-    """Find MiniJinja openers in the unescaped goal-brief source fields."""
-    fields: list[tuple[str, str | None]] = [
-        ("title", item.title),
-        ("description", item.description),
-        ("acceptance", item.acceptance_criteria),
-        ("notes", item.notes),
-        ("lessons", lessons),
-    ]
-    findings: list[GoalBriefMiniJinjaFinding] = []
-    for source, text in fields:
-        findings.extend(minijinja_openers_in_text(source=source, text=text))
-    for index, comment in enumerate(comments, start=1):
-        findings.extend(
-            minijinja_openers_in_text(
-                source=_comment_source(index=index, comment=comment), text=comment.text
-            )
-        )
-    return tuple(findings)
+    """Find refusal-worthy openers in editable item fields only.
+
+    Comments and lessons are immutable sources; `render_goal` rewrites their
+    openers in place rather than refusing an otherwise repairable dispatch.
+    """
+    _ = (comments, lessons)
+    return minijinja_openers_in_item_fields(item=item)
 
 
 def minijinja_openers_in_text(
@@ -139,7 +152,11 @@ def minijinja_openers_in_text(
     if text is None or text == "":
         return ()
     return tuple(
-        GoalBriefMiniJinjaFinding(source=source, opener=match.group(0))
+        GoalBriefMiniJinjaFinding(
+            source=source,
+            opener=match.group(0),
+            offset=match.start(),
+        )
         for match in _MINIJINJA_OPEN_DELIMITER_RE.finditer(text)
     )
 
@@ -148,15 +165,14 @@ def minijinja_findings_detail(
     *,
     findings: tuple[GoalBriefMiniJinjaFinding, ...],
 ) -> str:
-    """Render a refusal detail naming every offending goal-brief source."""
-    sources = ", ".join(f"{finding.source} ({finding.opener})" for finding in findings)
-    return (
-        "goal brief contains MiniJinja opening delimiter before escaping; "
-        f"offending source(s): {sources}"
+    """Render a safe refusal detail without copying an opener to the ledger."""
+    sources = ", ".join(
+        f"{finding.source} at 0-based character offset {finding.offset}" for finding in findings
     )
+    return f"goal-template opening delimiter in editable field(s): {sources}; edit that field"
 
 
-def render_goal(
+def render_goal(  # noqa: PLR0913 — kw-only brief inputs; `interrupted` and `repayment` are the two Dispatcher-authored sections handed in beside the item's own fields.
     *,
     item: WorkItem,
     repo: Path,
@@ -164,6 +180,8 @@ def render_goal(
     comments: tuple[WorkItemComment, ...] = (),
     lessons: str = "",
     interrupted: InterruptedAttempt | None = None,
+    repayment: str = "",
+    claim_at: str | None = None,
 ) -> str:
     """Render the per-item brief delivered to the phase graph.
 
@@ -175,6 +193,9 @@ def render_goal(
     is not a recovery launch has no placement to narrate — and that default is
     also why the call site's own keyword is bound by a test: an omission here
     renders the plain brief and says nothing about the section it dropped.
+
+    `repayment` is the marker-removal section an incident's normal repayment
+    dispatch carries (`_dispatcher_goal_repayment`), empty for every other item.
 
     THE GOVERNING-HEADING VERDICT IS READ OUT OF `comments`, not taken again.
     The `dod_gate` node's check 6 reads it instead of searching the scenario
@@ -241,12 +262,12 @@ def render_goal(
     # agent is already standing on: a brief that names it after the standing
     # guidance has the agent read the whole brief before learning that its
     # working tree is somebody else's unfinished work.
-    body = base + interrupted_attempt_section(attempt=interrupted)
+    body = base + interrupted_attempt_section(attempt=interrupted) + repayment
     if lessons:
         body += (
             "\nRatified lessons (human-merged via loop-reflection-gate/"
             "lessons.md; treat as standing guidance for this dispatch):\n"
-            f"{lessons}\n"
+            f"{rewrite_minijinja_openers_for_goal(text=lessons)}\n"
         )
     # Escape AFTER assembly so EVERY interpolated field (title, description,
     # lessons, comments, repo path) is neutralized in one place: the whole
@@ -256,7 +277,8 @@ def render_goal(
     # receipts. An item whose comments are ALL receipts renders no section at
     # all, exactly as one with no comment does: a heading with nothing under it
     # would tell the node riders exist.
-    riders = tuple(comment for comment in comments if not is_receipt_comment(body=comment.text))
+    bounded = bound_riders(comments=comments, claim_at=claim_at)
+    riders = bounded.carried
     # The governing-heading verdict rides AFTER the riders for the same reason
     # the recovery placement rides before them: a rider is part of the brief the
     # verdict was taken about, so a block standing ahead of them would describe
@@ -266,17 +288,19 @@ def render_goal(
     # judgement nobody took — the first forecloses its finding and the second
     # leaves it its own search.
     bodies = tuple(comment.text for comment in comments)
+    governing = reusable_governing_heading_verdict(item=item, repo=repo, comments=bodies)
     # A standing human attestation is the verdict when one exists: the `dod_gate`
     # node "MUST use the attested `stated` verdict", and the receipt the pre-dispatch
     # taking recorded may predate the attestation.
     attested = attested_governing_heading(item=item, repo=repo, comments=bodies)
-    verdict_block = (
-        "\n"
-        + governing_heading_block(
-            verdict=recorded_governing_heading(comments=bodies) if attested is None else attested
-        )
-        + "\n"
+    verdict = (
+        governing
+        if governing is not None
+        else recorded_governing_heading(comments=bodies)
+        if attested is None
+        else attested
     )
+    verdict_block = "\n" + governing_heading_block(verdict=verdict) + "\n"
     # The SPEC IDENTITY the pre-dispatch taking used rides beside the verdict it
     # was derived from, so the run's `dod_gate` node compares on the taking's own
     # digest. A run whose item records none is supplied none and falls back on the
@@ -284,17 +308,26 @@ def render_goal(
     supplied = recorded_spec_identity(comments=bodies)
     if supplied is not None:
         verdict_block += "\n" + spec_identity_block(identity=supplied) + "\n"
-    if not riders:
+    # THE JUDGEMENT SUBJECT IS NOT APPENDED HERE (bd-ib-tzvtgc). Fabro injects this
+    # goal into EVERY ACP node, and only `dod_gate` grades the subject, so
+    # appending it made each request of each node carry the item's referenced
+    # spec sections (bd-ib-qshcwc: 24,910 to 136,040 characters). The node reads
+    # the same subject from the file `_dispatcher_dod_gate_subject` materializes.
+    if not riders and bounded.left_out == 0:
         return escape_minijinja_literal(text=body + verdict_block)
     lines = [
         "",
         "Ledger comments (operator riders appended after filing; treat them as part of the brief):",
     ]
+    if bounded.left_out:
+        lines.append(left_out_line(item_id=item.id, riders=bounded))
     # Numbered over the RIDERS rather than over the comments, so the brief
     # carries no gap where a receipt was dropped — a gap reads as a comment the
     # renderer lost rather than one it deliberately omitted.
     for index, comment in enumerate(riders, start=1):
-        lines.append(f"[{index}] {_comment_entry(comment=comment)}")
+        lines.append(
+            f"[{index}] {rewrite_minijinja_openers_for_goal(text=_comment_entry(comment=comment))}"
+        )
     return escape_minijinja_literal(text=body + "\n".join(lines) + "\n" + verdict_block)
 
 
@@ -331,9 +364,3 @@ def _comment_entry(*, comment: WorkItemComment) -> str:
     if provenance == "":
         return comment.text
     return f"({provenance}) {comment.text}"
-
-
-def _comment_source(*, index: int, comment: WorkItemComment) -> str:
-    label = comment.comment_id or f"#{index}"
-    created = "" if comment.created_at is None else f" created {comment.created_at}"
-    return f"ledger comment {label}{created}"

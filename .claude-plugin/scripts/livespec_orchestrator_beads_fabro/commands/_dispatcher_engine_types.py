@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,15 +13,24 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_base_advance import 
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_hook_over_limit import HookOverLimit
 from livespec_orchestrator_beads_fabro.commands._dispatcher_hook_verdict import HookVerdict
+from livespec_orchestrator_beads_fabro.commands._dispatcher_merge_wait_handoff import (
+    MergeWaitHandedOff,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_merged_reconcile import MergedReconcile
 from livespec_orchestrator_beads_fabro.commands._dispatcher_node_timeout_cut import NodeTimeoutCut
 from livespec_orchestrator_beads_fabro.commands._dispatcher_provider_limit_classify import (
     ProviderLimitRelease,
     ReclassifiedTurn,
 )
+from livespec_orchestrator_beads_fabro.commands._fabro_resource_exhaustion import (
+    SandboxTermination,
+)
 
 if TYPE_CHECKING:
     from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import DispatchPlan
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_run_watch_decision import (
+        RunWatchState,
+    )
 
 __all__: list[str] = [
     "CommandResult",
@@ -72,6 +82,7 @@ class FabroRunResult:
     budget_exceeded_run_id: str | None = None
     abandoned_run_id: str | None = None
     abandoned_item_status: str | None = None
+    run_watch_state: RunWatchState | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -178,6 +189,11 @@ class DispatchOutcome:
     needs_human_stages: tuple[str, ...] | None = None
     needs_human_reason: str | None = None
     needs_human_preservation: str | None = None
+    # The run conclusion's final checkpoint commit, when the engine recorded
+    # one.  A sandbox-acquire failure happens after that checkpoint but before
+    # another node can start, so the durable cause record needs this immutable
+    # seed without re-reading a run the factory may already have pruned.
+    final_git_commit_sha: str | None = None
     hook_over_limit: HookOverLimit | None = None
     # The node-timeout cut this needs-human ending is, with the commit runs the cut
     # turn had started and their states when preservation began (Scenario 192,
@@ -191,6 +207,11 @@ class DispatchOutcome:
     # account of it", bd-ib-k3nmbi).
     hook_verdict: HookVerdict | None = None
     base_advanced: BaseAdvancedAfterArming | None = None
+    # The handoff a merge wait took when its poll budget ended on an armed pull
+    # request whose required checks were passing or still running. Carried on the
+    # outcome for the reason `base_advanced` beside it is: the ledger comment is
+    # written by the post-run disposition, long after the poll that measured it.
+    merge_wait_handed_off: MergeWaitHandedOff | None = None
     # The provider-limit release this terminal owes, decided ONCE by the
     # terminal mapper and read from here by the disposition that performs it.
     # It rides the outcome for the reason `hook_over_limit` beside it does: the
@@ -208,6 +229,12 @@ class DispatchOutcome:
     # acceptance pass needs the merged head, and a record of what the ending
     # proved cannot be recovered from the pull request alone.
     merged_reconcile: MergedReconcile | None = None
+    already_satisfied_base: str | None = None
+    # What the sandbox provider reported about how the run's container ended
+    # (Scenario 335): an OOM kill naming the run id and the memory limit, or the
+    # statement that the termination was unobservable. None on every outcome that
+    # read no report, which is every outcome of a run that did not fail.
+    sandbox_termination: SandboxTermination | None = None
 
 
 SleepFn = Callable[[float], None]
@@ -249,10 +276,16 @@ class CommandRunner(Protocol):
 
 @dataclass(frozen=True, kw_only=True)
 class PollPolicy:
-    """Bounded merge-confirmation polling (an unbounded loop is a defect)."""
+    """Bounded merge-confirmation polling (an unbounded loop is a defect).
+
+    `clock` is the monotonic reading the wait measures the seconds it spent on, so
+    a handoff can state them; it is a field rather than a module call so a test
+    can supply a deterministic one.
+    """
 
     attempts: int
     interval_seconds: float
+    clock: Callable[[], float] = time.monotonic
 
 
 class FabroLauncher(Protocol):

@@ -44,12 +44,24 @@ if [[ "$(git config --get --bool livespec.sandboxExempt || printf 'false')" == t
     echo ":: the dispatch-time master-CI preflight governs whether a run may start against a red master"
     sandbox_skips+=(check-master-ci-green)
 fi
+# Inside the delegated gate Job this script IS the Job's gate, and the shared
+# client exports into `SKIP_TARGETS` the members that read authority held
+# outside the tree (the work-items ledger, the forge's settings), running them
+# on the committing host instead. Dropping the variable here ran
+# `check-no-workflow-edits` in a pod holding no credential, where it failed
+# closed on every tree carrying an approved workflow edit (gate Jobs of
+# bd-ib-oxx6eo, 2026-11-08). The pre-push script reads it the same way. Unset,
+# nothing extra is skipped.
+read -ra delegated_skip_targets <<< "${SKIP_TARGETS:-}"
 
 staged=$(git diff --cached --name-only --diff-filter=AM)
 py_staged=$(echo "$staged" | grep -E '\.py$' || true)
 test_staged=$(echo "$staged" | grep -E '^tests/.*\.py$' || true)
 impl_staged=$(echo "$staged" | grep -E '^(\.claude-plugin/scripts/|dev-tooling/checks/).*\.py$' || true)
 green_amend_staged=$(echo "$py_staged" | grep -Ev '^tests/' || true)
+workflow_fabro_staged=$(echo "$staged" | grep -E '^\.claude-plugin/\.fabro/workflows/[^/]+/workflow\.fabro$' || true)
+pre_commit_hook_staged=$(echo "$staged" | grep -E '^dev-tooling/just-check-pre-commit\.sh$' || true)
+green_amend_staged=$(printf '%s\n%s\n%s\n' "$green_amend_staged" "$workflow_fabro_staged" "$pre_commit_hook_staged" | sed '/^$/d')
 test_count=0
 impl_count=0
 [[ -n "$test_staged" ]] && test_count=$(echo "$test_staged" | wc -l)
@@ -57,7 +69,18 @@ impl_count=0
 head_msg=$(git log -1 --format=%B 2>/dev/null || true)
 red_test_staged=$(git diff-tree --no-commit-id --name-only --diff-filter=AM -r HEAD -- tests/ \
     | grep -E '^tests/.*\.py$' || true)
-if [[ -n "$green_amend_staged" ]] \
+# A merge in progress is neither a Red nor a Green-amend: whatever HEAD's
+# trailers say, its staged tree is the merged tree. red_green_replay routes a
+# MERGE_HEAD commit to its suite-green leg, which reuses only the full
+# aggregate's same-tree evidence, and the Green-amend and Red-mode branches
+# below write none. So a merge staging `.py` skips them and reaches the
+# evidence-writing aggregate; a merge staging no `.py` stays on the doc-only path.
+merge_in_progress=false
+if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+    merge_in_progress=true
+fi
+if [[ "$merge_in_progress" == false ]] \
+    && [[ -n "$green_amend_staged" ]] \
     && [[ -n "$red_test_staged" ]] \
     && grep -q 'TDD-Red-Test-File-Checksum:' <<<"$head_msg" \
     && ! grep -q 'TDD-Green-Verified-At:' <<<"$head_msg"; then
@@ -72,7 +95,7 @@ if [[ -n "$green_amend_staged" ]] \
     fi
     echo ":: staged pre-check and staged tests passed; running the gate once"
     echo ":: skipping no-arg check-red-green-replay and same-repo live TUI picker gate"
-    if ! just check-skipping check-red-green-replay check-codex-skill-picker "${sandbox_skips[@]}"; then
+    if ! just check-skipping check-red-green-replay check-codex-skill-picker "${sandbox_skips[@]}" "${delegated_skip_targets[@]}"; then
         echo ":: gate phase refused the commit" >&2
         exit 1
     fi
@@ -84,7 +107,7 @@ if [[ -z "$py_staged" ]]; then
     just check-pre-commit-doc-only
     exit $?
 fi
-if [[ "$test_count" -eq 1 ]] && [[ "$impl_count" -eq 0 ]]; then
+if [[ "$merge_in_progress" == false ]] && [[ "$test_count" -eq 1 ]] && [[ "$impl_count" -eq 0 ]]; then
     echo ":: Red-mode shape detected: $test_staged"
     echo ":: skipping coverage gates and same-repo live TUI picker gate in pre-commit"
     # check-check-coverage-incremental belongs in this skip list even though it
@@ -100,16 +123,35 @@ if [[ "$test_count" -eq 1 ]] && [[ "$impl_count" -eq 0 ]]; then
         check-per-file-coverage \
         check-check-coverage-incremental \
         check-codex-skill-picker \
-        "${sandbox_skips[@]}"
+        "${sandbox_skips[@]}" "${delegated_skip_targets[@]}"
     exit $?
 fi
-if [[ "$impl_count" -ge 1 ]] \
+if [[ "$merge_in_progress" == false ]] \
+    && [[ "$impl_count" -ge 1 ]] \
     && grep -q 'TDD-Red-Test-File-Checksum:' <<<"$head_msg" \
     && ! grep -q 'TDD-Green-Verified-At:' <<<"$head_msg"; then
     echo ":: Green-amend shape detected (impl staged; HEAD carries Red-only trailers)"
     echo ":: skipping no-arg check-red-green-replay and same-repo live TUI picker gate"
-    just check-skipping check-red-green-replay check-codex-skill-picker "${sandbox_skips[@]}"
+    just check-skipping check-red-green-replay check-codex-skill-picker "${sandbox_skips[@]}" "${delegated_skip_targets[@]}"
     exit $?
 fi
 echo ":: pre-push: skipping same-repo live TUI picker gate; run just check-codex-skill-picker explicitly for live Codex picker acceptance"
-just check-skipping check-codex-skill-picker "${sandbox_skips[@]}"
+aggregate_log=$(mktemp "$(git rev-parse --git-path livespec-pre-commit-aggregate.XXXXXX)")
+staged_tree=$(git write-tree)
+set +e
+just check-skipping check-codex-skill-picker "${sandbox_skips[@]}" "${delegated_skip_targets[@]}" 2>&1 | tee "$aggregate_log"
+aggregate_status=${PIPESTATUS[0]}
+set -e
+# The local aggregate reads the working tree, so it can certify the staged tree
+# only when both trees are identical and no untracked file could have affected
+# its result. Capture the staged tree before the aggregate and confirm it again
+# afterwards so an index mutation cannot receive evidence for an untested tree.
+if [[ "$aggregate_status" -eq 0 ]] && git diff --quiet \
+    && [[ -z "$(git ls-files --others --exclude-standard)" ]] \
+    && [[ "$(git write-tree)" == "$staged_tree" ]]; then
+    run_id="pre-commit-aggregate:$(date -u +%Y%m%dT%H%M%SZ):${staged_tree}"
+    output_checksum="sha256:$(sha256sum "$aggregate_log" | awk '{print $1}')"
+    uv run python -m livespec_dev_tooling.green_token write-pre-commit "$run_id" "$output_checksum"
+fi
+rm -f "$aggregate_log"
+exit "$aggregate_status"

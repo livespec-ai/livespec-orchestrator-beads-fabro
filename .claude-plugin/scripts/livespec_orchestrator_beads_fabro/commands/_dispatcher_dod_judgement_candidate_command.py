@@ -17,6 +17,12 @@ from typing import TYPE_CHECKING, cast
 from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential import (
     CLAUDE_OAUTH_TOKEN_ENV,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential_policy import (
+    ClaudeCredentialRefusal,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_candidate_attempt import (
+    CandidateAttempt,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_prompt import (
     judgement_argv,
     resolve_judge_path,
@@ -32,13 +38,17 @@ if TYPE_CHECKING:
     from livespec_orchestrator_beads_fabro.commands._acp_candidate_schema import AcpCandidate
 
 __all__: list[str] = [
+    "caller_environ",
     "candidate_command",
     "candidate_label",
     "candidate_model",
+    "claude_judge_token",
     "is_codex_candidate",
 ]
 
 _CODEX_AGENT = "codex-acp"
+# The exit code recorded for a judge the chain never started.
+_EXIT_NOT_STARTED = -1
 _CODEX_SANDBOX_SETTINGS = frozenset({"sandbox_mode", "approval_policy"})
 _CLAUDE_AGENT = "claude-acp"
 _CODEX_ISOLATION_SETTINGS = (
@@ -49,10 +59,51 @@ _CODEX_ISOLATION_SETTINGS = (
 )
 
 
-def candidate_command(
+def caller_environ(*, caller: str | None, environ: dict[str, str]) -> dict[str, str]:
+    """Append the launching judgement's caller label when one is supplied."""
+    if caller is None:
+        return environ
+    label = f"livespec.caller={caller}"
+    inherited = environ.get("OTEL_RESOURCE_ATTRIBUTES")
+    return {
+        **environ,
+        "OTEL_RESOURCE_ATTRIBUTES": label if inherited is None else f"{inherited},{label}",
+    }
+
+
+def claude_judge_token(
+    *, candidate: AcpCandidate, repo: Path, environ: dict[str, str]
+) -> str | CandidateAttempt:
+    """The Claude token this candidate's judge authenticates with, or its not-started attempt.
+
+    The empty token for a candidate that is not Claude's, which needs no Claude
+    credential and so never acquires the policy's requirement. The policy is read
+    from the governed repository under the same selector every dispatch consumer
+    uses; a refusal is the attempt the chain records without starting the judge.
+    """
+    if candidate.agent_id != _CLAUDE_AGENT:
+        return ""
+    choice = select_factory_credential(
+        repo=repo,
+        environ=environ,
+        home=Path(environ.get("HOME", str(Path.home()))),
+        warn=lambda message: sys.stderr.write(f"{message}\n"),
+    )
+    if isinstance(choice, ClaudeCredentialRefusal):
+        return CandidateAttempt(
+            agent=_CLAUDE_AGENT,
+            model=candidate_model(candidate=candidate),
+            exit_code=_EXIT_NOT_STARTED,
+            outcome=choice.cause,
+        )
+    return environ.get(choice.env_name, "")
+
+
+def candidate_command(  # noqa: PLR0913 - each argument is an independent seam input.
     *,
     candidate: AcpCandidate,
     environ: dict[str, str],
+    claude_token: str,
     bound_input: bool,
     journal_spend: bool,
     journal_name: str,
@@ -98,13 +149,9 @@ def candidate_command(
         argv.append("--skip-git-repo-check")
         return argv, judge_environ
     if candidate.agent_id == _CLAUDE_AGENT:
+        judge_environ["DISABLE_PROMPT_CACHING"] = "1"
         model = candidate.adapter.env.get("ANTHROPIC_MODEL", "")
-        credential = select_factory_credential(
-            environ=environ,
-            home=Path(environ.get("HOME", str(Path.home()))),
-            warn=lambda message: sys.stderr.write(f"{message}\n"),
-        )
-        judge_environ[CLAUDE_OAUTH_TOKEN_ENV] = environ.get(credential.env_name, "")
+        judge_environ[CLAUDE_OAUTH_TOKEN_ENV] = claude_token
         argv = judgement_argv(
             judge_path=resolve_judge_path(environ=environ),
             model=model,

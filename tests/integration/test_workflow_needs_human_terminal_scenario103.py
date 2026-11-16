@@ -101,8 +101,9 @@ def test_the_preservation_ref_carries_no_placeholder_default() -> None:
     """No placeholder fallback, on the stdin source the engine supplies."""
     script = _preservation_script()
 
-    assert "read -r run_id" in script
-    assert f'ref="{_REF_PREFIX}$run_id"' in script
+    assert "read -r engine_run_id" in script
+    assert f'ref="{_REF_PREFIX}$preservation_id"' in script
+    assert "refs/heads/fabro/run/$engine_run_id" in script
     assert "unknown-run" not in script
     # NO `:-` default survives anywhere: every one would be a placeholder every
     # run would share. The two `:?` forms are required-variable assertions, which
@@ -142,11 +143,16 @@ def test_every_other_former_gate_edge_targets_needs_human() -> None:
     for source in _DIRECT_NEEDS_HUMAN_SOURCES:
         assert any(re.match(rf"^{source}\s*->\s*needs_human\b", line) for line in lines), source
     assert (
-        'implement -> implement_amendment_route [label="Blocked", condition="outcome=failed"]'
+        'red -> implement_amendment_route [label="Definition-of-Done amendment", condition="outcome=failed"]'
         in lines
     )
     assert (
         'implement_amendment_route -> needs_human [label="Definition-of-Done amendment", condition="outcome=failed"]'
+        in lines
+    )
+    assert 'green -> green_amendment_route [label="Blocked", condition="outcome=failed"]' in lines
+    assert (
+        'green_amendment_route -> needs_human [label="Definition-of-Done amendment", condition="outcome=failed"]'
         in lines
     )
     assert 'review -> needs_human [label="unmatched review outcome"]' in lines
@@ -222,6 +228,12 @@ def _sandbox(*, tmp_path: Path) -> tuple[Path, Path]:
     _git(work, "add", "seed.txt")
     _git(work, "commit", "--quiet", "-m", "seed")
     _git(work, "remote", "add", "origin", str(origin))
+    # The node preserves the engine-named run branch's tip, so the fixture sits on
+    # one carrying settled work ahead of the default branch.
+    _git(work, "switch", "--quiet", "-c", f"fabro/run/{_RUN_ID}")
+    (work / "run-work.txt").write_text("the run's settled work\n", encoding="utf-8")
+    _git(work, "add", "run-work.txt")
+    _git(work, "commit", "--quiet", "-m", "settled run work")
     (work / "in-progress.txt").write_text("the tree the node must preserve\n", encoding="utf-8")
     return work, origin
 
@@ -289,7 +301,7 @@ def _plan(*, tmp_path: Path) -> DispatchPlan:
         janitor=("just", "check"),
         janitor_checkout=tmp_path / ".janitor",
         janitor_core_checkout=tmp_path / ".janitor" / ".livespec-core",
-        janitor_core_repo_url="https://github.com/thewoolleyman/livespec.git",
+        janitor_core_repo_url="https://github.com/livespec-ai/livespec.git",
         janitor_core_ref="master",
         review_fix_visit_cap=3,
         merge_on_review_cap_outcome="succeeded",

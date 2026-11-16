@@ -27,20 +27,19 @@ from livespec_orchestrator_beads_fabro.commands import (
     _dispatcher_self_update as selfup,
 )
 from livespec_orchestrator_beads_fabro.commands._acp_preflight_verdict import AcpPreflightVerdict
-from livespec_orchestrator_beads_fabro.commands._config import FactoryTarget
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dispatch_id_journal import (
     DispatchJournalIdentity,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dispatch_lock import (
-    dispatch_lock_path,
-    live_dispatch_lock,
     release_dispatch_lock,
-    write_dispatch_lock,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
     DispatchOutcome,
     run_dispatch,
     run_fabro_factory_auth_login,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_goal_repayment import (
+    repayment_goal_for,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import (
     JournalFile,
@@ -67,7 +66,8 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_loop_run import (
     DispatchLaunchContext,
     DispatchLifetime,
     DispatchRunContext,
-    dispatch_id_for_launch,
+    dispatch_factory_name,
+    dispatch_lock_for,
     run_dispatch_with_watchdog,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_loop_selection import (
@@ -87,6 +87,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_pre_run_claim import
 from livespec_orchestrator_beads_fabro.commands._dispatcher_prelaunch_cpu import PrelaunchCpuProfile
 from livespec_orchestrator_beads_fabro.commands._dispatcher_review_gate import (
     emit_review_gate_from_fabro_events,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_rider_bound import (
+    prior_claim_instant,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_secret_vault import (
     fabro_vault_sink_for_plan,
@@ -118,19 +121,10 @@ def dispatch_one(
     configured primary, which is the contract's additive guarantee.
     """
     resolved_launch = launch or DispatchLaunchContext()
-    raw_factory_target = getattr(args, "fabro_factory_target", None)
-    dispatch_factory = (
-        raw_factory_target.name if isinstance(raw_factory_target, FactoryTarget) else None
+    dispatch_factory = dispatch_factory_name(args=args)
+    dispatch_id, lock_path = dispatch_lock_for(
+        repo=repo, work_item_id=item.id, context=resolved_launch, mint_id=run_id
     )
-    if not isinstance(raw_factory_target, FactoryTarget):
-        args.fabro_factory_target = FactoryTarget(name="default", server=None, dev_token=None)
-    lock = live_dispatch_lock(repo=repo, work_item_id=item.id)
-    if lock is None or lock.dispatch_id is None:
-        dispatch_id = dispatch_id_for_launch(context=resolved_launch, mint_id=run_id)
-        lock_path = write_dispatch_lock(repo=repo, work_item_id=item.id, dispatch_id=dispatch_id)
-    else:
-        dispatch_id = lock.dispatch_id
-        lock_path = dispatch_lock_path(repo=repo, work_item_id=item.id)
     with ExitStack() as stack:
         _ = stack.callback(lambda: release_dispatch_lock(path=lock_path))
         outcome = _dispatch_one_locked(
@@ -146,6 +140,7 @@ def dispatch_one(
                     dispatch_factory=dispatch_factory,
                 ),
                 cleanup=stack,
+                resume=resolved_launch.resume,
             ),
             prelaunch_profile=resolved_launch.prelaunch_profile,
         )
@@ -276,6 +271,12 @@ def _dispatch_one_locked(  # noqa: PLR0913 — kw-only dispatch inputs; `verdict
             # is the namespace `recovery_launch_args` pinned the route onto — never a
             # wave-shared one, for the reason the clause forbids route state there.
             interrupted=interrupted_attempt_for(args=args),
+            repayment=repayment_goal_for(repo=repo, item_id=item.id),
+            claim_at=prior_claim_instant(
+                journal_path=journal.path,
+                item_id=item.id,
+                own_dispatch_id=identity.dispatch_id,
+            ),
         )
         _ = goal_file.write_text(goal_text, encoding="utf-8")
     started_at, outcome = run_dispatch_with_watchdog(
@@ -311,6 +312,6 @@ def _dispatch_one_locked(  # noqa: PLR0913 — kw-only dispatch inputs; `verdict
         token_supplier=token_supplier,
         identity=identity,
         spans=spans_path(args=args, repo=repo),
-        dispose=post_run_dispositions,
+        dispose=partial(post_run_dispositions, resume=lifetime.resume),
         emit_review=emit_review_gate_from_fabro_events,
     )

@@ -67,13 +67,13 @@
   "libraries": [
     {
       "name": "livespec_runtime",
-      "upstream_url": "https://github.com/thewoolleyman/livespec-runtime",
-      "upstream_ref": "v0.29.1",
-      "vendored_at": "2026-10-25T19:22:29Z"
+      "upstream_url": "https://github.com/livespec-ai/livespec-runtime",
+      "upstream_ref": "v0.31.1",
+      "vendored_at": "2026-11-16T06:04:31Z"
     },
     {
       "name": "livespec_spec_clauses",
-      "upstream_url": "https://github.com/thewoolleyman/livespec",
+      "upstream_url": "https://github.com/livespec-ai/livespec",
       "upstream_ref": "b3ac52b:dev-tooling/spec_clauses.py",
       "vendored_at": "2026-06-19T18:50:00Z"
     },
@@ -85,7 +85,7 @@
     },
     {
       "name": "returns",
-      "upstream_url": "https://github.com/thewoolleyman/livespec",
+      "upstream_url": "https://github.com/livespec-ai/livespec",
       "upstream_ref": "e2cdeea:.claude-plugin/scripts/_vendor/returns",
       "vendored_at": "2026-07-16T09:36:00Z"
     },

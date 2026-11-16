@@ -137,7 +137,14 @@ Current checks:
   instead of asking the engine. It reads the SAME payload set the two other
   payload gates read (`_checked_workflow_payloads.py`), then globs those
   directories' parents for a `workflow.fabro` the enumeration does not name, so
-  an unregistered sibling graph is a finding rather than an unvalidated file. Its
+  an unregistered sibling graph is a finding rather than an unvalidated file. It
+  also carries a REACHABILITY leg that needs no engine binary
+  (`_fabro_graph_reachability.py`, work-item bd-ib-vvzd3v): for EVERY
+  `.claude-plugin/.fabro/workflows/*/workflow*.fabro` it walks the edges from the
+  graph's `shape=Mdiamond` start node and names each node it cannot reach, so the
+  engine's `attractor.unreachable_node` refusal is caught in a sandbox and in CI
+  where `fabro validate` cannot run. v0.329.0 shipped two such nodes and every
+  implement dispatch was refused at `fabro run`. Its
   matcher control is a MUTANT OF THE REAL GRAPH rather than a hand-authored
   fixture: for each graph it makes one node's single unconditional edge
   conditional — the exact shape both outages had — and requires the engine to
@@ -152,11 +159,11 @@ Current checks:
   harden it. The absence is never silent: one error-level record per graph not
   looked at, plus a summary saying so. `fail_when_fabro_absent` makes that
   absence fatal; CI sets it on the metadata batch after installing the pinned,
-  checksum-verified UPSTREAM fabro 0.254.0 release, and a value outside that
+  checksum-verified UPSTREAM Petri-era fabro 0.408.0-nightly.0 release, and a value outside that
   closed space is a failure, never a fallback. Every validation runs in a
   scratch COPY of the payload whose `workflow.toml` loses exactly the keys
   `FORK_ONLY_SETTINGS` names (today `run.checkpoint.commit_timeout`, fork PR
-  #552, which upstream 0.254.0 cannot parse and then drops the whole settings
+  #552, which upstream 0.408.0-nightly.0 cannot parse and then drops the whole settings
   file over). A settings control requires the copy to equal the original minus
   those keys, and each stripped key is logged, so CI's normalization is
   reported rather than invisible; a new fork-only key makes the upstream engine

@@ -305,6 +305,8 @@ truth for the scrub policy.
   — the reflector READ path via `mcp.honeycomb.io`.
 - Keys live in the livespec 1Password Environment; probe-only, never
   committed.
+
+The preceding 1Password store decision is historical. Parameter Store is the canonical source for these declared Honeycomb names, written first; callers use the unchanged wrapper interface throughout staged migration. This does not claim deployed SSM reader bindings or a converted wrapper.
 - **WIRE-UP CAVEAT to verify once telemetry flows**: confirm the
   reflector key queries the livespec env via `mcp.honeycomb.io`
   (Intelligence ON; `queries:false` limits only the classic Query Data

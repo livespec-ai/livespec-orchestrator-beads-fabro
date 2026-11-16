@@ -23,7 +23,7 @@ parked on NEEDS_ATTENTION.
 THE PAYLOADS ARE COMMITTED, NOT FETCHED, for the reason the sibling attribution
 module records: a test that fetched them live would depend on the forge and would
 stop being a test of this repository. Each is the verbatim
-`gh api repos/thewoolleyman/livespec-orchestrator-beads-fabro/issues/<n>/comments`
+`gh api repos/livespec-ai/livespec-orchestrator-beads-fabro/issues/<n>/comments`
 answer, reshaped only into the `{"comments": [...]}` envelope `gh pr view --json
 comments` returns — which is the argv the pass actually runs. No field was edited.
 
@@ -84,11 +84,11 @@ _HEADING = re.compile(r"^#{1,6}\s")
 _PR_2561 = 2561
 _DISPATCH_ID_2561 = "6a9a2d129e934e74987b8a9203ff6a5d"
 _VERIFIED_RECORD_URL_2561 = (
-    "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/pull/2561"
+    "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/pull/2561"
     "#issuecomment-5979532725"
 )
 _NOT_REPRODUCED_RECORD_URL_2561 = (
-    "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/pull/2561"
+    "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/pull/2561"
     "#issuecomment-5979222402"
 )
 # `bd-ib-2s3kkq`'s four Definition-of-Done assertions, transcribed from the
@@ -117,7 +117,7 @@ _PR_2538 = 2538
 _FABRO_RUN_ID_2538 = "01M3WH8Z10278S5V4SV9WRYW20"
 _DISPATCH_ID_2538 = "f195238b76b942698485a780611fe1ef"
 _VERIFIED_RECORD_URL_2538 = (
-    "https://github.com/thewoolleyman/livespec-orchestrator-beads-fabro/pull/2538"
+    "https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/pull/2538"
     "#issuecomment-5940752598"
 )
 _ASSERTIONS_2538 = (

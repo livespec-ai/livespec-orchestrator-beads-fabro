@@ -86,6 +86,17 @@ tmux capture-pane -p -t "$WORKER_TARGET" | tail -8 \
   && echo "PICKER OPEN - do not paste" || true
 ```
 
+**Prefer `SendMessage` for a Claude worker (maintainer ruling 2026-11-14).**
+Send a Claude worker its instructions with `SendMessage` (across machines via
+Remote Control), per the fleet's distributed SendMessage protocol
+(https://github.com/livespec-ai/livespec-dev-tooling/blob/master/%2Eai/distributed-sendmessage-protocol.md),
+because text typed into its pane can interrupt the maintainer. Typing into a
+pane is still allowed and nothing blocks it; use it when necessary, such as
+for a slash command, a picker, a session `SendMessage` cannot reach, or a
+Codex or pi worker. When you do type, use the recipes below, or
+`herdr pane send-text <pane> "<text>"` followed by a separate
+`herdr pane send-keys <pane> Enter` with the same verify-before-Enter rule.
+
 For a short instruction, send text, verify it landed, and send Enter
 separately:
 

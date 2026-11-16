@@ -58,9 +58,6 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_carry_forward_progra
     carry_forward_program_source,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dot_graph import parse_dot_graph
-from livespec_orchestrator_beads_fabro.commands._dispatcher_plugin_cache_gate import (
-    plugin_cache_gate_prepare_step,
-)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_publication_push import (
     PUBLICATION_PUSH_PROGRAM_FILENAME,
     publication_push_program_source,
@@ -80,7 +77,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_plugins impo
     SANDBOX_CLAUDE_PLUGINS_ROOT_ENV_VAR,
 )
 
-from tests.prepare_step_support import runnable_script
+from tests.prepare_step_support import plugin_gate_installer_script
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GRAPH_PATH = (
@@ -250,7 +247,8 @@ def _advance_default(*, world: _World, path: str = _SHARED_FILE, text: str = "mo
     the stage's own fetch, which is the state a real dispatch is in when the
     default branch advances underneath it.
     """
-    mover = world.clone.parent / f"mover-{path.replace(chr(47), chr(45))}"
+    mover_name = "-".join((path.replace(chr(47), chr(45)), text.strip().replace(" ", "-")))
+    mover = world.clone.parent / f"mover-{mover_name}"
     _ = _git("clone", "--quiet", str(world.origin), str(mover), cwd=world.clone.parent)
     advanced = _commit(cwd=mover, path=path, text=text, subject=f"feat: advance {path}")
     _ = _git("push", "--quiet", "origin", f"HEAD:refs/heads/{_DEFAULT_BRANCH}", cwd=mover)
@@ -269,8 +267,10 @@ def _node_script(*, node: str, check_suite: str) -> str:
     graph = parse_dot_graph(text=_GRAPH_PATH.read_text(encoding="utf-8"))
     assert not isinstance(graph, str), graph
     script: str = graph.nodes[node]["script"]
-    return script.replace("{{ inputs.default_branch }}", _DEFAULT_BRANCH).replace(
-        "{{ inputs.sandbox_check_suite }}", check_suite
+    return (
+        script.replace("{{ inputs.default_branch }}", _DEFAULT_BRANCH)
+        .replace("{{ inputs.sandbox_check_suite }}", check_suite)
+        .replace("{{ inputs.conformance_hook_install }}", "")
     )
 
 
@@ -342,6 +342,72 @@ def _published_empties(*, world: _World) -> list[str]:
         "merge-base", published, f"origin/{_DEFAULT_BRANCH}", cwd=world.clone
     ).stdout.strip()
     return _commits_that_started_empty(world=world, base=base, head=published)
+
+
+def test_a_first_publication_rewrites_checkpoint_and_merge_history_to_authored_commits(
+    tmp_path: Path,
+) -> None:
+    """Publication never offers engine or merge history to a rebase-merge pull request.
+
+    The Petri checkpoint commits are not reliably empty: stages that materialize
+    an artifact before their checkpoint give an engine subject a real diff. A
+    merge of the default branch is likewise not empty, so the older empty-only
+    rewrite leaves both shapes on the branch GitHub rebase-merges. This fixture
+    carries each shape and asks the real ``publish_draft`` script what it
+    actually pushes to a real origin.
+    """
+    world = _petri_run(root=tmp_path)
+    advanced = _advance_default(world=world)
+    _ = _git("fetch", "--quiet", "origin", _DEFAULT_BRANCH, cwd=world.clone)
+    _ = _git("merge", "--quiet", "--no-edit", f"origin/{_DEFAULT_BRANCH}", cwd=world.clone)
+    _ = _commit(
+        cwd=world.clone,
+        path="checkpoint.txt",
+        text="engine-owned stage artifact\n",
+        subject="fabro(run): proof_capture (succeeded)",
+    )
+    source_tree = _git("rev-parse", "HEAD^{tree}", cwd=world.clone).stdout.strip()
+
+    result = _run_publish_draft(world=world)
+
+    assert result.returncode == 0, result.stderr
+    published = world.remote_head(ref=_BRANCH)
+    base = _git("rev-parse", f"origin/{_DEFAULT_BRANCH}", cwd=world.clone).stdout.strip()
+    subjects = _git(
+        "log", "--format=%s", f"{base}..{published}", cwd=world.clone
+    ).stdout.splitlines()
+    parent_counts = _git(
+        "rev-list", "--parents", f"{base}..{published}", cwd=world.clone
+    ).stdout.splitlines()
+
+    assert all(not subject.startswith("fabro(") for subject in subjects)
+    assert all(len(line.split()) == 2 for line in parent_counts)
+    assert _git("rev-parse", f"{published}^{{tree}}", cwd=world.clone).stdout.strip() == source_tree
+    assert set(subjects) <= {"feat: the run's work"}
+    assert _git("merge-base", "--is-ancestor", advanced, published, cwd=world.clone).returncode == 0
+
+
+def test_a_first_publication_with_only_authored_commits_preserves_its_head(
+    tmp_path: Path,
+) -> None:
+    """A clean authored branch is pushed without the sanitizer rewriting it."""
+    world = _world(root=tmp_path)
+    _ = _commit(
+        cwd=world.clone,
+        path=_OWNED_FILE,
+        text="this run's work\n",
+        subject="feat: the run's work",
+    )
+    authored_head = world.head()
+    source_tree = _git("rev-parse", "HEAD^{tree}", cwd=world.clone).stdout.strip()
+
+    result = _run_publish_draft(world=world)
+
+    assert result.returncode == 0, result.stderr
+    assert world.head() == authored_head
+    published = world.remote_head(ref=_BRANCH)
+    assert published == authored_head
+    assert _git("rev-parse", f"{published}^{{tree}}", cwd=world.clone).stdout.strip() == source_tree
 
 
 def test_a_first_publication_drops_the_engine_s_empty_checkpoint_commits(
@@ -547,6 +613,51 @@ def test_a_review_fix_republish_drops_the_empties_above_the_published_tip(
     )
 
 
+def test_a_checkpoint_cleanup_preserves_merged_default_ancestry_for_a_later_refresh(
+    tmp_path: Path,
+) -> None:
+    """Drop the checkpoint without replaying the default branch as copied commits.
+
+    A published run receives the moved default branch through janitor's merge,
+    then an engine checkpoint.  The cleanup must retain the merged commits at
+    their original object identities: a later default-branch commit that edits
+    the same line can then merge through its real ancestry instead of
+    conflicting with a copied version of the earlier default commit.
+    """
+    world = _world(root=tmp_path)
+    _ = _commit(cwd=world.clone, path=_OWNED_FILE, text="run work\n", subject="feat: run work")
+    first = _run_publish_draft(world=world)
+    assert first.returncode == 0, first.stderr
+    published = world.remote_head(ref=_BRANCH)
+
+    default_original = _advance_default(world=world, path=_SHARED_FILE, text="default one\n")
+    default_companion = _advance_default(world=world, path="default.txt", text="default two\n")
+    _ = _git("fetch", "--quiet", "origin", _DEFAULT_BRANCH, cwd=world.clone)
+    _ = _git("merge", "--no-edit", f"origin/{_DEFAULT_BRANCH}", cwd=world.clone)
+    world.state_dir().mkdir(parents=True, exist_ok=True)
+    _ = (world.state_dir() / "livespec-janitor-passed-head").write_text(
+        f"{world.head()}\n", encoding="utf-8"
+    )
+    checkpoint = _checkpoint(cwd=world.clone, subject="fabro(run): janitor (succeeded)")
+
+    republished_result = _run_publish_draft(world=world)
+
+    assert republished_result.returncode == 0, republished_result.stderr
+    republished = world.remote_head(ref=_BRANCH)
+    assert _ancestor_of(world=world, earlier=published, later=republished)
+    assert _ancestor_of(world=world, earlier=default_original, later=republished)
+    assert _ancestor_of(world=world, earlier=default_companion, later=republished)
+    assert not _ancestor_of(world=world, earlier=checkpoint, later=republished)
+    assert _published_empties(world=world) == []
+
+    _ = (world.state_dir() / "livespec-janitor-passed-head").unlink()
+    rewritten_default = _advance_default(world=world, path=_SHARED_FILE, text="default rewritten\n")
+    refreshed = _run_publish_draft(world=world)
+
+    assert refreshed.returncode == 0, refreshed.stderr
+    assert _ancestor_of(world=world, earlier=rewritten_default, later=world.head())
+
+
 def _anchored_run(*, root: Path) -> tuple[_World, str]:
     """A run whose ALREADY-PUBLISHED tip itself carries empty checkpoint commits.
 
@@ -748,9 +859,7 @@ def _refresh_plugins_root(*, root: Path) -> Path:
     """
     plugins_root = _materialized_push_program(root=root)
     gate_script = root / "install-plugin-gate.sh"
-    _ = gate_script.write_text(
-        runnable_script(step=plugin_cache_gate_prepare_step()), encoding="utf-8"
-    )
+    _ = gate_script.write_text(plugin_gate_installer_script(), encoding="utf-8")
     _ = subprocess.run(
         ["bash", str(gate_script)],
         check=True,

@@ -22,8 +22,10 @@ _SERVICE_DIR = _REPO_ROOT / "orchestrator-image" / "services" / "reconcile-runs"
 _SERVICE = _SERVICE_DIR / "reconcile-runs.service"
 _TIMER = _SERVICE_DIR / "reconcile-runs.timer"
 _INSTALL = _SERVICE_DIR / "install.sh"
+_TENANT_WRAP_SOURCE = _SERVICE_DIR / "tenant-wrap.sh"
 
 _ENV_WRAPPER = "/usr/local/bin/with-livespec-env.sh"
+_TENANT_WRAP = "/usr/local/libexec/livespec-tenant-wrap.sh"
 
 
 def _exec_start(*, unit: Path) -> str:
@@ -36,17 +38,27 @@ def _exec_start(*, unit: Path) -> str:
     return lines[0]
 
 
-def test_the_committed_exec_start_names_the_env_wrapper_and_the_reconcile_runs_verb() -> None:
-    """Without the wrapper the timer runs `bd` with no tenant password."""
+def test_the_committed_exec_start_names_the_tenant_wrapper_and_the_reconcile_runs_verb() -> None:
+    """Without a credential wrapper the timer runs `bd` with no tenant password.
+
+    The wrapper is the tenant wrapper, which reads the tenant repository's
+    committed `credential_wrapper` at run time (bd-ib-ft426g), and which itself
+    runs inside the family wrapper.
+    """
     exec_start = _exec_start(unit=_SERVICE)
 
-    assert _ENV_WRAPPER in exec_start
     # The wrapper is the COMMAND, not an argument buried later: it is the first
     # token after `ExecStart=` and it is followed by the `--` separator, which
     # is what makes it wrap the dispatcher rather than merely be mentioned.
-    assert exec_start.startswith(f"ExecStart={_ENV_WRAPPER} -- ")
+    assert exec_start.startswith(f"ExecStart={_TENANT_WRAP} -- ")
     assert "scripts/bin/dispatcher.py reconcile-runs" in exec_start
     assert "--repo @PRIMARY_REPO@" in exec_start
+    family = [
+        line
+        for line in _TENANT_WRAP_SOURCE.read_text(encoding="utf-8").splitlines()
+        if line.startswith("family=")
+    ]
+    assert family == [f'family="${{TW_FAMILY_WRAPPER:-{_ENV_WRAPPER}}}"']
 
 
 def test_the_host_timer_surveys_only_the_live_factories() -> None:
@@ -64,13 +76,77 @@ def test_the_host_timer_surveys_only_the_live_factories() -> None:
     assert declared_factory_names(block=configured) == ("candidate", "petri")
 
 
-def test_the_timer_fires_every_ten_minutes_and_catches_up_after_downtime() -> None:
-    timer = _TIMER.read_text(encoding="utf-8")
+def test_the_timer_counts_its_interval_from_the_end_of_the_previous_pass() -> None:
+    """The interval is counted from the end of a pass, never from its start.
 
-    assert "OnUnitActiveSec=10min" in timer
+    Counted from the start, any pass as long as the interval was followed by
+    the next one with no gap, which is how passes ran back to back on
+    vmi3006760 on 2026-11-11. The interval and boot delay are operator values
+    carried by the unit; this test asserts only which settings are used.
+    """
+    timer = _TIMER.read_text(encoding="utf-8")
+    settings = [line for line in timer.splitlines() if not line.startswith("#")]
+
+    assert any(line.startswith("OnUnitInactiveSec=") for line in settings)
+    assert not any(line.startswith("OnUnitActiveSec=") for line in settings)
+    # OnUnitInactiveSec has no previous pass to count from after boot.
+    assert any(line.startswith("OnBootSec=") for line in settings)
     assert "Persistent=true" in timer
     assert "Unit=reconcile-runs.service" in timer
     assert "WantedBy=timers.target" in timer
+
+
+def _gigabytes(value: str) -> float:
+    units = {"K": 1 / 1024 / 1024, "M": 1 / 1024, "G": 1.0, "T": 1024.0}
+    return float(value[:-1]) * units[value[-1]]
+
+
+def test_a_pass_yields_cpu_and_is_reclaimed_and_only_backstopped_far_above_its_peak() -> None:
+    """A hard MemoryMax near the measured peak would OOM-kill every pass.
+
+    The backstop sits above the 4.7 GB measured max peak and above the 5G
+    reclaim watermark, so only a runaway pass reaches it.
+    """
+    settings = [
+        line
+        for line in _SERVICE.read_text(encoding="utf-8").splitlines()
+        if not line.startswith("#")
+    ]
+
+    cpu_weights = [
+        int(line.removeprefix("CPUWeight=")) for line in settings if line.startswith("CPUWeight=")
+    ]
+    # systemd's default CPUWeight is 100; a pass must weigh less than that.
+    assert len(cpu_weights) == 1
+    assert cpu_weights[0] < 100
+    highs = [
+        line.removeprefix("MemoryHigh=") for line in settings if line.startswith("MemoryHigh=")
+    ]
+    maxes = [line.removeprefix("MemoryMax=") for line in settings if line.startswith("MemoryMax=")]
+    assert len(highs) == 1
+    assert len(maxes) == 1
+    assert _gigabytes(maxes[0]) > _gigabytes(highs[0])
+    assert _gigabytes(maxes[0]) >= 8
+
+
+def test_the_committed_unit_is_the_single_source_of_every_host_side_bound() -> None:
+    """The unit carries all four bounds itself, and the timer cadence is untouched."""
+    settings = {
+        line.partition("=")[0]: line.partition("=")[2]
+        for line in _SERVICE.read_text(encoding="utf-8").splitlines()
+        if "=" in line and not line.startswith("#")
+    }
+
+    assert settings["CPUWeight"] == "20"
+    assert settings["IOWeight"] == "20"
+    assert settings["OOMScoreAdjust"] == "500"
+    assert settings["MemorySwapMax"] == "0"
+    timer = _TIMER.read_text(encoding="utf-8")
+    assert "OnUnitInactiveSec=10min" in timer
+    assert "OnBootSec=5min" in timer
+    assert "OnUnitActiveSec" not in "\n".join(
+        line for line in timer.splitlines() if not line.startswith("#")
+    )
 
 
 def test_the_installer_refuses_without_the_project_env_wrapper(tmp_path: Path) -> None:
@@ -95,7 +171,13 @@ def test_the_installer_renders_both_units_when_the_wrapper_resolves(tmp_path: Pa
     assert completed.returncode == 0, completed.stderr
     rendered = tmp_path / "units" / "reconcile-runs.service"
     exec_start = _exec_start(unit=rendered)
-    assert exec_start.startswith(f"ExecStart={wrapper} -- ")
+    tenant_wrap = tmp_path / "libexec" / "livespec-tenant-wrap.sh"
+    assert exec_start.startswith(f"ExecStart={tenant_wrap} -- ")
+    # The installed tenant wrapper runs inside the family wrapper this host has.
+    assert os.access(tenant_wrap, os.X_OK)
+    assert f'family="${{TW_FAMILY_WRAPPER:-{wrapper}}}"\n' in tenant_wrap.read_text(
+        encoding="utf-8"
+    )
     assert "reconcile-runs" in exec_start
     # Every placeholder is substituted: an unrendered token would make systemd
     # refuse the unit at load time, long after the operator has walked away.
@@ -148,6 +230,7 @@ def _run(
         env={
             **os.environ,
             "LIVESPEC_ENV_WRAPPER": env_wrapper,
+            "LIVESPEC_TENANT_WRAP": str(tmp_path / "libexec" / "livespec-tenant-wrap.sh"),
             "UNIT_DIR": str(tmp_path / "units"),
             "DRY_RUN": "1",
         },

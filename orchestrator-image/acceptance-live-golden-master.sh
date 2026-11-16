@@ -51,7 +51,7 @@
 # probes secret presence by byte count only.
 #
 # Required env (normally from the 1Password wrapper):
-#   /data/projects/1password-env-wrapper/with-livespec-env.sh -- \
+#   /usr/local/bin/with-livespec-env.sh -- \
 #     bash orchestrator-image/acceptance-live-golden-master.sh --run
 #
 #   LIVESPEC_E2E_GITHUB_TOKEN        org-scoped fine-grained token (livespec-e2e;
@@ -142,7 +142,7 @@ Options:
                     adapter invokes, so it runs the target version.
                     Default: empty (use the image-baked version, unchanged).
 
-Required env (normally from /data/projects/1password-env-wrapper/with-livespec-env.sh):
+Required env (normally from /usr/local/bin/with-livespec-env.sh):
   LIVESPEC_E2E_GITHUB_TOKEN   (host-side repo create/clone/delete)
   GITHUB_APP_ID + GITHUB_PRIVATE_KEY  (in-container App-token mint; the App's
                               installation must cover the livespec-e2e org)
@@ -218,7 +218,7 @@ delete_throwaway_repo() {
     code=$?
     set -e
     if [ "$code" -eq 0 ]; then printf 'teardown: deleted %s\n' "$full"; return 0; fi
-    if printf '%s' "$out" | grep -qiE 'HTTP 404|Not Found'; then
+    if grep -qiE 'HTTP 404|Not Found' <<<"$out"; then
       printf 'teardown: already gone (404): %s\n' "$full"; return 0
     fi
     printf 'teardown: attempt %s/6 not-yet-deletable, backing off 3s\n' "$attempt"
@@ -266,7 +266,7 @@ stage_and_build_image() {
   # Draining fabro's stdout through $() removes the pipe, so it never SIGPIPEs;
   # `|| true` keeps an informational log line from ever failing the accept.
   fabro_ver="$("$HERE/fabro" version || true)"
-  printf '%s\n' "$fabro_ver" | head -1
+  printf '%s\n' "$fabro_ver" | sed -n '1p'
   # Stage the plugin scripts tree (mint-app-token CLI + package + vendored
   # runtime) into the build context; the Dockerfile bakes it at
   # /opt/livespec-orchestrator/scripts for the entrypoint's github provisioning.
@@ -414,7 +414,7 @@ create_and_seed_repo() {
     _seed_desc="$(cat <<'SEED_DESC'
 ## Definition of Done
 
-References: Scenario 1 - Greeting one supplied name
+References: ## Scenario 1 - Greeting one supplied name
 
 - `greet("Ada")` from `src/greeting/greet.py` returns exactly `Hello, Ada!`.
 - For any supplied name, `greet(name)` returns exactly `Hello, <name>!`.

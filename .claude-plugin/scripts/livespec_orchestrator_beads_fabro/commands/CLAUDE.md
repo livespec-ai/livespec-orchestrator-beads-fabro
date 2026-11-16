@@ -125,6 +125,27 @@ public module per query-only skill:
   it changed nothing, while an unconfirmed genesis is REFUSED carrying
   its remedy, because another writer may have migrated the epic in the
   same minute and that is state a human resolves.
+- `migrate_claim_tokens.py` — the orchestrator-PRIVATE claim-token
+  migration pass contracts.md's "Claim tokens" rule requires per tenant
+  BEFORE `dispatcher.claim_tokens` is committed `true` there (NOT a
+  contract CLI and NOT a skill surface). It names a fresh open current
+  token on every non-closed item that names no open token (none, a
+  closed one or a discarded one) and leaves every item already naming
+  an open token unchanged, so an interrupted pass is finished by
+  running it again. It WRITES ONLY with
+  `--confirm-claim-writers-stopped`: the pass must run while every
+  claim writer of the tenant is stopped, writers may run on other
+  hosts, and nothing on this host can measure that, so the flag is the
+  operator's attestation. Without it the command surveys and writes
+  nothing. Exit 0 means every non-closed item names an open token, in
+  either mode, which makes the same command the cutover precondition
+  check. The decisions and the writes live in
+  `_store_claim_token_migration.py`; an item whose named token cannot
+  be read is HELD (`claim-token-unobservable`), never renamed.
+  `_needs_attention_claim_tokens.py` is the lane the same rule owes
+  after the cutover: one `hygiene:claim-token-missing:<id>` row per
+  non-closed item naming no current token, composed only while the key
+  is `true`, whose handoff is the SURVEY form of this command.
 
 Each public module exports `main(argv=None) -> int` (the supervisor
 the wrapper calls) plus its named helpers, all enumerated in
@@ -334,6 +355,16 @@ Private helper modules (underscore-prefixed) carry shared plumbing:
   repository-declared gate runs immediately after it, so output left behind
   would gate a head nobody committed, while demanding a clean tree would hold on
   every sandbox's own provisioning residue.
+- `_dispatcher_fleet_run_collection.py` — ended-run collection across EVERY
+  repository that dispatches to a factory (`bd-ib-q4xgcp`, Scenario 281). The
+  host timer starts the pass from one repository, whose own attribution reaches
+  only its own runs, so this module reads each other repository the host's plugin
+  install registry names (its journal, run stamps and item statuses) and hands the
+  runs no earlier repository claimed to the SAME `collect_closed_ended_runs`, with
+  `repo` naming the dispatching repository so its origin's preservation refs are
+  the ones deleted. An unreadable ledger reads as NO statuses, which refuses and
+  leaves the run in place; it is never read as closed. A dry run and a targeted
+  pass collect nothing here.
 - `_dispatcher_journal_file.py` — the append-only dispatch journal and the
   attribution stamp it owns, split out of `_dispatcher_io` for the same reason
   `_dispatcher_shell_runner` was: that aggregate's import closure reaches the
@@ -421,6 +452,21 @@ Private helper modules (underscore-prefixed) carry shared plumbing:
   deliberately left NO re-export shim — AGENTS.md §"Refactoring for size" bans
   one, and a shim would have bought the overlay none of the room the split was
   for. Every caller imports from here.
+- `_dispatcher_rider_bound.py` — the BOUNDED RIDER SET a rendered goal and a
+  judgement subject carry (`bd-ib-l2poch`, Scenario 268, `contracts.md` "A goal
+  carries a bounded rider set"). One module answers "which comments are carried" for
+  both, because the node and every host taking must grade the same bytes. Four
+  properties an editor must not invert. The bound is the `ledger-admit` journal
+  row's instant, because the claim stamp on the item carries none, and the row now
+  names its `dispatch_id` so a dispatch skips the claim it just took: the claim a
+  dispatch takes MUST NOT move its own bound. An unreadable instant, either side,
+  CARRIES the rider — dropping a binding rider silently is the worse error. Receipts
+  are neither carried nor counted, and `carried_comment_bodies` keeps them in the
+  bodies handed to the judgement, which finds its recorded verdict among them and
+  drops them from the subject itself. And `judgement_comment_bodies`
+  (`_dispatcher_dod_judgement_comments`) is the host surfaces' reader while the
+  in-run `dod_gate` subject is bounded at `_dispatcher_loop_overlay`, so the digest
+  an uncarried rider cannot move is the same digest on both sides.
 - `_dispatcher_goal_recovery.py` — what a SEEDED dispatch's goal brief says about
   the tree its sandbox starts on (`bd-ib-kn7ktk`, Scenario 185): "The new sandbox
   MUST check out the recorded SHA, and the goal brief MUST name that commit as an
@@ -460,6 +506,30 @@ Private helper modules (underscore-prefixed) carry shared plumbing:
   advantage); `unaged_ready_order()` is that path for a caller holding no
   project root. `rebalance_ranks` deliberately composes NEITHER input — stored
   `rank` keys must not absorb a transient dwell.
+- `_needs_attention_journal_hold.py`, `_needs_attention_journal_hold_fold.py` and
+  `_needs_attention_journal_lanes.py` — the `hygiene:journal-hold:<subject>` lane
+  of `SPECIFICATION/contracts.md`'s "Journal-recorded holds" clause (`bd-ib-5xogp4`,
+  Scenario 324): eleven hold or deferral stages that only the dispatch journal
+  records, composed as one fact per subject, and the idle lanes they correct.
+  The dependency direction reads bottom-up: `_fold` (PURE: which record is a
+  subject's current hold) -> `_hold` (the one read of the journal, and the facts)
+  -> `_lanes` (the three lanes composed from that one reading). Four properties
+  an editor must not invert. An UNREADABLE journal is `observable=False`, never an
+  empty hold set: it composes the single `hygiene:journal-hold:unobservable` fact,
+  clears the idle-factory fact, and holds this repository's ready idle-slot
+  children, because "no holds found" read off a journal nobody could open is the
+  one answer that lets a held item read as idle (an ABSENT journal is the
+  opposite, a repository that never dispatched). A record is of every subject it
+  names, but a hold is filed under the FIRST of `work_item_id`, `run_id`,
+  `container_name`, `hold` it carries, so a retiring record naming an item and a
+  run reaches a hold filed under either. Three stages are excluded only by their
+  recorded reason (`run-live`, `already-released` and the like), and such a record
+  retires an earlier hold of its OWN stage and no other, so an excluded record
+  never hides a `recovery-held`. And `publish-branch-reclaim-held` is a fact but
+  not an exclusion: it refuses no dispatch, so the item still counts as eligible
+  for the idle-factory fact. The three lanes share one reading through
+  `journal_hold_and_idle_items`, which is also what kept `needs_attention.py`
+  under its file LLOC ceiling.
 - `_dispatcher_credential_wrapper.py` — the dispatch target's committed
   `credential_wrapper` declaration, as read. Split out of
   `_dispatcher_credentials` by cohesion once the proof-credential gate became
@@ -554,6 +624,62 @@ Private helper modules (underscore-prefixed) carry shared plumbing:
   to "keep it readable" — `test_dispatcher_prepare_payload_off_script` renders the
   whole overlay and refuses any heredoc or long base64 run in a script. A test that
   EXECUTES a payload step needs the script AND its env (`tests/prepare_step_support`).
+  Every PLAIN-TEXT payload rides packed, gzip then base64 (`pack_payload`), and its
+  step decodes it with `python3` (`packed_payload_write_command`) (`bd-ib-p5e32s`).
+  The decode FAILS CLOSED: a base64 or gzip error (gzip checks CRC32 and length)
+  exits with `LIVESPEC_PREPARE_PAYLOAD_DECODE_FAILED: <file>: <reason>`, and the
+  bytes land through a temporary file renamed into place only on success, so no
+  partial helper is ever left for a later stage to run.
+  The overlay is collected as the run's `workflow.toml`, which Fabro caps at
+  524,288 bytes PER FILE, and plain helper source paid that budget twice, once in
+  bytes and again in JSON escaping: livespec-dev-tooling's overlay reached 524,343
+  bytes after v0.312.3 and stopped dispatching. `payload_write_command` is only for
+  a value that is already packed, such as the gh-refresh archive chunks.
+  `check-materialized-workflow-toml-size` (in the aggregate) and
+  `check-fleet-materialized-workflow-toml-size` (pre-push, every fleet member) hold
+  the rendered file under 471,859 bytes.
+- `_dispatcher_setup_nodes.py` — the sandbox setup chain as explicit COMMAND NODES
+  named `run_prepare_<N>`, because upstream Fabro refuses `run.prepare` from
+  `v0.396.0-nightly.0` (`bd-ib-dpsiwz`). It lifts every `[[run.prepare.steps]]`
+  block out of a rendered overlay (`split_prepare_steps`, judged by a postcondition:
+  what remains must parse to the original document minus `run.prepare`) and hangs
+  them off the graph's setup-chain TAIL (`splice_setup_nodes`). Five properties an
+  editor must not invert. The names are FIXED: the carrier's re-prepare-on-reacquire
+  recognises a run's setup only by the `run_prepare_` prefix. The numbering CONTINUES
+  from the committed graph's own `run_prepare_1` .. `run_prepare_K`, so the committed
+  provisioning steps come first and the Dispatcher's after them, as the overlay
+  always ordered them. Every node carries a conditional `outcome=failed` edge to the
+  terminal `setup_failed` node as well as its unconditional one, because a command
+  node that exits non-zero otherwise follows its unconditional edge and the run
+  succeeds; the unconditional edge stays because the engine rejects a node whose
+  every edge is conditional. A step's payload variables ride the RUN's environment
+  table and not the node (`hoist_step_env`, `append_env_lines`): the engine's compact
+  fidelity re-sends every setup script and no environment, so helper-program bytes
+  stay out of the agent turns, a command node has no environment of its own that the
+  engine is known to read, and the engine's 524,288-byte workflow-file limit makes
+  the payloads (most of the overlay's weight) a poor fit for the graph file. Each
+  variable is renamed `LIVESPEC_SETUP_<position>__<name>`, because a run-wide table
+  admits one `LIVESPEC_PREPARE_PAYLOAD` where a dozen steps each had their own, and
+  the rename matches WHOLE names so it never rewrites the front of
+  `LIVESPEC_PREPARE_PAYLOAD_0`. The append is read back through a TOML parse and
+  refused if any entry did not land, since a payload that never arrived would fail
+  its own `${VAR:?}` guard minutes into the run. And every script is
+  MiniJinja-ESCAPED, since the engine renders node attributes and `run.prepare` was
+  left verbatim. The
+  derived graphs (`_dispatcher_resume_entry`) move the edge out of the chain's tail,
+  so a resume or the proof-only arm keeps its setup.
+  `_dispatcher_setup_materialize.py` is where that happens to a REAL dispatch:
+  `overlay_with_setup_nodes` splits the rendered overlay, writes the steps into the
+  dispatch's own copy of the graph and returns the overlay without them, called from
+  `materialize_overlay` after the overlay is rendered whole (so the twenty-one
+  emitters are untouched). A graph with no `start` node, or no per-dispatch graph at
+  all, keeps its steps in the config, since every engine rejects such a graph
+  before a run exists; a graph WITH `start` and nothing to hang the chain on
+  REFUSES, and the refusal gives the minted proof credentials back. The committed
+  setup steps are the `run_prepare_1` .. `run_prepare_K` nodes of each committed
+  `workflow.fabro`, so the Dispatcher's steps continue the numbering at `K + 1`.
+  `_dispatcher_open_command_node` matches the numbered nodes by shape, since a step
+  such as `uv sync` outlasts the stall window with no event inside it.
 - `_dispatcher_sandbox_worktree_exclude.py` — the ONE renderer that makes a
   Dispatcher-materialized sandbox path invisible to the run's own git worktree,
   shared by ALL FOUR projections that write a fixed `/workspace` path:
@@ -650,6 +776,22 @@ Private helper modules (underscore-prefixed) carry shared plumbing:
   twin — a twin would be a second account of one merge, and only the copy the
   sandbox runs decides anything. This raises NO ceiling; it makes the ceiling
   the overlay already declared the effective one.
+- `_dispatcher_definition_of_done_origin_spec.py` — the H2 headings the
+  Definition-of-Done wall resolves a `References:` line against, read from the
+  target repository's `origin/master` and never from the primary checkout's
+  working tree (`bd-ib-ahtcng`). A primary is auto-pulled, so it lags after a merge
+  burst and refused headings a merged revise had already added. Three properties
+  an editor must not invert. The read FETCHES first, then reads the tree out of
+  the remote-tracking ref with `git ls-tree` and `git show`; the filing display
+  and the dispatch-time wall both reach it through `definition_of_done_findings`,
+  so they judge one revision. An unreadable remote is an `OriginSpecUnreadable`
+  VALUE and the item is REFUSED naming `origin/master` — it is never an empty set
+  that skips the check and never a fallback to the working tree, which is the
+  stale read this module exists to remove. And ambient `GIT_DIR`-class selectors
+  are scrubbed from the child, so a caller running under a git hook reads the
+  repository at `cwd`. The suite's autouse `_hermetic_origin_spec_headings`
+  answers a directory with no `.git` of its own from its `SPECIFICATION/`
+  working tree; a directory that IS a repository takes the real read.
 - `_dispatcher_default_branch_fetch.py` — the DISPATCH BASE every dispatch
   fetches into its sandbox clone, so `origin/<default_branch>` exists for the
   `implementation_diff` node and for every check that diffs the default branch
@@ -876,8 +1018,9 @@ Private helper modules (underscore-prefixed) carry shared plumbing:
     precondition and the per-poll verdict. The pointer is written AND READ BACK
     before `fabro rm -f`, and a read-back that fails yields `HELD` rather than
     `CANCELLED`: the run keeps its slot for one more poll and the export is
-    re-attempted. The `HELD` arm must stay an explicit `continue` in the watch
-    loop and never a fall-through — a quiet run past its budget satisfies the
+    re-attempted. The `HELD` arm must stay an explicit non-cancelling return in
+    `decide_run_watch` (`_dispatcher_run_watch_decision.py`, the per-poll
+    budget-then-stall decision the watch loop calls) and never a fall-through — a quiet run past its budget satisfies the
     stall rule as well, so a fall-through cancels it as stalled, with the wrong
     record, the wrong disposition, and the pointer the hold exists to secure
     still unwritten.
@@ -893,6 +1036,28 @@ Private helper modules (underscore-prefixed) carry shared plumbing:
     `blocked` / `needs-human` carrying the remedy `resolve-blocked:<id>:ready`;
     it has no release arm, since a budget cancel is not a non-convergence
     observation and must not bounce the slice to `backlog`.
+  - `_dispatcher_run_wall_budget_refs.py` and
+    `_dispatcher_run_wall_budget_hold.py` — what keeps the hold from being
+    unbounded (`bd-ib-l77jxo`, v311). A held poll lists origin with
+    `git ls-remote` (never a local clone) for a VERIFIED PRESERVATION REF of the
+    run (`needs-human/<run>`, `preserve/run-<run>`, a preserved-publish ref, or
+    the run's latest `wip/<item>/<run>/<n>` capture) whose commit's tree equals
+    the run branch's committed tip as the run's own record reports it
+    (`committed_tip`), and cancels as `run-wall-budget-exceeded` the moment one
+    exists, naming that ref and commit INSTEAD of the pointer. Three answers,
+    never two: a ref, an answered listing holding none, and a listing or tree
+    read that could not be taken — the third is a named failed measurement and
+    is never "no ref", or a flaky `ls-remote` would hide a safe tree and a
+    wrong release would destroy an unsafe one. With no tip reported only the
+    needs-human ref and the latest capture qualify on their own. The third
+    consecutive held record escalates ONCE (`run-wall-budget-hold-escalated`
+    plus one ledger comment, never a status write: the seam is the comment
+    surface), the in-memory flag stops a repeat inside a watch and the comment's
+    marker plus run id stops one after a restart. `refs` deliberately imports
+    neither `_dispatcher_wip_capture_receipt` nor anything else that reaches
+    `_dispatcher_io`, and the records module imports `refs` not at all:
+    `_dispatcher_io` reaches the watch through the launcher, so such an import
+    closes a cycle.
   THE `exceeded` RECORD ALSO ANCHORS A RESUME, and that reader is
   `_dispatcher_resume_cancel_anchor` rather than anything in this family — the
   clause says the record "anchors resume ... exactly as a
@@ -3092,6 +3257,18 @@ Private helper modules (underscore-prefixed) carry shared plumbing:
   while plan-child disposition REFUSES — "where it cannot determine a child's
   autonomy tier from that recorded classification, it MUST refuse the
   disposition and surface it".
+  AN `unratified-topic` HOLD ALSO NAMES A RELINK CANDIDATE (`bd-ib-jnbcny`), through
+  `_spec_change_tier_relink_candidate` and `_spec_change_tier_wall.standing_hold`,
+  which the wall's refusal and the `hygiene:spec-tier-relink:<id>` attention lane
+  both read so the two cannot name different topics. Three properties an editor
+  must not invert. An amendment is a change between CONSECUTIVE history
+  snapshots, never a difference from the record's own version, because every
+  snapshot after the first amendment still carries its text and a revision that
+  left the heading alone would read as the one that amended it. A rejected
+  revision is excluded by the SAME ratification read the hold uses
+  (`ratified_topics_of_version`), not by a second decision test. And naming a
+  candidate writes nothing and releases nothing: only the `relink-spec-tier`
+  route changes the linked topic.
   TWO EXEMPTIONS ARE LOAD-BEARING. A GROOM-kind variant is exempt at both wall
   surfaces through the shared `criteria_wall_variant`, because a groom target
   reaches that door BECAUSE it is not yet decomposed: judging it holds the groom
@@ -3134,6 +3311,84 @@ Private helper modules (underscore-prefixed) carry shared plumbing:
   (`observe_item_run_liveness`, shared with the merge-hold arming guard). The
   heading is the REST of the action id, since a specification title may carry a
   colon.
+
+- The HANDED-OFF MERGE WAIT of `contracts.md`'s "Armed pull request overtaken by
+  the default branch" paragraph (`bd-ib-bacahf`, Scenario 220) — what a merge wait
+  does when its poll budget ends on a pull request the forge is still going to
+  merge. Before it, such an item rested at `blocked / needs-human` and a person ran
+  `reconcile-merged` by hand once CI finished. Five cohesive modules, and the
+  dependency direction reads bottom-up: `_dispatcher_merge_wait_handoff` (PURE: the
+  `handed-off` status, the typed account of one handoff, the outcome detail and the
+  one journal row, whose stage and keys are the written contract between the two
+  passes below) → `_dispatcher_engine_exhaustion` (the final read, and the one
+  decision between merged, handed off and rested; `_dispatcher_engine_merge`
+  composes it and measures the seconds the wait spent on `PollPolicy.clock`) and
+  `_dispatcher_merge_wait_handoff_record` (the durable ledger comment) →
+  `_dispatcher_stranded_claim_handoff` (the OBSERVATION: which pull request the
+  claim's newest dispatch handed off, and what the forge now says) →
+  `_dispatcher_stranded_claim_handoff_recovery` (the pass that completes it).
+  Seven properties an editor must not invert. The status is `handed-off` and NEVER
+  `green`, because green means the pull request merged and the acceptance valve, the
+  self-update canary, calibration and the cost gate all act on that meaning; it is
+  not `blocked` either, which rests the item for a human. It is an exit-0 status
+  (`dispatch_exit_code`, `exit_code_for_status`), a non-alarm status, and it clears
+  the stranded-dispatch attention row, because an `active` item with no live lock
+  is exactly the shape that lane reports and its handoff would tell a person to
+  undo the handoff. The handoff is decided only when the forge's REQUIRED-check
+  list could be read: an unreadable list rests the item, since a handoff on a pull
+  request nobody could grade is a guess. A failed required check at the final read
+  is the ordinary required-check failure, built by the SAME
+  `required_check_failure_outcome` the poll uses and the stranded-claim pass reuses,
+  so the three surfaces cannot record different outcomes. The row is trusted only
+  in the claim's own newest dispatch segment and only when it names the claim's own
+  run, and a pull request the forge answers unreadably, or in a state the reading
+  does not recognise, HOLDS the claim. The recovery drives `reconcile-merged`
+  through its own command function with `force` set, because the fence it holds IS
+  the dispatch lock that valve's preflight refuses on; the ladder's `dispatch-live`
+  hold has already established that no other live owner exists. And nothing here
+  re-runs a failed check: any automatic re-run belongs to the failed-check recovery,
+  at most once per head, and this pass records the attempt the forge reports.
+
+- `_dispatcher_ruling_currency.py` and `_dispatcher_recovery_ruled_seed.py` — how
+  recovery routing honours an operator's SEED RULING (`bd-ib-26mhad`, Scenario 185;
+  the writer is `dispatcher.py seed-ruling`, `_dispatcher_seed_ruling*`). The first is
+  PURE and is the ONE reader of an item's rulings: `current_ruling` takes the item's
+  ledger comments oldest first and answers the seed or fresh ruling that governs,
+  because "the latest ruling of either kind governs" must be read in one place and the
+  fresh ruling's own routing reads it there too. The second turns a current seed
+  ruling into the route's seed, or into the hold. Six properties an editor must not
+  invert. The ruling is read from the item's LEDGER COMMENTS and never the journal, so
+  a ruling written from another checkout governs a dispatch from this one. A ruling is
+  graded AFTER the non-fallback refusals and the unobservable measurements, which keep
+  their precedence, and BEFORE the resume ladder, which it outranks. A ruled ref origin
+  does not carry at the ruled SHA HOLDS the item under its own measurement name
+  (`seed-ruling-ref`) and never falls through to another preserved tree, the published
+  head or `fresh`. An unanswered `git ls-remote` is the existing `preserved-work`
+  unobservable hold and not "absent", because the two have different remedies. A ledger
+  that cannot be ASKED (connection, command or tenant faults) holds the item as
+  `seed-ruling-comments`, while a repository with no ledger to ask reads as no ruling.
+  And a consumed comment is matched to its ruling by marker kind and the ruling's
+  instant found among its field VALUES, so a ruling is never revived behind a later
+  consumed one and the two kinds never consume each other. A current FRESH ruling reads
+  as no seed ruling here: routing it is the fresh ruling's own work.
+
+- `_drive_impl_scope.py` — the HOST DISPATCH MEMORY SLICE an `impl:` dispatch
+  launches its loop inside (`bd-ib-szbxu7`, Scenario 371). When the published
+  bound file holds a memory size, `systemd-run` is installed, the user manager is
+  offered the memory controller and it loads `factory-dispatch.slice`, the loop
+  runs through `systemd-run --user --scope` with `OOMPolicy=continue` and the
+  published `MemoryMax`; otherwise the argv is exactly what it was. Three
+  properties an editor must not invert. Every host fact is read through the
+  `ScopeHost` seam and any failing read answers "not provided", so no read can
+  fail a launch. `OOMPolicy=continue` is required, not decorative: systemd 257
+  defaults to `stop`, under which one OOM-killed child stops the whole scope and
+  strands the run. And the unit is NAMED by the launch (`--unit`), so the journal
+  record and the `drive` result carry it without parsing the launcher's output.
+  A scoped launch that failed before the loop ran (non-zero exit and no
+  `Running scope as unit: <unit>` announcement) falls back to exactly one
+  unscoped launch, journaled with the failure as `detail`; a loop that ran in
+  its scope and exited non-zero is never relaunched.
+  The slice and the bound are host provisioning this repository does not install.
 
 Rules an agent editing this tree must follow:
 

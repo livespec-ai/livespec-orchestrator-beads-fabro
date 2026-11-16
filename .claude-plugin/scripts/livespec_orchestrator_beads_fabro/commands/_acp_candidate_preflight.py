@@ -114,6 +114,7 @@ from livespec_orchestrator_beads_fabro.commands._acp_hold_coverage import (
     legacy_record_covers_candidate,
 )
 from livespec_orchestrator_beads_fabro.commands._acp_preflight_skips import (
+    CLAUDE_CREDENTIAL_SKIP,
     HEADROOM_SKIP,
     LEGACY_HOLD_SKIP,
     OUTSTANDING_CONFIRMATION_SKIP,
@@ -359,6 +360,12 @@ def _headroom_skip(
         candidate=candidate, builtin_pairs=inputs.builtin_pairs
     ):
         return None
+    if policy.credential_refusal is not None:
+        return ephemeral_skip(
+            candidate=candidate,
+            reason=CLAUDE_CREDENTIAL_SKIP,
+            condition=policy.credential_refusal.cause,
+        )
     reading = policy.read()
     pooled = () if policy.pool_read is None else policy.pool_read()
     for assessed in (*pooled, reading):

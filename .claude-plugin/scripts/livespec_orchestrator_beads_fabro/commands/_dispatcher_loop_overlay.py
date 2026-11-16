@@ -49,6 +49,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_credentials import (
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dispatch_pull_requests import (
     dispatch_pull_requests_env_line,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_gate_subject import (
+    dod_gate_subject,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_integration_projection import (
     contract_prompt_variables,
 )
@@ -66,6 +69,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_publication_metadata
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_entry import (
     resume_checkout_for,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_rider_bound import (
+    carried_comment_bodies,
+    prior_claim_instant,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_worktree_pack import (
     fleet_toolchain_is_the_sandbox_gate_premise,
@@ -131,6 +138,13 @@ def materialize_dispatch_overlay(*, overlay: DispatchOverlay) -> str | None:
         # rather than from the committed default a bare `fabro run` would see.
         review_fix_visit_cap=plan.review_fix_visit_cap,
         graph_override=overlay.recorded.payload.graph,
+        # The node timeouts that graph was rendered with, so the setup nodes the
+        # overlay adds to it take their durations from the same resolution.
+        node_timeouts=overlay.recorded.payload.timeouts,
+        # The dispatch's own `--node-timeout` layer, so the credential allowance
+        # reads the per-node values the rendered graph carries. Read defensively:
+        # only a dispatching subcommand declares the flag.
+        node_timeout_arguments=tuple(getattr(overlay.args, "node_timeout", None) or ()),
         # The client build the record MEASURED for this plan's factory binary,
         # which decides how the written config may name that graph: a Petri-era
         # client collects the package the config sits in, and refuses an
@@ -202,6 +216,24 @@ def materialize_dispatch_overlay(*, overlay: DispatchOverlay) -> str | None:
         # and without this projection it falls back to the publish branch name
         # as its title and keeps `publish_draft`'s placeholder body.
         publication_metadata=publication_metadata_for(item=overlay.item),
+        # The Definition-of-Done judgement subject, for the `dod_gate` node ALONE.
+        # Rendered HERE for the reason the publication metadata above is, and
+        # delivered as a file rather than appended to the goal: Fabro injects the
+        # goal into every ACP node, and only this one grades the subject.
+        dod_gate_subject=dod_gate_subject(
+            item=overlay.item,
+            repo=overlay.repo,
+            # The CARRIED bodies, bounded at the claim this dispatch follows, so the
+            # node grades the subject a host taking computed its digest over.
+            comments=carried_comment_bodies(
+                comments=overlay.recorded.comments,
+                claim_at=prior_claim_instant(
+                    journal_path=overlay.journal.path,
+                    item_id=overlay.item.id,
+                    own_dispatch_id=overlay.dispatch_id,
+                ),
+            ),
+        ),
         # The item's `factory_captured` assertions, for the sandbox's own
         # per-assertion grade of the verified record. Rendered HERE for the same
         # reason the publication metadata above is: this is the one call site

@@ -81,8 +81,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_codex_headroom_io im
     read_projected_codex_headroom,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_selector import (
-    injected_credential_slots,
+    policy_pool_slots,
     register_admission_slot_chooser,
+    repo_credential_refusal,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_policy_settings import (
     PolicySettingUnreadable,
@@ -216,12 +217,18 @@ def session_headroom_policy(
             DEFAULT_SESSION_HEADROOM_HORIZON_MINUTES
         )
     )
+    # An absent or invalid policy, or no declared slot injected, is the refusal
+    # every covered candidate is skipped by, without a reading.
+    refusal = repo_credential_refusal(repo=repo, environ=os.environ)
     taken: list[PoolSelection] = []
 
     def pool_once() -> PoolSelection:
         if not taken:
             taken.append(
                 _assessed_pool(
+                    # The declared credential policy decides the pool, read when
+                    # the pool is; an absent or invalid one assesses no slot.
+                    pool=lambda: policy_pool_slots(repo=repo, environ=os.environ),
                     read=read,
                     floor_percent=floor,
                     horizon_minutes=horizon,
@@ -238,6 +245,7 @@ def session_headroom_policy(
         horizon_minutes=horizon,
         read=lambda: pool_once().representative,
         pool_read=lambda: pool_once().readings,
+        credential_refusal=refusal,
         codex_read=codex_headroom_source(
             now_iso=now_iso,
             journal_path=journal_path,
@@ -303,6 +311,7 @@ def _assessed(
 
 def _assessed_pool(
     *,
+    pool: Callable[[], tuple[str, ...]],
     read: Callable[..., SessionHeadroomReading],
     floor_percent: int,
     horizon_minutes: int,
@@ -315,7 +324,7 @@ def _assessed_pool(
     the filter grades exactly as it always has. The chosen slot is whatever
     `select_pool_slot` ranks first; the caam-published account plays no part.
     """
-    slots = injected_credential_slots(environ=os.environ)
+    slots = pool()
     if not slots:
         lone = _assessed(
             reading=read(token=None, observed_at=now_iso),

@@ -43,6 +43,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_host_record_cli impo
     reconcile_for,
     reconcile_merged_for_item,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_host_record_payload import (
+    read_evidence,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_host_record_post import (
     HOST_RECORD_STAGE,
     HOST_RECORD_SURFACE,
@@ -102,6 +105,34 @@ References: ## Scenario 136 — A host-captured assertion holds the item in acce
 """
 
 
+def test_a_non_array_artifact_paths_value_is_refused_naming_the_field(tmp_path: Path) -> None:
+    """The shared payload reader rejects a non-array before either posting primitive can post."""
+    record = tmp_path / "artifact-paths.json"
+    _ = record.write_text(
+        json.dumps(
+            {
+                "build": {"artifact_paths": "not-an-array"},
+                "assertions": [{"text": _HOST_ASSERTION}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    emitted: list[str] = []
+
+    evidence = read_evidence(
+        record_path=record,
+        work_item_id=_ITEM_ID,
+        declared={_HOST_ASSERTION: "host_captured"},
+        verdict_is_replay=False,
+        surface=HOST_RECORD_SURFACE,
+        scenario_fallback=None,
+        emit=emitted.append,
+    )
+
+    assert evidence is None
+    assert "artifact_paths" in "".join(emitted)
+
+
 @dataclass(kw_only=True)
 class _Runner:
     """A runner answering by argv SHAPE rather than by call order.
@@ -119,6 +150,10 @@ class _Runner:
     # A merged pull request that only MENTIONS the item in its body: neither its head
     # branch nor its title names the item, so no dispatch of the item produced it.
     body_mention_only: bool = False
+    # A second title-identified merge models a host landing split across sequenced
+    # pull requests. Reconciliation's explicit selector has already identified the
+    # intended one in the shared journal, so the host record must not re-rank these.
+    extra_title_match: bool = False
     # The proof-asset store's upload leg. Defaults to SUCCEEDING, so a test that is
     # not about the store does not have to stub one; the failure arm is what the
     # upload-refusal case sets.
@@ -176,18 +211,28 @@ class _Runner:
                     }
                 ]
             )
-        return json.dumps(
-            [
+        candidates: list[dict[str, object]] = [
+            {
+                "number": _PR_NUMBER,
+                "title": f"feat: {_ITEM_ID}",
+                "headRefName": "host/first-landing",
+                "baseRefName": "master",
+                "state": "MERGED",
+                "mergeCommit": {"oid": _MERGE_SHA},
+            }
+        ]
+        if self.extra_title_match:
+            candidates.append(
                 {
-                    "number": _PR_NUMBER,
-                    "title": f"feat: {_ITEM_ID}",
-                    "headRefName": f"feat/{_ITEM_ID}",
+                    "number": _PR_NUMBER + 1,
+                    "title": f"docs: {_ITEM_ID} follow-up",
+                    "headRefName": "docs/host-landing-follow-up",
                     "baseRefName": "master",
                     "state": "MERGED",
-                    "mergeCommit": {"oid": _MERGE_SHA},
+                    "mergeCommit": {"oid": "second-merged-sha"},
                 }
-            ]
-        )
+            )
+        return json.dumps(candidates)
 
 
 def _comments(*, records: tuple[dict[str, str], ...] = ()) -> str:
@@ -249,9 +294,11 @@ class _Reconciles:
     """
 
     driven: list[str] = field(default_factory=list)
+    pull_requests: list[int | None] = field(default_factory=list)
 
-    def drive(self, *, work_item_id: str) -> int:
+    def drive(self, *, work_item_id: str, pull_request: int | None = None) -> int:
         self.driven.append(work_item_id)
+        self.pull_requests.append(pull_request)
         return 0
 
 
@@ -639,6 +686,31 @@ def test_publishing_an_independent_replay_drives_reconcile_merged_for_the_item(
     assert reconciled.driven == [_ITEM_ID]
 
 
+@pytest.mark.parametrize(
+    ("verdict", "reproduced"),
+    [(VERDICT_HOST_VERIFIED, True), (VERDICT_HOST_NOT_REPRODUCED, False)],
+)
+def test_a_replay_drives_reconcile_against_the_pull_request_its_record_was_posted_on(
+    tmp_path: Path, *, verdict: str, reproduced: bool
+) -> None:
+    """Both replay verdicts preserve the post target through the acceptance pass."""
+    _file_item(repo=tmp_path)
+    runner = _Runner(comments=_comments(records=(_capture_comment(identity=_OTHER_SESSION),)))
+    reconciled = _Reconciles()
+
+    exit_code, _ = _post(
+        repo=tmp_path,
+        verdict=verdict,
+        runner=runner,
+        env={"CLAUDE_CODE_SESSION_ID": _SESSION},
+        reproduced=reproduced,
+        reconciles=reconciled,
+    )
+
+    assert exit_code == 0
+    assert reconciled.pull_requests == [_PR_NUMBER]
+
+
 def test_a_capture_post_does_not_drive_reconcile_merged(tmp_path: Path) -> None:
     """Only the two REPLAY verdicts re-run the pass, which is what the clause says.
 
@@ -816,6 +888,46 @@ def test_an_item_with_no_merged_pull_request_is_refused(tmp_path: Path) -> None:
     assert exit_code != 0
     assert "no single merged pull request" in emitted
     assert [call for call in runner.calls if call[:3] == ["gh", "pr", "comment"]] == []
+
+
+def test_a_host_record_targets_the_pull_request_reconciliation_selected(
+    tmp_path: Path,
+) -> None:
+    """A host-routed split landing uses reconciliation's selected pull request.
+
+    The host item has no factory run whose branch can resolve a pull request. Two
+    sequenced merged pull requests name it in their titles, but reconciliation already
+    recorded the operator's explicit selection. Re-ranking those title matches would
+    recreate the ambiguity that selection removed and strand the host-captured proof.
+    """
+    _file_item(repo=tmp_path)
+    journal = tmp_path / "tmp" / "fabro-dispatch-journal.jsonl"
+    _ = journal.parent.mkdir()
+    _ = journal.write_text(
+        json.dumps(
+            {
+                "stage": "reconcile-pr-selected",
+                "work_item_id": _ITEM_ID,
+                "pr_number": _PR_NUMBER,
+                "merge_sha": _MERGE_SHA,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runner = _Runner(comments=_comments(), extra_title_match=True)
+
+    exit_code, _ = _post(
+        repo=tmp_path,
+        verdict=VERDICT_HOST_RECORDED,
+        runner=runner,
+        env={"CLAUDE_CODE_SESSION_ID": _SESSION},
+    )
+
+    assert exit_code == 0
+    posted = [call for call in runner.calls if call[:3] == ["gh", "pr", "comment"]]
+    assert len(posted) == 1
+    assert posted[0][3] == str(_PR_NUMBER)
 
 
 def test_a_merged_pull_request_that_only_mentions_the_item_is_not_a_target(
@@ -1053,7 +1165,7 @@ def test_the_bound_reconcile_carries_the_invocations_repository_to_the_valve(
         repo=tmp_path, args=argparse.Namespace(journal=None, invoker="human:test")
     )
 
-    assert drive(work_item_id="bd-ib-unfiled") != 0
+    assert drive(work_item_id="bd-ib-unfiled", pull_request=_PR_NUMBER) != 0
 
 
 def _drive_capturing_valve_args(
@@ -1070,7 +1182,7 @@ def _drive_capturing_valve_args(
 
     monkeypatch.setattr(cli, "reconcile_merged_for_item", fake_valve)
     drive = reconcile_for(repo=repo, args=argparse.Namespace(journal=None, invoker="human:test"))
-    assert drive(work_item_id=_ITEM_ID) == 0
+    assert drive(work_item_id=_ITEM_ID, pull_request=_PR_NUMBER) == 0
     return seen
 
 
@@ -1101,6 +1213,17 @@ def test_a_replay_post_on_an_unmarked_item_drives_the_plain_route(
 
     assert [one.regrade for one in seen] == [False]
     assert [one.item for one in seen] == [_ITEM_ID]
+
+
+def test_the_bound_reconcile_selects_the_pull_request_that_received_the_host_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The valve receives the post target, so its journal names that same pull request."""
+    _file_item(repo=tmp_path)
+
+    seen = _drive_capturing_valve_args(repo=tmp_path, monkeypatch=monkeypatch)
+
+    assert [one.pr for one in seen] == [_PR_NUMBER]
 
 
 _RECORD_FILE_KEYS = (

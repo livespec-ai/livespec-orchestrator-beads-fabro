@@ -78,10 +78,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_plugin_cache_gate im
     PLUGIN_BUILD_ADVANCED_MARKER,
     PLUGIN_CACHE_UNMATERIALIZED_MARKER,
     SANDBOX_CLAUDE_PLUGINS_ROOT_ENV_VAR,
-    plugin_cache_gate_prepare_step,
 )
 
-from tests.prepare_step_support import runnable_script
+from tests.prepare_step_support import plugin_gate_installer_script
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = (
@@ -94,6 +93,9 @@ _WORKFLOW = (
 )
 
 _CHECK_SUITE_TOKEN = "{{ inputs.sandbox_check_suite }}"
+_DEFAULT_BRANCH_TOKEN = "{{ inputs.default_branch }}"
+_CONFORMANCE_HOOK_INSTALL_TOKEN = "{{ inputs.conformance_hook_install }}"
+_DEFAULT_BRANCH = "master"
 
 # The gate program's own filename, as the NODE SCRIPTS spell it. Asserted
 # against the materialized name rather than imported into the rendering, because
@@ -172,7 +174,11 @@ def _rendered_janitor(*, suite_argv: str, shell_quoted_input: bool) -> str:
     script = _node_script(node="janitor")
     assert script.count(_CHECK_SUITE_TOKEN) == 1
     replacement = shlex.quote(suite_argv) if shell_quoted_input else suite_argv
-    return script.replace(_CHECK_SUITE_TOKEN, replacement)
+    return (
+        script.replace(_DEFAULT_BRANCH_TOKEN, _DEFAULT_BRANCH)
+        .replace(_CHECK_SUITE_TOKEN, replacement)
+        .replace(_CONFORMANCE_HOOK_INSTALL_TOKEN, "")
+    )
 
 
 def _child_env(*, box: _Sandbox) -> dict[str, str]:
@@ -185,7 +191,7 @@ def _child_env(*, box: _Sandbox) -> dict[str, str]:
     construction, so no child self-instruments and races the coverage run.
     """
     return {
-        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "PATH": f"{box.plugins_root / 'bin'}:/usr/local/bin:/usr/bin:/bin",
         "HOME": str(box.home),
         SANDBOX_CLAUDE_PLUGINS_ROOT_ENV_VAR: str(box.plugins_root),
     }
@@ -251,7 +257,7 @@ def _prepare(*, box: _Sandbox) -> None:
     restating it is what makes the gate under test the gate the Dispatcher ships.
     """
     script = box.home.parent / "install-plugin-gate.sh"
-    _ = script.write_text(runnable_script(step=plugin_cache_gate_prepare_step()), encoding="utf-8")
+    _ = script.write_text(plugin_gate_installer_script(), encoding="utf-8")
     _ = subprocess.run(
         ["bash", str(script)],
         check=True,
@@ -264,6 +270,21 @@ def _prepare(*, box: _Sandbox) -> None:
 def _sandbox(*, tmp_path: Path, exit_status: int = 0) -> _Sandbox:
     plugins_root = tmp_path / "plugins"
     plugins_root.mkdir()
+    bin_dir = plugins_root / "bin"
+    bin_dir.mkdir()
+    git = bin_dir / "git"
+    _ = git.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -eu\n"
+        'case "${1:-}" in\n'
+        "  fetch|rebase) exit 0 ;;\n"
+        "  rev-parse)\n"
+        "    if test \"${2:-}\" = --git-path; then printf '%s\\n' \"$PWD/.git/${3:?}\"; else printf '%s\\n' test-head; fi ;;\n"
+        "  *) printf 'unexpected git argv: %s\\n' \"$*\" >&2; exit 1 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    git.chmod(0o755)
     home = tmp_path / "home"
     home.mkdir()
     marker = tmp_path / "suite-ran"
@@ -293,6 +314,7 @@ def _run_janitor(*, box: _Sandbox, shell_quoted_input: bool) -> subprocess.Compl
         ],
         check=False,
         capture_output=True,
+        cwd=box.home,
         text=True,
         env=_child_env(box=box),
     )

@@ -26,10 +26,32 @@ declared GENERATED record file, the brief also carries one
 the default branch into this run's work inside this turn and resolve the
 conflict or the gate failure:
 
-1. `git fetch origin {{ inputs.default_branch }}`, then rebase or merge this
-   run's work onto it yourself, resolving each conflicted path on its merits.
-   Do NOT resolve by taking one side wholesale — a conflict means both sides
-   changed something, and discarding either loses work somebody shipped.
+1. `git fetch origin {{ inputs.default_branch }}`, then identify this run's
+   publish branch from `$LIVESPEC_PUBLISH_BRANCH` and look up its origin tip.
+   When `origin/$LIVESPEC_PUBLISH_BRANCH` exists and its tip is an ancestor of
+   `HEAD`, MERGE `origin/{{ inputs.default_branch }}` into `HEAD` with
+   `git merge --no-edit origin/{{ inputs.default_branch }}`, resolving each
+   conflicted path on its merits, so the origin tip remains an ancestor of the
+   repaired head. When the publish branch does not exist on origin, REBASE this
+   run's own commits onto `origin/{{ inputs.default_branch }}` yourself
+   (`git rebase origin/{{ inputs.default_branch }}`). Do NOT resolve by taking
+   one side wholesale — a conflict means both sides changed something, and
+   discarding either loses work somebody shipped.
+
+   **Every commit the integration creates goes through the sandbox commit
+   runner**, including the commit that records a conflict resolution. When the
+   merge or rebase stops on a conflict, resolve the paths, `git add` each one,
+   then run
+   `python3 "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-runner.py" start -- git commit --no-edit`
+   and wait once with
+   `python3 "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-runner.py" wait <run-id> --timeout-seconds 300`
+   in a later tool call. Wait at most once on each commit run you start. If that wait reports `running`, do not call `wait` again and do not stop it. End the turn and leave it for `fix_commit_settle` to wait out. A terminal report lets you continue. Never run a foreground `git commit`, or a
+   foreground `git rebase --continue` while a resolution is staged: the commit
+   hook runs the whole check suite and outlasts both the ten-minute tool-call
+   limit and the turn's own limit, which killed the measured instance's hook and
+   then its turn. Once the runner reports `passed`, nothing is staged, so
+   `git rebase --continue` only replays the remaining picks and creates no
+   commit of its own; any further conflict stop is resolved the same way.
 
    **A `regenerate:` line in the brief is an instruction, not a hint.** The
    brief carries one line `regenerate: <path> via <generator argv>` for every
@@ -47,16 +69,28 @@ conflict or the gate failure:
    rather than through a conflict, and it has the same one remedy: run the
    generator the brief names for that path. If the generator exits non-zero, that
    is the finding to fix — never a reason to write the file by hand.
-2. Run the repository's check suite (`{{ inputs.sandbox_check_suite }}`)
-   against the integrated tree and fix what the integration broke.
-   Run it ONCE per tree, under the once-per-tree rule below, which counts a
-   commit whose pre-commit hook ran the full suite green on the exact
-   integrated tree it committed as that tree's run. A gate target the brief
-   names failed on the REFRESHED tree, so a green suite on the pre-refresh
-   tree is not evidence.
+2. Fix what the integration broke, and let the commit hook grade the integrated
+   tree, under the rule "A fix turn grades each tree once, through its commit
+   hook" below.
+   Reproduce a gate target the brief names by running the failing tests that
+   target's own output names, not by running the full check suite.
+   A gate target the brief names
+   failed on the REFRESHED tree, so a green result on the pre-refresh tree is not
+   evidence.
 3. Leave the branch at the integrated, green head. The graph re-enters
    janitor, then `publish_draft`, then `proof_capture`, so publication is
    re-earned on the repaired head rather than claimed here.
+
+**A `subjectless-commits:` line in the brief is a different finding.** It names
+commits between `origin/{{ inputs.default_branch }}` and `HEAD` whose first message
+line is a trailer line (`Factory-Run-Id: ...`) or empty, so `publish_draft` refused to
+publish them: under rebase-merge such a commit would land on the default branch with
+no readable subject. There is no conflict to resolve. Reword each named commit so its
+first line is a conventional subject (`fix: ...` or `feat: ...`) with its trailers kept
+below it, by rebasing this run's own commits onto `origin/{{ inputs.default_branch }}`
+and rewording the named ones, and commit every step through the sandbox commit runner
+as above. Leave the rewritten branch for the `publish_draft` visit the graph re-enters,
+which owns any republication.
 
 Hooks run normally in this turn, exactly as everywhere else. Never pass
 `--no-verify`, never use bare force, and rewrite no ref at all — not even
@@ -68,12 +102,98 @@ been captured on. A run may take at most two
 refresh-repair rounds in total, so a turn that leaves the conflict unresolved
 spends a budget nothing replaces.
 
+## When the refresh-repair brief names `stage: publish_draft` with a refused head
+
+`publish_draft` pushed this run's publish branch and origin or the repository's
+pre-push hook REFUSED the push, so it recorded a repair brief and routed here
+rather than ending the run. This is a publish-repair round. It is counted in the
+same two-round refresh-repair budget as a refresh repair, and the brief is read
+the same way (the preamble opens `LIVESPEC_REFRESH_REPAIR`; the file
+`livespec-refresh-repair-brief` in the publication state directory is the durable
+route). Its `refused-head:` line names the head whose push was refused, and the
+cause is one of two shapes:
+
+- `oversize-paths:` names each path GitHub refused with its GH001 large-file
+  error, together with the size it reported, for example
+  `.pnpm-store/v10/files/ab/cdef (119.00 MB)`. Remove each named path from EVERY
+  commit of this run that origin does not already hold, so no commit the next
+  push would send carries it. Find those commits with `git fetch origin`, then
+  `git rev-list origin/$LIVESPEC_PUBLISH_BRANCH..HEAD` when that branch exists on
+  origin and `git rev-list origin/{{ inputs.default_branch }}..HEAD` when it does
+  not. Rewrite only those commits (a rebase of that range that drops the path
+  from each commit that added it, or an equivalent), and make every commit
+  through the sandbox commit runner like any other. A commit origin already holds
+  MUST NOT be rewritten: if a named path sits in one, that is a finding to report
+  through the needs-human ending, not something to rewrite around. Do not re-add
+  the path in any later commit.
+- `failed-gate-targets:` names each target the pre-push hook reported as failed,
+  and `hook-output-tail` carries the last 80 lines of the hook's own output.
+  Repair each named target on this run's tree, reading the tail for the
+  failure's own lines.
+
+A rewritten commit that carries `TDD-Red-*` or `TDD-Green-*` trailers no longer
+matches the checksums those trailers recorded. NEVER hand-edit or forge a
+trailer. Redo Red-Green for that commit: restage its test file alone as a fresh
+Red commit through the commit runner, then Green-amend the implementation, so the
+hook records trailers for the tree the commit now carries.
+
+Hooks run normally in this turn. Never pass `--no-verify`, never use bare force,
+and rewrite no ref on origin. The graph then re-enters `janitor`, then
+`publish_draft`, then `proof_capture`, so publication is re-earned on the
+repaired head. A run may take at most two refresh-repair rounds in total, so a
+turn that leaves the named path or target unrepaired spends a round nothing
+replaces.
+
 This node uses `summary:high` fidelity so the preamble includes prior
 agents' source-labelled responses, not just their status and changed files.
 Read the most recent incoming stage and its full response (or open the
 referenced response artifact). Do not choose an older green proof record
 over that stage's current finding. When several rounds are visible, use
 the incoming stage's latest response, not an earlier round's disposition.
+
+When the most recent incoming stage is `janitor_refresh_route`, it is only the
+router a red janitor passes through: its own response is a routing label. The
+failure to repair is the `janitor` response immediately before it, so read the
+janitor failure output there.
+
+## When the incoming stage is `fix_commit_settle`
+
+The previous fix turn's commit run settled FAILED, so the graph came back here
+instead of running janitor against an incomplete integration. The runner's
+brief for that commit run is in the file `livespec-fix-live-commit` inside the
+git directory (`git rev-parse --git-path livespec-fix-live-commit`): its first
+line is `failed`, and the rest names the commit run, the hook's failed targets
+and its own error lines. Read it with `cat`, fix what it names, and commit
+again through the sandbox commit runner.
+
+If the brief says the settle aborted an in-progress merge or rebase, the tree is
+back at the head that operation began from and the integration is NOT done:
+redo it, resolving each conflicted path on its merits, rather than assuming the
+earlier resolution survived.
+
+## When the previous fix turn left an open Red commit
+
+A fix turn that ends with its last commit carrying `TDD-Red-*` trailers and no
+`TDD-Green-*` trailers has left an OPEN Red: the commit hook accepted the
+correctly failing test on its fast path, so no tree has yet been graded. The
+graph re-enters this node for it instead of sending the run to the janitor.
+When this file exists, you were re-entered for exactly that:
+
+    cat "$(git rev-parse --git-path livespec-fix-open-red-brief)"
+
+The brief names the open Red commit. Do NOT author a new Red commit and do not
+rewrite the test: write the minimum implementation that makes that Red's test
+pass, run the test file, and complete its Green amend through the sandbox commit
+runner (`git commit --amend --no-edit`, so the Red trailer block survives). The
+runner folds engine checkpoint commits sitting above the open Red onto it before
+amending, so issue that runner amend while HEAD is on the checkpoints rather
+than declining because they sit above the Red. Before that runner amend, do not
+run `git reset` with either `--soft` or `--hard`, and do not otherwise rewrite
+the open Red or the checkpoints above it. The test-file bytes must stay identical
+across the pair. A turn that ends with the Red still open spends one of this
+node's eight visits and the run ends at
+`needs_human` when they are used. If the file does not exist, this visit was
+entered on a janitor or proof finding; carry on below.
 
 ## Which proof record is your work order
 
@@ -149,16 +269,17 @@ Make every commit through the sandbox commit runner, which this stage prompt
 names. Start the commit with
 `python3 "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-runner.py" start -- git commit ...`
 (the same `git commit` you would run in the foreground, with its own
-arguments), which prints a run id at once, then repeat
+arguments), which prints a run id at once, then wait once
 `python3 "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-runner.py" wait <run-id> --timeout-seconds 300`
-in later tool calls until it reports a terminal state. The runner invokes the
+in a later tool call. Wait at most once on each commit run you start. If that wait reports `running`, do not call `wait` again and do not stop it. End the turn and leave it for `fix_commit_settle` to wait out. The runner invokes the
 commit unchanged, so the repository hooks still run exactly as they would in
 the foreground. A `running` report is not a failed commit. Only `passed` is a
 commit; `failed` is the hook's refusal, with its exit status and output, and
 `no-verdict` means the commit's process ended without a verdict, so neither is
 a commit. The detached commit run and its bounded waits are the one exception
 to the rule against backgrounding a tool call, and every commit run you start
-must be terminal before your final message.
+must be terminal before your final message. The one exception is the commit run
+that the commit-hook section below tells you to leave for `fix_commit_settle`.
 
 ## What to do
 
@@ -177,55 +298,79 @@ must be terminal before your final message.
    never an edit under an existing Green); commit trailer
    `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`; never
    create or switch branches, never touch `.beads/` or `core.bare`.
-3. Run the repository's check suite (`{{ inputs.sandbox_check_suite }}`)
-   yourself until it is green — ONCE per tree, under the once-per-tree rule
-   below, which counts a commit whose pre-commit hook ran the full suite green
-   on the exact tree it committed as that tree's run.
-4. Re-run the failed reproduction and report the before/after result,
+3. Leave the tree graded by its commit hook, under the rule "A fix turn grades each tree once, through its commit hook" below.
+   Commit the fix through the commit hook, fix any failure the hook names, and
+   commit again; do not start a run of the full check suite yourself.
+4. Re-run the failed reproduction, through the failing tests its output names,
+   and report the before/after result,
    naming the source stage and assertion alongside the diagnosis and fix.
    Suite success alone is not evidence that the semantic finding is fixed.
    The graph still re-earns janitor, capture, review and independent replay;
    do not claim their downstream approval on their behalf.
 
-## The check suite runs ONCE per tree — a commit hook's green run counts
+## A fix turn grades each tree once, through its commit hook
 
-This repository's pre-commit hook runs the whole declared check suite, so a
-commit the hook admitted has ALREADY run that suite in full on the exact tree
-it committed. That hook run IS this turn's run of the suite for that tree.
-Do NOT launch a second run of the suite on a tree a hook already passed it on
-in this turn.
+This repository's pre-commit hook grades what it commits: it runs the
+affected-tests gate's scoped tests and their coverage, or the whole declared
+check suite (`{{ inputs.sandbox_check_suite }}`) when that gate cannot scope the
+change. That hook run IS this turn's grading of the tree it committed.
+This turn directs no run of the full check suite beyond what its commit hook runs.
 
-Two full runs of a long suite inside one turn exhaust this node's time limit by
-construction, and the limit kills the SECOND one — after the fix is committed,
-leaving the turn nothing to show for work it had already finished. Measured
-2026-10-18 on run 01M56YAEWMS8: the pre-commit hook ran the aggregate green in
-1364 seconds, the turn then launched a second aggregate on the identical tree,
-and the 3600-second ceiling killed it.
+This relaxes NOTHING. The `janitor` visit the graph re-enters after a successful
+turn runs the whole suite as a hard gate on the tree you leave, so a full run
+inside this turn only pays for that verdict twice. Measured 2026-11-07 on run
+01M6V7SGBQXFK2V8JHDMTKK0Z2: the janitor had just failed the tree on three named
+tests, the turn started full suite runs on that unchanged tree, read two tool
+calls that had returned without an exit status as passing verdicts, ran three
+full suites at once, and spent its whole 3600-second limit polling them without
+a repair. The three tests failed in 16 seconds when run by name.
 
-This relaxes NOTHING. The suite must still have passed IN FULL on the tree you
-leave the branch at, and the `janitor` visit the graph re-enters after a
-successful turn runs the whole suite again as a hard gate. What changes is only
-that you do not pay for the same tree twice.
-
-So before you end the turn, ask which tree your last full passing run covered:
-
-- A commit whose pre-commit hook ran the FULL suite to a passing result on the
-  exact tree it committed: that tree is COVERED. Leave the branch at that
-  commit and end the turn without running the suite again.
-- The tree CHANGED after that run — a later commit, an amend, or any edit still
-  sitting in the working tree: the suite is OWED on the new tree. Run it in
-  full before the turn ends.
-- No commit in this turn ran the full suite: the suite is OWED. A Red commit
-  takes the hook's fast path, which runs only part of the suite, and a hook run
-  that covered only part of it counts for nothing here. Run it in full before
-  the turn ends.
-- You cannot tell which of these holds: run it in full. This rule removes a
-  duplicate run, never the obligation.
+- Do NOT start a full run of the check suite while `HEAD` and the working tree
+  are unchanged from the tree the preceding `janitor` visit failed on. That
+  visit already ran the suite on this exact tree, and its verdict stands.
+- When you enter from a red janitor, reproduce a failed target by running the
+  failing tests that target's own output names, in one invocation naming them,
+  never by re-running the aggregate target that contains them. If the preamble's
+  tail does not name those tests, open the full janitor response it references
+  and read them there before running anything.
+- A command whose tool call returned WITHOUT an exit status is STILL RUNNING
+  and has produced NO verdict. It is not a pass, not a failure, and not
+  evidence that a failure is "not reproducible". Wait for its own exit, or read
+  its recorded output, before you draw any conclusion from it.
+- Do NOT start a full run of the check suite while another full run you started is still live.
+  Two or three concurrent suites each run at a fraction of the speed, and a
+  second one cannot overtake the first. Check for a live run before you start
+  anything long, and never kill one the commit hook started.
+- A tree that CHANGED after your last passing commit-hook run, or whose only
+  commit took the hook's Red fast path, which grades only part of the suite, is
+  not yet graded: commit that tree through the commit hook to a passing result before the turn ends.
+  A change is a later commit, an amend, or any edit still sitting in the
+  working tree. Do not run the full check suite beyond what that hook runs.
 
 The same rule governs the refresh-repair steps above, on the tree the repair
-produced: a commit whose hook ran the full suite green on the INTEGRATED tree
-is that tree's run, and no second run of the suite on that integrated tree is
-owed in the same turn.
+produced: a commit whose hook passed on the INTEGRATED tree grades that tree,
+and no run of the full check suite on that integrated tree is directed in the
+same turn.
+
+## Default-branch attribution is evidence, never a guess
+
+Call a failure inherited from `{{ inputs.default_branch }}` ONLY after you
+run EVERY failed test named by the janitor aggregate or refresh-repair brief
+against the default branch's own tree in this sandbox and see that test FAIL there.
+Account for EVERY failed target named by the janitor aggregate or refresh-repair brief;
+do not decide attribution from only one target while another named target or
+check-suite worker is still running.
+
+For each named test, record its result on the default branch's tree and its result on this run's tree.
+A test that PASSES on the default branch's tree and FAILS on this run's tree
+is caused by this run's own work, including the integration a refresh-repair round performs.
+Fix it inside this turn; do NOT route it to needs_human. Do NOT stop a still-running check-suite worker
+in order to end the turn on another target's attribution.
+
+If you take the needs-human protocol because a failure is inherited, its reason
+must name EACH failed test together with its result on the default branch's tree
+and its result on this run's tree. An untested target, or a target whose result on either tree is unknown,
+is not evidence of inherited attribution.
 
 ## A commit hook outlasts a tool call — a return is not a verdict
 
@@ -258,11 +403,23 @@ So, for every commit in this stage:
 - DO NOT START ANOTHER `git commit` WHILE ONE IS STILL LIVE. Two hook runs
   must never execute at once in this sandbox, and a second attempt cannot
   overtake the one already running.
-- DO NOT END YOUR TURN WHILE A COMMIT HOOK YOU STARTED IS STILL RUNNING. The
-  turn-end rule below forbids LEAVING a tool call running in the background;
-  a commit hook is waited out in the FOREGROUND until it exits, and only then
-  is the final message written. Stopping while it runs abandons work that was
-  about to pass and reports it as partial progress.
+- DO NOT END YOUR TURN WHILE A COMMIT HOOK IS STILL RUNNING INSIDE YOUR OWN
+  FOREGROUND `git commit` TOOL CALL. That commit is waited out in the
+  FOREGROUND until it exits, and only then is the final message written.
+  Stopping while it runs abandons work that was about to pass and reports it
+  as partial progress.
+- A COMMIT RUN THAT YOU STARTED THROUGH THE COMMIT RUNNER AND THAT THE RUNNER
+  STILL REPORTS AS RUNNING IS LEFT FOR `fix_commit_settle`. When the only work
+  this turn has left is such a commit, end the turn as SUCCEEDED, not failed,
+  and name that commit run's id in your final message. Do not keep calling
+  `wait` until the turn's time limit: a turn cut at its limit, or one that
+  ends failed, takes `fix -> needs_human`, `fix_commit_settle` never runs, and
+  the commit's verdict is lost. The graph's `fix_commit_settle` node waits that
+  commit run out and hands the janitor its verdict. This commit run is the
+  exception to the turn-end rule below; do not stop it. Wait at most once on
+  each commit run you start. If that wait reports `running`, do not call `wait`
+  again and do not stop it. End the turn and leave it for `fix_commit_settle`
+  to wait out.
 
 ## When the failure is not auto-resolvable (needs-human protocol)
 
