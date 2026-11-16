@@ -82,9 +82,9 @@ HOST_PUBLISH_PORT="${HOST_PUBLISH_PORT:-32283}"
 HOST_FABRO_BIN="${HOST_FABRO_BIN:-$HOME/.fabro/bin/fabro}"
 
 # GitHub org/repo coordinates for the two in-container fresh clones.
-DISPATCHER_ORG="${DISPATCHER_ORG:-thewoolleyman}"
+DISPATCHER_ORG="${DISPATCHER_ORG:-livespec-ai}"
 DISPATCHER_REPO="${DISPATCHER_REPO:-livespec-orchestrator-beads-fabro}"
-TARGET_ORG="${TARGET_ORG:-thewoolleyman}"
+TARGET_ORG="${TARGET_ORG:-$DISPATCHER_ORG}"
 TARGET_REPO="${TARGET_REPO:-}"
 
 # In-container clone venues (under /workspace, NOT /tmp — coverage omit guard).
@@ -121,7 +121,7 @@ Modes:
 
 Options:
   --target-repo NAME   Required. The dispatch-target repo name (tenant DB == name).
-  --target-org ORG     GitHub org of the target. Default: thewoolleyman.
+  --target-org ORG     GitHub org of the target. Default: the dispatcher org (livespec-ai).
   --item ID            Required for --run. A ready work-item id in the target ledger.
   --image NAME         Docker image tag. Default: livespec-orchestrator:dev.
   --container NAME     Container name. Default: livespec-orch-realwork.

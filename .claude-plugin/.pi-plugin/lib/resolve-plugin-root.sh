@@ -45,15 +45,21 @@ if ! project_root="$(cd "$project_root" 2>/dev/null && pwd)"; then
     exit 1
 fi
 
-clone_suffix="git/github.com/thewoolleyman/$plugin_name/.claude-plugin"
+# pi clones a git package under git/github.com/<owner>/<repo>. The canonical owner is
+# livespec-ai; thewoolleyman stays a FALLBACK so a clone made before the owner move
+# still resolves. Candidates are tried owner-first.
+clone_owners=(livespec-ai thewoolleyman)
 
 candidates=()
 if [ -n "${LIVESPEC_ORCH_PLUGIN_ROOT:-}" ]; then
     candidates+=("$LIVESPEC_ORCH_PLUGIN_ROOT")
 fi
 candidates+=("$project_root/.claude-plugin")
-candidates+=("$project_root/.pi/$clone_suffix")
-candidates+=("${HOME:-}/.pi/agent/$clone_suffix")
+for clone_owner in "${clone_owners[@]}"; do
+    clone_suffix="git/github.com/$clone_owner/$plugin_name/.claude-plugin"
+    candidates+=("$project_root/.pi/$clone_suffix")
+    candidates+=("${HOME:-}/.pi/agent/$clone_suffix")
+done
 
 is_this_plugin() {
     manifest="$1/plugin.json"
@@ -93,7 +99,7 @@ done
         printf 'a missing install — fix or unset it before installing anything.\n\n'
     fi
     printf 'Install this plugin as a project-scope pi package from the repo root:\n'
-    printf '    pi install git:github.com/thewoolleyman/%s@release -l\n\n' "$plugin_name"
+    printf '    pi install git:github.com/livespec-ai/%s@release -l\n\n' "$plugin_name"
     printf 'pi resolves project packages only after the project is TRUSTED, so a\n'
     printf 'non-interactive run (-p, --mode json, --mode rpc) in an untrusted\n'
     printf 'project silently loads nothing. Establish trust before driving\n'

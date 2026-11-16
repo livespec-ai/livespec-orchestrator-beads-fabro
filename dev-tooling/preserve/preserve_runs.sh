@@ -30,14 +30,15 @@ read_copy_record() {
   RECORD_SHA=$(sed -n 's/^sha=//p' "$d.preserve" | head -n 1)
 }
 # The repositories this script preserves runs for: a pre-sidecar copy records none, so its preserve ref
-# is looked up on each of these. PRESERVE_REPOS (space-separated URLs) overrides the fleet default.
+# is looked up on each of these. PRESERVE_REPOS (space-separated URLs) overrides the fleet default;
+# PRESERVE_OWNER (default livespec-ai) names the GitHub owner of the default list.
 fleet_repos() {
   local r
   if [ -n "${PRESERVE_REPOS:-}" ]; then printf '%s\n' $PRESERVE_REPOS; return; fi
   for r in livespec livespec-dev-tooling livespec-driver-claude livespec-driver-codex livespec-driver-pi \
            livespec-orchestrator-beads-fabro livespec-orchestrator-git-jsonl livespec-runtime \
            livespec-console-beads-fabro livespec-overseer; do
-    printf 'https://github.com/thewoolleyman/%s\n' "$r"
+    printf 'https://github.com/%s/%s\n' "${PRESERVE_OWNER:-livespec-ai}" "$r"
   done
 }
 read_origin_ref() { GIT_TERMINAL_PROMPT=0 git ls-remote "$1" "$2" 2>/dev/null | awk 'NR == 1 { print $1 }'; }
