@@ -37,10 +37,11 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
 import subprocess
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -1413,3 +1414,57 @@ def _tmp_path_stays_removable(tmp_path: Path) -> Iterator[None]:
     yield
     for directory, _subdirectories, _files in os.walk(tmp_path):
         Path(directory).chmod(Path(directory).stat().st_mode | 0o700)
+
+
+_CALL_REPORT = pytest.StashKey[pytest.TestReport]()
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(
+    item: pytest.Item,
+) -> Generator[None, pytest.TestReport, pytest.TestReport]:
+    """Remember each test's call report so a fixture can tell at teardown whether it passed."""
+    report = yield
+    if report.when == "call":
+        item.stash[_CALL_REPORT] = report
+    return report
+
+
+def _make_removable(*, root: Path) -> None:
+    """Restore the owner write bit on every directory under `root` so it can be removed."""
+    for directory, _subdirectories, _files in os.walk(root):
+        Path(directory).chmod(Path(directory).stat().st_mode | 0o700)
+
+
+@pytest.fixture(autouse=True)
+def _factory_dirs_removed(
+    request: pytest.FixtureRequest,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[None]:
+    """Remove the `tmp_path_factory.mktemp` directories a PASSING test made.
+
+    pytest's `tmp_path_retention_policy` prunes only the `tmp_path` fixture's own
+    directory, so every directory a fixture makes through `mktemp` (seven per test in
+    this file) stayed in /tmp and, at about 105k files per suite run, exhausted a seat
+    host's tmpfs inodes (livespec-dev-tooling-jxhi63, 2026-11-16). The directories a
+    test makes are recorded here and, when its call phase passed, made writable and
+    removed; a failing test keeps them for diagnosis, as the `failed` policy keeps its
+    `tmp_path`. Higher-scoped fixtures are set up before this function-scoped one, so
+    a session or module directory is never recorded.
+    """
+    made: list[Path] = []
+    original = tmp_path_factory.mktemp
+
+    def recording(basename: str, *, numbered: bool = True) -> Path:
+        path = original(basename, numbered=numbered)
+        made.append(path)
+        return path
+
+    monkeypatch.setattr(tmp_path_factory, "mktemp", recording)
+    yield
+    report = request.node.stash.get(_CALL_REPORT, None)
+    if report is not None and report.passed:
+        for path in made:
+            _make_removable(root=path)
+            shutil.rmtree(path, ignore_errors=True)
