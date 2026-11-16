@@ -441,6 +441,39 @@ def test_the_judgement_is_told_a_configuration_bullet_is_not_unratified_behaviou
     assert "still unstated" in judged
 
 
+def test_the_judgement_is_told_an_internal_item_needs_no_new_clause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path=tmp_path)
+    captured = tmp_path / "judge-prompts"
+    captured.mkdir()
+    script = tmp_path / "capturing-judge"
+    _ = script.write_text(
+        "#!/bin/sh\n"
+        f"n=$(ls {captured} | wc -l | tr -d ' ')\n"
+        f'{{ printf "%s\\n" "$@"; cat; }} > {captured}/prompt-$n\n'
+        'if [ "$n" = 0 ]; then echo bug; else\n'
+        f"cat <<'REPLY'\n{_STATED}\nREPLY\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("LIVESPEC_DOD_JUDGEMENT_CLAUDE_PATH", str(script))
+    append_work_item(path=_config(repo=repo), item=_item())
+
+    _ = classify_item_spec_change_tier(
+        item=_item(), repo=repo, path=_config(repo=repo), stage=STAGE_FILING
+    )
+
+    judged = (captured / "prompt-1").read_text(encoding="utf-8")
+    assert "Judging rule for internal items." in judged
+    assert "no contract between components or repositories" in judged
+    assert "no safety or security guarantee" in judged
+    assert "no promise to users or operators" in judged
+    assert "needs no new clause" in judged
+    assert 'report the behaviour "stated"' in judged
+
+
 def test_the_tier_gate_labels_its_own_spawns_not_the_drift_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

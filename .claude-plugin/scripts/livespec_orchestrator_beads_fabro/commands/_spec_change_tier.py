@@ -124,6 +124,13 @@ the behaviour that clause governs; the repository's own choice of it is a fact
 about the repository that the specification does not and cannot state, so it
 must not lower the verdict to "partial" or "unstated". Behaviour the ratified
 text genuinely does not state is still unstated, and the verdict must say so.
+
+Judging rule for internal items. An item is internal when it changes
+no contract between components or repositories,
+no safety or security guarantee and
+no promise to users or operators. Code and tests, a flake fix, a bug fix and a
+process rule are internal. An internal item needs no new clause, so
+report the behaviour "stated".
 """
 
 # A topic stem is lowercase-kebab, which is the form every proposal under
