@@ -701,14 +701,52 @@ def _hermetic_admission_slot_chooser() -> Iterator[None]:
     """
     from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_selector import (
         register_admission_slot_chooser,
-        register_claude_credential_policy,
     )
 
     register_admission_slot_chooser(chooser=None)
-    register_claude_credential_policy(policy=None)
     yield
     register_admission_slot_chooser(chooser=None)
-    register_claude_credential_policy(policy=None)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_claude_credential_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read an UNDECLARED Claude credential policy as `legacy-independent` in a test.
+
+    The Dispatcher refuses every Claude-credential operation in a repository that
+    declares no `dispatcher.claude_credential_policy` (SPECIFICATION v382). The
+    suite's fixture repositories predate the key and exercise everything else
+    about a dispatch, so for THEM an absent declaration stands in as the explicit
+    `legacy-independent` mode -- the pool rule they were all written against.
+    A declared policy, valid or not, is read exactly as committed.
+
+    This is a TEST seam, never a product one: production has no default. A test
+    asserting the absent-policy refusal restores the real resolver itself
+    (`test_dispatcher_claude_credential_policy.py` does, for its whole module).
+    """
+    from livespec_orchestrator_beads_fabro.commands import (
+        _dispatcher_claude_credential_policy as credential_policy,
+    )
+    from returns.io import IOResult, IOSuccess
+    from returns.unsafe import unsafe_perform_io
+
+    real = credential_policy.resolve_claude_credential_policy
+    legacy = credential_policy.ClaudeCredentialPolicy(
+        mode=credential_policy.LEGACY_INDEPENDENT, slots=()
+    )
+
+    def legacy_when_undeclared(
+        *, cwd: Path
+    ) -> IOResult[Any, credential_policy.PolicySettingUnreadable]:
+        declared = credential_policy.read_dispatcher_config_value(
+            cwd=cwd, key=credential_policy.CLAUDE_CREDENTIAL_POLICY_KEY
+        )
+        if unsafe_perform_io(declared.value_or(legacy)) is None:
+            return IOSuccess(legacy)
+        return real(cwd=cwd)
+
+    monkeypatch.setattr(
+        credential_policy, "resolve_claude_credential_policy", legacy_when_undeclared
+    )
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]

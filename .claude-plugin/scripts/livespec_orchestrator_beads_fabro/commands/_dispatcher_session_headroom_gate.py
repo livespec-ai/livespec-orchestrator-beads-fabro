@@ -81,8 +81,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_codex_headroom_io im
     read_projected_codex_headroom,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_selector import (
-    injected_credential_slots,
-    install_claude_credential_policy,
+    policy_pool_slots,
     register_admission_slot_chooser,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_policy_settings import (
@@ -217,17 +216,15 @@ def session_headroom_policy(
             DEFAULT_SESSION_HEADROOM_HORIZON_MINUTES
         )
     )
-    # The declared credential policy is read with the dials and registered before
-    # the pool is assessed, so the pool and every downstream consumer see the
-    # same allow-list. A policy that is written but unreadable fails CLOSED to an
-    # empty declared pool rather than open to whatever the wrapper injects.
-    install_claude_credential_policy(repo=repo)
     taken: list[PoolSelection] = []
 
     def pool_once() -> PoolSelection:
         if not taken:
             taken.append(
                 _assessed_pool(
+                    # The declared credential policy decides the pool, read when
+                    # the pool is; an absent or invalid one assesses no slot.
+                    pool=lambda: policy_pool_slots(repo=repo, environ=os.environ),
                     read=read,
                     floor_percent=floor,
                     horizon_minutes=horizon,
@@ -309,6 +306,7 @@ def _assessed(
 
 def _assessed_pool(
     *,
+    pool: Callable[[], tuple[str, ...]],
     read: Callable[..., SessionHeadroomReading],
     floor_percent: int,
     horizon_minutes: int,
@@ -321,7 +319,7 @@ def _assessed_pool(
     the filter grades exactly as it always has. The chosen slot is whatever
     `select_pool_slot` ranks first; the caam-published account plays no part.
     """
-    slots = injected_credential_slots(environ=os.environ)
+    slots = pool()
     if not slots:
         lone = _assessed(
             reading=read(token=None, observed_at=now_iso),

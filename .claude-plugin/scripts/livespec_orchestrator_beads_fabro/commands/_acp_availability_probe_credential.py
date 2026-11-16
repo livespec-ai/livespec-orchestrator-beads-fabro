@@ -58,6 +58,9 @@ from livespec_orchestrator_beads_fabro.commands._acp_session_headroom import (
     headroom_covers_candidate,
 )
 from livespec_orchestrator_beads_fabro.commands._config import dispatcher_block
+from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential_policy import (
+    ClaudeCredentialRefusal,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_selector import (
     select_factory_credential,
 )
@@ -120,10 +123,13 @@ def project_probe_credential(  # noqa: PLR0913 — kw-only probe inputs; each is
     if not _is_claude_candidate(candidate=candidate, builtin=builtin):
         return NO_PROBE_CREDENTIAL
     choice = select_factory_credential(
+        repo=repo,
         environ=os.environ,
         home=Path.home(),
         warn=lambda message: write_stderr(text=f"livespec-dispatch: {message}\n"),
     )
+    if isinstance(choice, ClaudeCredentialRefusal):
+        return f"the probe refused under the declared Claude credential policy: {choice.detail}"
     token = os.environ.get(choice.env_name, "")
     if token == "":
         return NO_PROBE_CREDENTIAL

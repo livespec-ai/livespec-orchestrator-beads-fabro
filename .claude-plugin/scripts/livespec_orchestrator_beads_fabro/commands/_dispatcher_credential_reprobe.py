@@ -106,9 +106,12 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_acp_preflight import
 from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential import (
     ClaudeCredentialStatus,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential_policy import (
+    ClaudeCredentialRefusal,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_env import (
     assess_resolved_credential,
-    projected_credential_env_name,
+    projected_credential,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_rotation import (
     RotatedCredential,
@@ -182,7 +185,11 @@ def await_usable_credential(  # noqa: PLR0913 — kw-only wait inputs; `runner` 
             DEFAULT_CREDENTIAL_REPROBE_INTERVAL_SECONDS
         )
     )
-    env_name = projected_credential_env_name()
+    env_name = projected_credential(repo=repo)
+    if isinstance(env_name, ClaudeCredentialRefusal):
+        # No declared credential to wait on: admission and the projection refuse
+        # the dispatch under the same policy, so waiting would only delay that.
+        return
     command = ShellCommandRunner() if runner is None else runner
     while budget > 0:
         rotated = resolve_rotated_credential(

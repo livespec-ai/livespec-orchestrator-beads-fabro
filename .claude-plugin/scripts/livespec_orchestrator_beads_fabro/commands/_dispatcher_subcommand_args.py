@@ -68,6 +68,7 @@ def add_codex_cred_refresh_arguments(*, parser: argparse.ArgumentParser) -> None
 
 
 def add_claude_cred_status_arguments(*, parser: argparse.ArgumentParser) -> None:
+    _ = parser.add_argument("--repo", dest="repo", default=None)
     _ = parser.add_argument("--json", dest="as_json", action="store_true")
 
 

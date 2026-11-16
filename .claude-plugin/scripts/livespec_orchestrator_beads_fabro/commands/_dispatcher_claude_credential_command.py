@@ -19,6 +19,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential_io
     CLAUDE_CREDENTIAL_PROBE_TIMEOUT_SECONDS,
     probe_claude_credential,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential_policy import (
+    ClaudeCredentialRefusal,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_selector import (
     select_factory_credential,
 )
@@ -30,6 +33,8 @@ __all__: list[str] = [
 ]
 
 _WRAPPER_HINT = "the target repo's configured credential_wrapper"
+# A refusal under the declared Claude credential policy is a precondition error.
+_EXIT_PRECONDITION_ERROR = 3
 
 
 def assess_claude_credential(
@@ -63,10 +68,14 @@ def run_claude_cred_status(*, args: argparse.Namespace) -> int:
     about which pool slot answered for it.
     """
     choice = select_factory_credential(
+        repo=Path(args.repo) if args.repo is not None else Path.cwd(),
         environ=os.environ,
         home=Path.home(),
         warn=lambda message: write_stderr(text=f"livespec-dispatch: {message}\n"),
     )
+    if isinstance(choice, ClaudeCredentialRefusal):
+        _ = write_stderr(text=f"livespec-dispatch: claude-cred-status refused: {choice.detail}\n")
+        return _EXIT_PRECONDITION_ERROR
     status = assess_claude_credential(
         token=os.environ.get(choice.env_name),
         probe=probe_claude_credential,
