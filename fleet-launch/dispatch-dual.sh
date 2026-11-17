@@ -73,6 +73,8 @@ GMK_Q=$FLEET_LAUNCH_GMK_QUEUE_DIR
 GMK_LOCK=$FLEET_LAUNCH_GMK_LOCK_DIR
 # shellcheck source=fleet-launch/launch-lib.sh
 . "$FLEET_LAUNCH_DIR/launch-lib.sh"
+# Under the gate runner's stall cap this detaches into its own session and exits; see launch-lib.sh.
+detach_if_under_gate_runner
 # A mi-homelab or arm64 launcher orders its ticket only among tickets of its own class
 # (ticket line server=hl); a gmktec launcher ignores those. The mutex and the fleet cap are shared.
 FIFO_CLASS=gmk; [ -n "${ONLY_HL:-}${ONLY_ARM:-}" ] && FIFO_CLASS=hl

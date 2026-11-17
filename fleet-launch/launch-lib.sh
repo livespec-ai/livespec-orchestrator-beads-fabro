@@ -11,6 +11,41 @@
 # Like config.sh and board-snapshot.sh, this file is read when a launcher starts
 # and is not part of the launcher version launcher-versions.sh reports.
 
+# --- the gate runner's stall cap ----------------------------------------------
+# `just gate-start` (dev-tooling/gate-run.sh) ends the gate's WHOLE process group after
+# LIVESPEC_SUITE_GREEN_STALL_SECONDS (900) without output. A launcher started through it was
+# killed with its drive at 15m07s on four gate runs on 2026-11-17 while the factory run went on,
+# so no host-side watchdog owned the run and a needs_human item sat active and claimed until
+# reconcile-runs. The runner exports LIVESPEC_GATE_RUN_PROGRESS_STAMP into everything it runs;
+# that variable is the marker.
+#
+# detach_if_under_gate_runner: call it once, right after launch-lib.sh is sourced, from a
+# launcher that has set SELF and LAUNCHER_ARGS. Under the marker it re-executes the launcher in
+# a NEW SESSION (setsid nohup) with the marker removed, so neither the runner's process-group
+# kill nor a recursive detach can reach it, writes the child's output to a log file under
+# FLEET_LAUNCH_STATE_DIR, names the detached pid and that log on stdout, and exits 0 at once.
+# FLEET_LAUNCH_ALLOW_UNDER_GATE=1 opts out and runs in place. The detached child records one
+# line naming its own pid, session and parent, then runs the launcher as it always did.
+detach_if_under_gate_runner() {
+  local log pid session stamp=absent
+  if [ -n "${FLEET_LAUNCH_DETACHED_FROM:-}" ]; then
+    session=$(sed 's/^.*) //' "/proc/$$/stat" 2>/dev/null | awk '{print $4}')
+    [ -z "${LIVESPEC_GATE_RUN_PROGRESS_STAMP:-}" ] || stamp=present
+    printf '%s detached launcher: pid=%s session=%s parent=%s gate-stamp=%s\n' "$(date -u +%FT%TZ)" "$$" "${session:-unknown}" \
+      "$FLEET_LAUNCH_DETACHED_FROM" "$stamp"
+    return 0
+  fi
+  [ -n "${LIVESPEC_GATE_RUN_PROGRESS_STAMP:-}" ] || return 0
+  [ "${FLEET_LAUNCH_ALLOW_UNDER_GATE:-}" = 1 ] && return 0
+  mkdir -p "$FLEET_LAUNCH_STATE_DIR" || { echo "fleet-launch: cannot create $FLEET_LAUNCH_STATE_DIR to detach under the gate runner" >&2; exit 1; }
+  log="$FLEET_LAUNCH_STATE_DIR/detached-$(basename "$SELF" .sh)-$(date -u +%Y%m%dT%H%M%SZ)-$$.log"
+  env -u LIVESPEC_GATE_RUN_PROGRESS_STAMP FLEET_LAUNCH_DETACHED_FROM="$$" setsid nohup bash "$SELF" "${LAUNCHER_ARGS[@]}" > "$log" 2>&1 < /dev/null &
+  pid=$!
+  printf 'fleet-launch: started under the gate runner, whose %ss stall cap would end this launcher and its drive; detached pid %s, log file %s\n' \
+    "${LIVESPEC_SUITE_GREEN_STALL_SECONDS:-900}" "$pid" "$log"
+  exit 0
+}
+
 # --- tenant credential wrapper -----------------------------------------------
 # Every launch-time command that reaches the target repository's ledger or
 # Dispatcher runs under that repository's committed `credential_wrapper`, the

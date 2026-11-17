@@ -117,6 +117,7 @@ def test_red_preview_stages_exactly_the_named_test_ignoring_handoff_and_other_ch
     report = cast("dict[str, Any]", json.loads(completed.stdout.splitlines()[-1]))
     assert report == {
         "failed_targets": [_FAILED_TARGET],
+        "preview_ran": True,
         "status": 1,
         "unset_variables": ["LIVESPEC_CHECK_SKIP"],
     }

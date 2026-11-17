@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -11,8 +12,15 @@ from livespec_orchestrator_beads_fabro._incident_authority_types import (
     IncidentReading,
 )
 from livespec_orchestrator_beads_fabro._incident_drill_evidence import recorded_drill_evidence
-from livespec_orchestrator_beads_fabro._incident_phases import lifecycle_state_for
-from livespec_orchestrator_beads_fabro._store_claim_tokens import change_claim
+from livespec_orchestrator_beads_fabro._incident_phases import (
+    lifecycle_state_for,
+    stored_status_for,
+)
+from livespec_orchestrator_beads_fabro._store_claim_tokens import (
+    TRANSITION_WAIT_SECONDS,
+    ClaimChangeResult,
+    change_claim,
+)
 from livespec_orchestrator_beads_fabro.effects._incident_authority_reader import read_history
 from livespec_orchestrator_beads_fabro.effects._incident_authority_transition import (
     commit_transition,
@@ -99,6 +107,41 @@ def _recover_or_commit(
     return committed
 
 
+_POLL_SECONDS = 5.0
+# Injectable time, so a test can advance the claim-transition wait without sleeping.
+_clock = time.monotonic
+_sleep = time.sleep
+
+
+def _change_waiting_out_transition(*, client: BeadsClient, item_id: str) -> ClaimChangeResult:
+    """Write the closed lifecycle status, waiting out a stranded claim transition.
+
+    A crashed earlier attempt leaves its claim token closed with a successor
+    named. `change_claim` reports that as pending until its observation window
+    has passed, and it keeps the first observation only in the dict the caller
+    passes, so one shared dict and a bounded poll let a re-run finish the close
+    instead of refusing forever on a fresh dict.
+    """
+    observations: dict[tuple[str, str, str], float] = {}
+    deadline = _clock() + TRANSITION_WAIT_SECONDS + _POLL_SECONDS
+    while True:
+        result = change_claim(
+            client=client,
+            work_item_id=item_id,
+            writer="incident-drill-close",
+            intent="drill-close",
+            claim_tokens=True,
+            status=stored_status_for(phase=_PHASE) or "",
+            clear_assignee=True,
+            still_as_decided=lambda row: row.get("status") == "active",
+            clock=_clock,
+            transition_observations=observations,
+        )
+        if result.outcome != "claim-transition-pending" or _clock() >= deadline:
+            return result
+        _sleep(_POLL_SECONDS)
+
+
 def _publish_lifecycle(
     *, client: BeadsClient, committed: IncidentReading
 ) -> DrillClose | AuthorityRefusal:
@@ -106,18 +149,9 @@ def _publish_lifecycle(
     if isinstance(current, AuthorityRefusal):
         return current
     existing = client.show_issue(issue_id=committed.attempt.item_id)
-    if existing.get("status") == "done" and existing.get("assignee") is None:
+    if existing.get("status") in {"done", "closed"} and existing.get("assignee") is None:
         return _closed(reading=committed)
-    result = change_claim(
-        client=client,
-        work_item_id=committed.attempt.item_id,
-        writer="incident-drill-close",
-        intent="drill-close",
-        claim_tokens=True,
-        status=lifecycle_state_for(phase=_PHASE) or "",
-        clear_assignee=True,
-        still_as_decided=lambda row: row.get("status") == "active",
-    )
+    result = _change_waiting_out_transition(client=client, item_id=committed.attempt.item_id)
     if result.outcome != "applied":
         return _refusal(code="incident-drill-close-lifecycle-refused", detail=result.outcome)
     return _closed(reading=committed)

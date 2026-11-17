@@ -103,8 +103,9 @@ def preview(stage, test_file):
     root = Path(git("rev-parse", "--show-toplevel", cwd=Path.cwd()).stdout.strip())
     paths = selected_paths(stage, root, test_file)
     if not paths:
-        return 2, [], []
+        return 2, [], [], False
     preview_root = Path(tempfile.mkdtemp(prefix="livespec-gate-preview-"))
+    unset = []
     try:
         git("worktree", "add", "--detach", "--quiet", str(preview_root), "HEAD", cwd=root)
         for path in paths:
@@ -115,12 +116,20 @@ def preview(stage, test_file):
         ).stdout.strip()
         hook = Path(hook_path)
         if not hook.is_file():
-            return 0, [], []
+            return 0, [], unset, True
         environment, unset = skipped_environment()
+        trust = command("mise", "trust", cwd=preview_root, env=environment, check=False)
+        trust_output = trust.stdout + trust.stderr
+        if trust.returncode:
+            sys.stderr.write(trust_output)
+            return trust.returncode, [], unset, False
         result = command(str(hook), cwd=preview_root, env=environment, check=False)
         output = result.stdout + result.stderr
         sys.stdout.write(output)
-        return result.returncode, failed_targets(output), unset
+        return result.returncode, failed_targets(output), unset, True
+    except (OSError, RuntimeError) as error:
+        print(error, file=sys.stderr)
+        return 2, [], unset, False
     finally:
         command("git", "worktree", "remove", "--force", str(preview_root), cwd=root, check=False)
         shutil.rmtree(preview_root, ignore_errors=True)
@@ -133,10 +142,15 @@ def main():
     args = parser.parse_args()
     if (args.stage == "red") != (args.test_file is not None):
         parser.error("red requires the test file path commit_red will stage; green takes none")
-    status, targets, unset = preview(args.stage, args.test_file)
+    status, targets, unset, preview_ran = preview(args.stage, args.test_file)
     print(
         json.dumps(
-            {"status": status, "failed_targets": targets, "unset_variables": unset},
+            {
+                "status": status,
+                "failed_targets": targets,
+                "preview_ran": preview_ran,
+                "unset_variables": unset,
+            },
             sort_keys=True,
         )
     )

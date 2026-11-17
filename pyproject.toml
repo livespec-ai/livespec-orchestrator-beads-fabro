@@ -70,7 +70,7 @@ dev = [
 # module uses its types module for the canonical cross-repo manifest shape.
 # Pin matches livespec's pin (>=0.2.0; ~/livespec).
 [tool.uv.sources]
-livespec-dev-tooling = { git = "https://github.com/livespec-ai/livespec-dev-tooling.git", tag = "v1.211.0" }
+livespec-dev-tooling = { git = "https://github.com/livespec-ai/livespec-dev-tooling.git", tag = "v1.216.0" }
 livespec-runtime = { git = "https://github.com/livespec-ai/livespec-runtime.git", tag = "v0.32.0" }
 
 # ---------------------------------------------------------------------------
@@ -374,6 +374,13 @@ exclude_also = [
 # ---------------------------------------------------------------------------
 
 [tool.livespec_dev_tooling]
+# Org merge-queue cutover (plan stale-base-merge-options, epic
+# livespec-dev-tooling-xowhol). The incident recovery principal's GitHub App
+# id, the ONLY bypass actor branch_protection_alignment admits on a
+# queue-required repository's default-branch rulesets: the
+# livespec-ai-incident-recovery org App's Integration id. An App id is not a
+# secret.
+recovery_bypass_integration_id = 5761967
 # The merge queue's trusted authors (org merge-queue cutover, carrier bd-ib-bcxyfa).
 # ci.yml's merge-group-guard reads this list at the merge group's BASE commit and
 # routes the group to hosted capacity unless every queued PR is same-repository and
