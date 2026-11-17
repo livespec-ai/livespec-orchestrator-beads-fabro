@@ -87,8 +87,8 @@ Module-level rules an agent editing this tree must follow:
   `rank` + `audit` in metadata JSON; origin / gap-id / resolution /
   admission / acceptance / blocked-reason labels; depends_on via `blocks`
   edges; superseded_by via the `supersedes` edge; spec_commitment_hint
-  via native `spec_id`) is authoritative in
-  `dev-tooling/implementation/research/beads-schema-mapping.md`.
+  via native `spec_id`) is authoritative in that same section; the
+  research note it was derived from is retired.
 - Domain errors vs bugs: surface EXPECTED errors as the `errors.py`
   exception types (the `Beads*Error` classes for backend failures) and
   catch them at the supervisor (`commands/<cmd>.main()`); raise
