@@ -24,6 +24,11 @@ mkdir -p "${WORK}/wt-branch/.beads"
 
 cat >"${WORK}/bin/ssh" <<'STUB'
 #!/bin/sh
+case " $* " in
+    *" -O check "*)
+        echo check >>"$STUB_SSH_CHECKLOG"
+        exit "${STUB_CHECK_EXIT:-0}" ;;
+esac
 printf '%s\n' "$@" >"$STUB_SSH_ARGS"
 if [ -n "${STUB_SSH_EXIT:-}" ]; then exit "$STUB_SSH_EXIT"; fi
 for last in "$@"; do :; done
@@ -59,7 +64,7 @@ export LIVESPEC_BD_REMOTE_LOG="${WORK}/remote.log"
 export LIVESPEC_BD_GUARD_OTLP=off
 export LIVESPEC_BD_GUARD_MODE_FILE="${WORK}/no-such-mode-file"
 export LIVESPEC_BD_GUARD_MODE=warn
-export STUB_SSH_ARGS="${WORK}/ssh-args" STUB_SSH_DECODED="${WORK}/decoded" STUB_REAL_ARGS="${WORK}/real-args"
+export STUB_SSH_ARGS="${WORK}/ssh-args" STUB_SSH_DECODED="${WORK}/decoded" STUB_REAL_ARGS="${WORK}/real-args" STUB_SSH_CHECKLOG="${WORK}/checklog"
 
 PASS=0; FAIL=0
 pass() { PASS=$((PASS + 1)); echo "  ok:   $1"; }
@@ -68,7 +73,7 @@ fail() { FAIL=$((FAIL + 1)); echo "  FAIL: $1" >&2; }
 # run CWD ARGV... -> OUT ERR RC (via the guard, as installed `bd` would be)
 run() {
     local cwd="$1"; shift
-    rm -f "$STUB_SSH_ARGS" "$STUB_SSH_DECODED" "$STUB_REAL_ARGS"
+    rm -f "$STUB_SSH_ARGS" "$STUB_SSH_DECODED" "$STUB_REAL_ARGS" "$STUB_SSH_CHECKLOG"
     OUT=$(cd "$cwd" && "$GUARD" "$@" 2>"${WORK}/err"); RC=$?
     ERR=$(cat "${WORK}/err")
 }
@@ -137,14 +142,23 @@ printf 'CONTROL_SOCKET=%s\nSSH_TARGET=vps-ctl\n' "${WORK}/regular" >"${WORK}/c3.
 LIVESPEC_BD_REMOTE_CONF="${WORK}/c3.conf" run "$REPO" list
 if ran_local && ! ran_remote; then pass "control path is not a socket: local, as today"; else fail "not a socket"; fi
 
-# 8. ssh 255 falls back locally, logs to stderr AND the file, runs bd once.
+# 8. liveness check fails: nothing sent, local run, logged to stderr and file.
 rm -f "$LIVESPEC_BD_REMOTE_LOG"
-STUB_SSH_EXIT=255 run "$REPO" list --json
-if ran_remote && ran_local && [ "$OUT" = "local-ran" ] && [ "$RC" -eq 0 ] \
+STUB_CHECK_EXIT=255 run "$REPO" list --json
+if ! ran_remote && ran_local && [ "$OUT" = "local-ran" ] && [ "$RC" -eq 0 ] && [ -f "$STUB_SSH_CHECKLOG" ] \
     && grep -q 'falling back to local bd' <<<"$ERR" && grep -q 'falling back to local bd' "$LIVESPEC_BD_REMOTE_LOG"; then
-    pass "ssh status 255: falls back to local bd and logs to stderr and the log file"
+    pass "check fails: nothing sent, local bd runs, fallback logged to stderr and the log file"
 else
-    fail "255 fallback (rc=$RC err=$ERR)"
+    fail "check-fail fallback (rc=$RC err=$ERR)"
+fi
+
+# 8b. check ok, then ssh 255: never re-run locally, one clear error, exit 255.
+STUB_SSH_EXIT=255 run "$REPO" create --title x
+if ran_remote && ! ran_local && [ "$RC" -eq 255 ] \
+    && [ "$ERR" = "bd-remote: connection to the VPS failed after the command was sent; not retried" ]; then
+    pass "check ok then ssh 255: no local run, exit 255, one error line"
+else
+    fail "post-send 255 (rc=$RC err=$ERR local=$(ran_local && echo y || echo n))"
 fi
 
 # 9. a remote nonzero is returned and NOT retried locally.
@@ -161,6 +175,37 @@ if ! ran_local && [ "$RC" -eq 126 ]; then pass "server denial (126) is returned,
 rm -f "${WORK}/stdin-seen"
 OUT=$(cd "$REPO" && printf 'piped body' | STUB_SSH_STDIN="${WORK}/stdin-seen" "$GUARD" comments add demo-1 2>/dev/null)
 if [ "$(cat "${WORK}/stdin-seen" 2>/dev/null)" = "piped body" ]; then pass "stdin passes straight through to ssh"; else fail "stdin"; fi
+
+# 10b. a fallback after a failed check still receives the original stdin.
+rm -f "$STUB_REAL_ARGS"
+cat >"${WORK}/real-bd-stdin" <<'STUB'
+#!/bin/sh
+cat >"$STUB_REAL_STDIN"
+STUB
+chmod +x "${WORK}/real-bd-stdin"
+(cd "$REPO" && printf 'fallback body' | STUB_CHECK_EXIT=255 STUB_REAL_STDIN="${WORK}/real-stdin" \
+    LIVESPEC_BD_REAL="${WORK}/real-bd-stdin" "$GUARD" comments add demo-1 >/dev/null 2>&1)
+if [ "$(cat "${WORK}/real-stdin" 2>/dev/null)" = "fallback body" ]; then
+    pass "check fails: the local fallback still receives the original stdin"
+else
+    fail "stdin on fallback"
+fi
+
+# 10c. verb allowlist / flag denylist mirror of the server: denied runs local.
+for argv in "sql select 1" "export" "edit x" "init" "import" "config set k v" "config" \
+            "show x -C /tmp" "show x -c /tmp" "show x --global" "show x --GLOBAL" "show x --Db=/p" \
+            "show x --profile p" "show x --directory d" "show x --description-file f" "show x --credentials-file f"; do
+    # shellcheck disable=SC2086
+    run "$REPO" $argv
+    if ran_local && ! ran_remote && [ "$OUT" = "local-ran" ]; then :; else fail "'$argv' did not run local"; fi
+done
+pass "local: sql, export, edit, init, import, config set/bare, and -C/--global/--profile/--directory/... (case-insensitive) run local"
+for argv in "config get k" "config list" "show x" "comment x hi"; do
+    # shellcheck disable=SC2086
+    run "$REPO" $argv
+    if ran_remote && ! ran_local; then :; else fail "'$argv' did not go remote"; fi
+done
+pass "remote: config get/list, show, comment go remote"
 
 # 11. guard create post-processing still works over the remote path.
 run "$REPO" create --title "x"

@@ -15,10 +15,11 @@
 # leading flag, or help/version/completion/send-metrics run LOCAL via the real
 # bd (LIVESPEC_BD_REAL, default /usr/local/bin/bd-real).
 #
-# Fallback rule: if ssh itself cannot start the remote call (status 255) the
-# call runs locally and one line is logged to stderr and to the log file. If the
-# remote bd STARTED and returned any other status, that status is returned and
-# the call is NEVER retried locally (a write must never run twice).
+# Fallback rule: before sending, `ssh -O check` must pass; if it fails nothing
+# was sent, so the call runs locally and one line is logged to stderr and to the
+# log file. Once the command is sent it is NEVER re-run locally (a write must
+# never run twice): ssh's status is returned as is, and 255 (a transport failure
+# that may follow the send) prints one error line and exits 255.
 
 set -u
 
@@ -32,13 +33,33 @@ _local() { exec "$REAL" "$@"; }
 case "$1" in
     -* | help | version | completion | send-metrics) _local "$@" ;;
 esac
+
+# VERB ALLOWLIST and FLAG DENYLIST. THESE LISTS MUST MATCH the server wrapper
+# (livespec-dev-tooling ansible/roles/authorized_keys_managed/files/
+# authorized-keys-bd-exec.sh): anything the server denies runs LOCALLY here.
+case "$1" in
+    show | list | comments | comment | update | create | close | reopen | delete | dep \
+        | search | label | tag | children | count | history | ready | duplicate \
+        | duplicates | note | assign | priority | link | query | stale | status \
+        | statuses | types | graph | epic | supersede | todo | q | state | set-state \
+        | lint | promote | find-duplicates | version) ;;
+    config)
+        # Only `config get` and `config list` go remote.
+        case "${2:-}" in get | list) ;; *) _local "$@" ;; esac
+        ;;
+    *) _local "$@" ;;
+esac
 for _a in "$@"; do
-    case "$_a" in
+    # shellcheck disable=SC2018,SC2019  # ASCII-only, identical to the server wrapper
+    _l=$(printf '%s' "$_a" | tr 'A-Z' 'a-z')
+    case "$_l" in
         --db | --db=* | --database | --database=* | --dolt-* | --host | --host=* \
-            | --port | --port=* | --file | --file=* | --body-file | --body-file=* \
-            | --design-file | --design-file=* | -f | --path | --path=* | --dir \
-            | --dir=* | --config | --config=* | --output | --output=* | -o \
-            | --jsonl | --jsonl=*) _local "$@" ;;
+            | --port | --port=* | --global | --profile | --profile=* | --directory \
+            | --directory=* | -c | -c=* | --file | --file=* | --body-file \
+            | --body-file=* | --design-file | --design-file=* | --description-file \
+            | --description-file=* | -f | --path | --path=* | --dir | --dir=* \
+            | --config | --config=* | --output | --output=* | -o | --jsonl \
+            | --jsonl=* | --credentials-file | --credentials-file=*) _local "$@" ;;
     esac
 done
 
@@ -70,13 +91,23 @@ _b64=$(
 )
 # `shift` above ran in a subshell; the parent's "$@" is intact for fallback.
 
+# Liveness check BEFORE sending: if the master is not alive nothing has been
+# sent, so a local run is safe. `-O check` does not read stdin; </dev/null keeps
+# that explicit so the fallback still sees the original stdin.
+if ! ssh -S "$CONTROL_SOCKET" -O check "$SSH_TARGET" >/dev/null 2>&1 </dev/null; then
+    _msg="livespec bd-remote: ssh control master check failed; nothing sent, falling back to local bd"
+    printf '%s\n' "$_msg" >&2
+    { mkdir -p "$(dirname "$LOG")" && printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_msg" >>"$LOG"; } 2>/dev/null || :
+    _local "$@"
+fi
+
+# From here the command may have been sent: NEVER re-run locally (a write must
+# never run twice). Return ssh's status as is; 255 is a transport failure that
+# may have happened after the send, so say so and do not retry.
 ssh -S "$CONTROL_SOCKET" -o ControlMaster=no -o BatchMode=yes -o ConnectTimeout=5 \
     -T "$SSH_TARGET" "in $_repo bd $_b64"
 _rc=$?
 if [ "$_rc" -eq 255 ]; then
-    _msg="livespec bd-remote: ssh could not start the remote call (status 255); falling back to local bd"
-    printf '%s\n' "$_msg" >&2
-    { mkdir -p "$(dirname "$LOG")" && printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_msg" >>"$LOG"; } 2>/dev/null || :
-    _local "$@"
+    printf '%s\n' "bd-remote: connection to the VPS failed after the command was sent; not retried" >&2
 fi
 exit "$_rc"
