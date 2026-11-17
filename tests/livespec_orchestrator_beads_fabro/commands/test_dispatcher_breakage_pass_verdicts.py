@@ -288,3 +288,26 @@ def test_failed_job_and_log_edge_cases_are_visible(tmp_path: Path, capsys) -> No
     assert "no failing test named" in output
     assert module._string(value=1) == "1"
     assert module._string(value=None) == ""
+
+
+def test_failed_jobs_paginate_past_the_first_hundred_jobs(tmp_path: Path) -> None:
+    module = _module()
+    repo = _repo(tmp_path)
+    first_page = [{"id": n, "name": f"job-{n}", "conclusion": "success"} for n in range(100)]
+    runner = _Runner(
+        results=[
+            _ok({"jobs": first_page}),
+            _ok({"jobs": [{"id": 200, "name": "late", "conclusion": "failure"}]}),
+        ]
+    )
+    failed = module._failed_jobs(repo=repo, runner=runner, run_id="9")
+    assert failed == [{"id": 200, "name": "late", "conclusion": "failure"}]
+    assert len(runner.calls) == 2
+    assert all(call[:4] == ["gh", "api", "--cache", "1h"] for call in runner.calls)
+    assert "per_page=100" in runner.calls[0][-1]
+    assert "page=1" in runner.calls[0][-1]
+    assert "page=2" in runner.calls[1][-1]
+    broken = _Runner(
+        results=[_ok({"jobs": first_page}), CommandResult(exit_code=1, stdout="", stderr="no")]
+    )
+    assert module._failed_jobs(repo=repo, runner=broken, run_id="9") is None
