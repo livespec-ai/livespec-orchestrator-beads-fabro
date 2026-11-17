@@ -155,7 +155,7 @@ def test_publish_draft_is_a_command_node_that_pushes_the_publish_branch() -> Non
     assert "shape=parallelogram" in body
     assert "script=" in body
     assert "LIVESPEC_PUBLISH_BRANCH" in body
-    assert "git push" in body
+    assert "livespec_publish_push" in body
 
 
 def test_publish_draft_opens_a_draft_only_when_no_pull_request_exists() -> None:

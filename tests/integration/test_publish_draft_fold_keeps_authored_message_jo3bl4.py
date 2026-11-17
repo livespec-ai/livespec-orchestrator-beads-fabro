@@ -25,6 +25,10 @@ from pathlib import Path
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dot_graph import (
     parse_dot_graph,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_publication_push import (
+    PUBLICATION_PUSH_PROGRAM_FILENAME,
+    publication_push_program_source,
+)
 
 _WORKFLOW = Path(".claude-plugin/.fabro/workflows/implement-work-item/workflow.fabro")
 _PUBLISH_BRANCH = "feat/bd-ib-jo3bl4"
@@ -96,6 +100,11 @@ def _env(*, tmp_path: Path) -> dict[str, str]:
     gh = bin_dir / "gh"
     _ = gh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     gh.chmod(gh.stat().st_mode | stat.S_IXUSR)
+    plugins = tmp_path / "plugins"
+    plugins.mkdir()
+    publication_push = plugins / PUBLICATION_PUSH_PROGRAM_FILENAME
+    _ = publication_push.write_text(publication_push_program_source(), encoding="utf-8")
+    publication_push.chmod(0o700)
     env = {
         key: value
         for key, value in os.environ.items()
@@ -107,6 +116,7 @@ def _env(*, tmp_path: Path) -> dict[str, str]:
             "LIVESPEC_GIT_AUTHOR_NAME": "Fold Test",
             "LIVESPEC_GIT_AUTHOR_EMAIL": "fold-test@example.invalid",
             "LIVESPEC_PUBLISH_BRANCH": _PUBLISH_BRANCH,
+            "LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT": str(plugins),
         }
     )
     return env
