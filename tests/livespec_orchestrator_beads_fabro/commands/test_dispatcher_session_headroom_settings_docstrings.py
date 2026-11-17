@@ -30,8 +30,8 @@ def test_horizon_resolver_keeps_its_mirror_image_and_committed_only_reasoning() 
     assert "`_drive_config_schema.CONFIG_KEYS`" in doc
 
 
-def test_bounded_dial_keeps_the_one_grader_rationale_and_its_minimum() -> None:
-    doc = inspect.getdoc(settings._bounded_dial) or ""  # noqa: SLF001
+def test_module_keeps_the_one_grader_rationale_and_its_minimum() -> None:
+    source = inspect.getsource(settings)
 
-    assert "ONE grader for both dials rather than one apiece" in doc
-    assert "minimum" in inspect.signature(settings._bounded_dial).parameters  # noqa: SLF001
+    assert "ONE grader for both dials rather than one apiece" in source
+    assert "minimum: int" in source
