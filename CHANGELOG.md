@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.336.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.336.0...v0.336.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* commit_red stamps the factory run id so commit_green finds its Red (bd-ib-eyhjwr) ([d78d0d3](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/d78d0d3ab40f6f81dfc023f1b5640a51ce9c8ba4))
+* the availability probe carries the factory's github_app selection (bd-ib-55wrbx) ([1eca8c4](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/1eca8c4cb54085f312ed54abe92a9b2788e68ca1))
+
 ## [0.336.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.335.0...v0.336.0) (2026-11-17)
 
 
