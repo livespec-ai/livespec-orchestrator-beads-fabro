@@ -23,6 +23,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_publication_head imp
     PROOF_HEAD_PROGRAM_FILENAME,
     proof_head_program_source,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_publication_push import (
+    PUBLICATION_PUSH_PROGRAM_FILENAME,
+    publication_push_program_source,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_record_file_merge import (
     RECORD_FILE_MERGE_PROGRAM_FILENAME,
     record_file_merge_program_source,
@@ -225,6 +229,9 @@ def _publish(
     bin_dir = _forge_double(tmp_path=tmp_path, push_refusal=push_refusal)
     plugins_root = tmp_path / "plugins"
     plugins_root.mkdir()
+    publication_push = plugins_root / PUBLICATION_PUSH_PROGRAM_FILENAME
+    _ = publication_push.write_text(publication_push_program_source(), encoding="utf-8")
+    publication_push.chmod(publication_push.stat().st_mode | stat.S_IXUSR)
     _ = (plugins_root / PROOF_HEAD_PROGRAM_FILENAME).write_text(
         proof_head_program_source(), encoding="utf-8"
     )
@@ -253,6 +260,7 @@ def _publish(
             "GH_CREATE_REFUSED": str(tmp_path / "create-refused"),
             "SLEEP_CALLS": str(sleep_calls),
             "LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT": str(plugins_root),
+            "LIVESPEC_SANDBOX_GH_REFRESH_ROOT": str(tmp_path / "no-gh-refresh"),
         }
     )
     result = subprocess.run(
@@ -358,6 +366,32 @@ def test_stale_base_is_refreshed_before_a_workflow_clean_branch_is_published(
     assert "--draft" in create
     assert create[create.index("--base") + 1] == "master"
     assert create[create.index("--head") + 1] == _PUBLISH_BRANCH
+
+
+def test_initial_publication_refuses_bad_tdd_evidence_before_creating_the_branch(
+    tmp_path: Path,
+) -> None:
+    """The published workflow uses the lineage-gated helper for its first push."""
+    run, _, _ = _stale_run(tmp_path=tmp_path)
+    _ = _commit(
+        repo=run,
+        path="tests/test_widget.py",
+        content="def test_widget() -> None:\n    assert True\n",
+        message=(
+            "test: carry bad TDD evidence\n\n"
+            "TDD-Red-Test: tests/test_widget.py\n"
+            "TDD-Red-Test-File-Checksum: sha256:" + "0" * 64
+        ),
+    )
+
+    refused = _publish(tmp_path=tmp_path, run=run)
+
+    assert refused.result.returncode != 0
+    assert _git(run, "rev-parse", "HEAD").stdout.strip() in refused.result.stderr
+    assert "tests/test_widget.py" in refused.result.stderr
+    remote = _git(run, "ls-remote", "origin", f"refs/heads/{_PUBLISH_BRANCH}").stdout
+    assert remote == ""
+    assert refused.draft_created is False
 
 
 def test_declared_record_conflict_is_merged_before_draft_publication(tmp_path: Path) -> None:
