@@ -122,6 +122,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_shell_runner import 
 )
 from livespec_orchestrator_beads_fabro.commands._fabro_port import FabroPort, FabroTarget
 from livespec_orchestrator_beads_fabro.commands._fabro_port_types import FabroRunner
+from livespec_orchestrator_beads_fabro.commands._factory_github_app import (
+    factory_github_app_refusal,
+    github_app_table,
+)
 
 __all__: list[str] = [
     "PROBE_LAUNCH_TIMEOUT_EXIT_CODE",
@@ -204,6 +208,12 @@ def run_availability_probe(  # noqa: PLR0913 — kw-only probe inputs; each is o
             f"{target.name!r} declares no server, so a successful turn could not "
             f"become host-wide availability evidence"
         )
+    # The SAME per-run App selection a dispatch run carries, graded by the same
+    # refusal, so the probe cannot authenticate its checkout as a different App
+    # from the one a dispatch to this factory uses (bd-ib-55wrbx).
+    app_refusal = factory_github_app_refusal(factory=target.name, github_app=target.github_app)
+    if app_refusal is not None:
+        return app_refusal.strip()
     command = ShellCommandRunner() if runner is None else runner
     fabro_bin = factory_fabro_bin(factory=target, fallback=resolve_fabro_bin(cwd=repo))
     environment = factory_environment_id(factory=target)
@@ -240,7 +250,11 @@ def run_availability_probe(  # noqa: PLR0913 — kw-only probe inputs; each is o
             observation_ids=observation_ids,
             now_iso=now_iso,
             timeout_seconds=timeout_seconds,
-            manifest=AVAILABILITY_PROBE_MANIFEST + credential.manifest_tail,
+            manifest=(
+                AVAILABILITY_PROBE_MANIFEST
+                + credential.manifest_tail
+                + github_app_table(github_app=target.github_app)
+            ),
         )
     finally:
         credential.release()
