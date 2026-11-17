@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.336.2](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.336.1...v0.336.2) (2026-11-17)
+
+
+### Bug Fixes
+
+* codex_yolo_gate reads a malformed owner override as absent, not as not fleet-listed (bd-ib-jojibd) ([b810f25](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/b810f25a3baa6d68948b652b44b6d7b397e6c52b))
+* **incident:** drill-close writes the lifecycle status closed and waits out its claim transition on a re-run ([c97bdd7](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/c97bdd7854895c158c1a84a940518e68bf8ffb09))
+* test_wrong_reset preserves a committed Green lap on a needs-human lap ref (bd-ib-nckst7.2) ([bd3a09c](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/bd3a09c5e80f43924ccabfd38c50ec5b5b0c6972))
+
 ## [0.336.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.336.0...v0.336.1) (2026-11-17)
 
 
