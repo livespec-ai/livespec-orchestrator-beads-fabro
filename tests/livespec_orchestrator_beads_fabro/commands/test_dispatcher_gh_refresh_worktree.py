@@ -56,6 +56,7 @@ def test_publication_tooling_materializes_outside_the_run_worktree() -> None:
 
 def test_materialized_mint_helper_lints_without_late_module_imports() -> None:
     """The Dispatcher-generated credential helper must pass the repository linter."""
+    assert "def main() -> None:" in gh_mint_helper_source()
     lint = subprocess.run(
         [
             "uv",
