@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.338.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.337.0...v0.338.0) (2026-11-17)
+
+
+### Features
+
+* red ([e8203e2](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/e8203e2a3227e4440371c0f3414fd68398dd0198))
+* red ([3c8894b](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/3c8894b88bf582f6ddf4ebf4314024252867159c))
+* red ([d9ac359](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/d9ac3597326274d63912790e18c25a8555b03843))
+* red ([6fdb635](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/6fdb635e317b047cb35f475c37875af310541473))
+* red ([4123273](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/4123273f26d886aac2ef1e45df7542904d81b33b))
+
+
+### Bug Fixes
+
+* breakage pass paginates the failed run's jobs ([4c7e5cb](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/4c7e5cb7a040cddd676f8c770d9b09e40cd2cf53))
+* **fleet-launch:** default queue-ranking sources, one atomic claim per item, TICKET_NS restarts only an existing ticket (bd-ib-k5zk2h) ([054f4d8](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/054f4d8705e5ed6207547f8103cf2cb236bd9627))
+* keep moved session-headroom resolver docstrings ([0654b21](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/0654b21597113db09d9304cc96cb4a1e3948f052))
+* remove session-headroom gate arity suppression ([03e0f4a](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/03e0f4a4dbba9f99449ad27bcab7ac48355558ef))
+* the ended-run export is skipped under disk pressure and the run is still removed (bd-ib-cvilnl) ([f4e4850](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/f4e48500493dcecdd96e5b3539962694ea791677))
+
 ## [0.337.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.336.2...v0.337.0) (2026-11-17)
 
 

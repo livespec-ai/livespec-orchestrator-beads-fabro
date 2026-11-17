@@ -106,6 +106,24 @@ set -u
 
 REAL="${LIVESPEC_BD_REAL:-/usr/local/bin/bd-real}"
 
+# Remote exec (livespec-dev-tooling-tbhqye): ONLY when the config file exists and
+# its control socket is a live socket, route the real command through bd-remote.sh
+# (installed beside this guard), which runs bd on the Dolt host over the already
+# open SSH ControlMaster and falls back to the local real bd. bd-remote.sh reads
+# the local real bd from LIVESPEC_BD_REAL, so export the resolved one. Otherwise
+# behaviour is unchanged.
+_bdg_conf="${LIVESPEC_BD_REMOTE_CONF:-/usr/local/etc/livespec-bd-remote.conf}"
+_bdg_remote="${LIVESPEC_BD_REMOTE_BIN:-$(dirname "$0")/bd-remote.sh}"
+if [ -r "$_bdg_conf" ] && [ -x "$_bdg_remote" ]; then
+    # shellcheck disable=SC1090
+    _bdg_sock=$(CONTROL_SOCKET="" && . "$_bdg_conf" >/dev/null 2>&1 && printf '%s' "$CONTROL_SOCKET")
+    if [ -n "$_bdg_sock" ] && [ -S "$_bdg_sock" ]; then
+        LIVESPEC_BD_REAL="$REAL"
+        export LIVESPEC_BD_REAL
+        REAL="$_bdg_remote"
+    fi
+fi
+
 # Mode resolution (precedence): explicit env var > host-wide mode file > warn.
 # WHY THE FILE: the fleet credential wrapper (with-livespec-env.sh) scrubs the
 # environment (sudo env_reset / env -i) before bd runs, so an exported

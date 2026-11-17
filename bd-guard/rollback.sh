@@ -47,6 +47,13 @@ if [ -e "${BIN_DIR}/bd-guard-emit.py" ]; then
     rm -f "${BIN_DIR}/bd-guard-emit.py"
 fi
 
+# Best-effort removal of the remote-exec client install.sh laid down beside the
+# wrapper (a no-op when absent; older installs predate it).
+if [ -e "${BIN_DIR}/bd-remote.sh" ]; then
+    echo "rollback.sh: removing remote-exec client at '${BIN_DIR}/bd-remote.sh'" >&2
+    rm -f "${BIN_DIR}/bd-remote.sh"
+fi
+
 # Best-effort removal of the host-wide mode file install.sh seeded. Guarded so a
 # rollback never fails when it is absent (older installs predate the mode file).
 MODE_FILE="${LIVESPEC_BD_GUARD_MODE_FILE:-/usr/local/etc/livespec-bd-guard.mode}"

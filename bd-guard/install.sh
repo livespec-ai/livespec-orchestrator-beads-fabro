@@ -81,6 +81,12 @@ install -m 0755 "$WRAPPER_SRC" "$WRAPPER_TARGET"
 echo "install.sh: installing OTLP emit helper -> '${BIN_DIR}/bd-guard-emit.py'" >&2
 install -m 0755 "$EMIT_SRC" "${BIN_DIR}/bd-guard-emit.py"
 
+# --- Step 3b: install the remote-exec client next to the wrapper -------------
+# Inert unless /usr/local/etc/livespec-bd-remote.conf exists and names a live
+# control socket (see bd-guard/README.md); the guard then routes bd calls over SSH.
+echo "install.sh: installing remote-exec client -> '${BIN_DIR}/bd-remote.sh'" >&2
+install -m 0755 "${SCRIPT_DIR}/bd-remote.sh" "${BIN_DIR}/bd-remote.sh"
+
 # --- Step 4: seed the host-wide mode file (default warn; never clobber) -------
 MODE_FILE="${LIVESPEC_BD_GUARD_MODE_FILE:-/usr/local/etc/livespec-bd-guard.mode}"
 if [ ! -e "$MODE_FILE" ]; then

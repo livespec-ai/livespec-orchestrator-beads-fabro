@@ -43,7 +43,7 @@ from tests.prepare_step_support import plugins_helper, steps_in
 
 
 def _siblings(*, repos: tuple[str, ...]) -> SiblingClones:
-    return SiblingClones(owner="thewoolleyman", repos=repos, clones_root="/livespec-siblings")
+    return SiblingClones(owner="livespec-ai", repos=repos, clones_root="/livespec-siblings")
 
 
 def test_the_family_runs_exactly_one_cross_repository_tool() -> None:
@@ -100,7 +100,7 @@ def test_the_prepare_step_writes_the_plan_beside_the_fetched_program_and_runs_it
     (step,) = steps_in(block=block)
     assert step.env == {
         run_from.RUN_FROM_PLAN_ENV: run_from.run_from_plan_text(
-            url_base="https://github.com/thewoolleyman",
+            url_base="https://github.com/livespec-ai",
             root=RUN_FROM_CLONES_ROOT,
             repos=("livespec",),
         )
