@@ -78,6 +78,7 @@ __all__: list[str] = [
     "ABSENT_SEVEN_DAY_READING",
     "DEFAULT_SESSION_HEADROOM_FLOOR_PERCENT",
     "DEFAULT_SESSION_HEADROOM_HORIZON_MINUTES",
+    "DEFAULT_SESSION_HEADROOM_WEEKLY_FLOOR_PERCENT",
     "FIVE_HOUR_WINDOW_ABSENT",
     "FULL_ALLOWANCE_PERCENT",
     "NOT_PROJECTED_RESULT",
@@ -112,6 +113,12 @@ DEFAULT_SESSION_HEADROOM_FLOOR_PERCENT = 20
 # ratified dial defaults carried on the per-evaluation policy, and a reader
 # looking for one expects to find the other.
 DEFAULT_SESSION_HEADROOM_HORIZON_MINUTES = 180
+
+# The ratified default reserve for the provider's seven-day allowance.  This
+# remains a separate dial from the five-hour floor: an operator can reserve a
+# smaller fraction of the weekly allowance without changing the near-term
+# session reserve.
+DEFAULT_SESSION_HEADROOM_WEEKLY_FLOOR_PERCENT = 10
 
 # The allowance a utilization percentage is measured against, and the upper
 # bound of the clause's inclusive valid range.
@@ -171,11 +178,11 @@ class SevenDayReading:
     names the status. Nesting is what lets each window carry its own explicit
     unobservable result instead of one flag that cannot say which half failed.
 
-    `status` IS THE FIELD THAT DECIDES, and `utilization_percent` decides
-    nothing. The clause is explicit that "a utilization below 100 is not
-    exhaustion", so the figure is journaled and never graded -- which is also
-    what makes the decision immune to whether the provider reports that figure
-    as a fraction or as a percentage.
+    `status` decides an explicit provider refusal, while a valid
+    `utilization_percent` decides whether the remaining weekly allowance is
+    below the separate weekly reserve. The two arms stay distinct: a provider
+    refusal is authoritative even with the reserve disabled, while an absent
+    or unparseable utilization cannot trigger the reserve.
     """
 
     utilization_percent: float | None = None
@@ -296,7 +303,7 @@ class SessionHeadroomReading:
 
 @dataclass(frozen=True, kw_only=True)
 class SessionHeadroomPolicy:
-    """The two governing dials plus the ONE reading seam for one evaluation.
+    """The governing dials plus the ONE reading seam for one evaluation.
 
     `read` is memoized by whoever BUILDS the policy, per admission evaluation,
     which is how "One assessment per distinct projected credential per admission
@@ -327,6 +334,7 @@ class SessionHeadroomPolicy:
     floor_percent: int
     horizon_minutes: int
     read: Callable[[], SessionHeadroomReading]
+    weekly_floor_percent: int = DEFAULT_SESSION_HEADROOM_WEEKLY_FLOOR_PERCENT
     codex_read: Callable[[], CodexHeadroomReading] | None = None
     pool_read: Callable[[], tuple[SessionHeadroomReading, ...]] | None = None
     credential_refusal: ClaudeCredentialRefusal | None = None
@@ -430,10 +438,10 @@ def seven_day_reading(*, utilization: object, status: object) -> SevenDayReading
     THE UTILIZATION IS GRADED BY THE FIVE-HOUR RULE, which is the clause's own
     inclusive 0-through-100 range, so an out-of-range figure is journaled as
     absent rather than as a number. EITHER field alone makes the reading
-    observable: a response naming a status with no figure has still said the
-    thing the skip turns on, and a response naming a figure with no status has
-    still said something worth journaling. Only a response reporting NEITHER is
-    the explicit unobservable result -- which never skips a candidate.
+    observable: a response naming a status can report a provider refusal, and
+    a response naming a figure can be compared with the weekly reserve. Only a
+    response reporting NEITHER is the explicit unobservable result -- which
+    never skips a candidate.
     """
     percent = _valid_utilization(value=utilization)
     reported = status if isinstance(status, str) and status else None
@@ -489,7 +497,12 @@ def headroom_skips_candidate(*, reading: SessionHeadroomReading, floor_percent: 
     return remaining < floor_percent
 
 
-def seven_day_skips_candidate(*, reading: SessionHeadroomReading, floor_percent: int) -> bool:
+def seven_day_skips_candidate(
+    *,
+    reading: SessionHeadroomReading,
+    floor_percent: int,
+    weekly_floor_percent: int = DEFAULT_SESSION_HEADROOM_WEEKLY_FLOOR_PERCENT,
+) -> bool:
     """Whether the WEEKLY window alone stops this covered candidate.
 
     Its own predicate rather than a third arm of `headroom_skips_candidate`,
@@ -498,23 +511,24 @@ def seven_day_skips_candidate(*, reading: SessionHeadroomReading, floor_percent:
     a floor skip and a projection skip", and a predicate answering for both
     windows cannot say which it answered for.
 
-    THE STATUS IS THE WHOLE TEST, which is the clause in as many words: "a
-    warning status, a utilization below 100, or any other value is not
-    exhaustion". So no figure is compared, and a reading whose weekly
-    utilization sits at 100 while the provider still reports the allowance
-    available is admitted -- the provider is the authority on its own refusal,
-    and a build inferring one from the percentage would refuse an account the
-    provider was still serving.
+    A PROVIDER REFUSAL REMAINS AUTHORITATIVE. A status of `rejected` skips
+    regardless of the weekly reserve setting, so an operator can disable the
+    reserve without admitting an account the provider has already refused.
 
-    THE FLOOR GOVERNS THIS SKIP TOO, and it is the SAME dial rather than a
-    weekly one of its own: the clause makes a seven-day skip "a headroom skip
-    with exactly the semantics of a floor skip" and says that same floor of 0
-    disables it. A second dial would let an operator switch the filter off and
-    still have dispatches refused by the arm they had not heard of.
+    OTHERWISE, a valid weekly utilization spends the separate weekly reserve:
+    equality passes, while remaining allowance strictly below that reserve is a
+    skip. Missing or unparseable utilization is represented as `None` and
+    therefore fails open. The five-hour floor remains the master enable switch:
+    setting it to zero disables both seven-day arms while retaining the read.
     """
     if floor_percent <= 0:
         return False
-    return reading.seven_day.exhausted
+    if reading.seven_day.exhausted:
+        return True
+    if weekly_floor_percent <= 0:
+        return False
+    utilization = reading.seven_day.utilization_percent
+    return utilization is not None and FULL_ALLOWANCE_PERCENT - utilization < weekly_floor_percent
 
 
 def _valid_utilization(*, value: object) -> float | None:

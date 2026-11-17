@@ -69,13 +69,15 @@ def _headers(values: dict[str, str]) -> Message:
     return message
 
 
-def _measured_response_headers(*, seven_day_status: str = "allowed") -> Message:
+def _measured_response_headers(
+    *, seven_day_status: str = "allowed", seven_day_utilization: str = "0.02"
+) -> Message:
     return _headers(
         {
             "anthropic-ratelimit-unified-status": "allowed",
             "anthropic-ratelimit-unified-representative-claim": "seven_day",
             "anthropic-ratelimit-unified-7d-status": seven_day_status,
-            "anthropic-ratelimit-unified-7d-utilization": "0.02",
+            "anthropic-ratelimit-unified-7d-utilization": seven_day_utilization,
             "anthropic-ratelimit-unified-7d-reset": "1793941200",
         }
     )
@@ -153,6 +155,22 @@ def test_the_seven_day_status_still_governs_a_slot_whose_window_is_absent(
         projection.headroom_skip_kind(reading=reading, floor_percent=_FLOOR)
         == projection.SEVEN_DAY_SKIP_KIND
     )
+
+
+def test_the_weekly_reserve_still_governs_a_slot_whose_window_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reading = _read(
+        monkeypatch,
+        _answering(
+            headers=_measured_response_headers(
+                seven_day_status="allowed_warning", seven_day_utilization="0.99"
+            )
+        ),
+    )
+
+    assert getattr(reading, "five_hour_window_absent", None) is True
+    assert projection.headroom_skip_kind(reading=reading, floor_percent=_FLOOR) == "seven-day-floor"
 
 
 def test_a_measured_slot_outranks_a_slot_whose_window_is_absent(

@@ -36,6 +36,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 from livespec_orchestrator_beads_fabro.commands._acp_session_headroom import (
+    DEFAULT_SESSION_HEADROOM_WEEKLY_FLOOR_PERCENT,
     PROJECTED_RESULT,
     SessionHeadroomReading,
     SlotSelection,
@@ -70,7 +71,10 @@ class PoolSelection:
 
 
 def select_pool_slot(
-    *, readings: Sequence[tuple[str, SessionHeadroomReading]], floor_percent: int
+    *,
+    readings: Sequence[tuple[str, SessionHeadroomReading]],
+    floor_percent: int,
+    weekly_floor_percent: int = DEFAULT_SESSION_HEADROOM_WEEKLY_FLOOR_PERCENT,
 ) -> PoolSelection:
     """Rank the pool: the qualifying slot to project, or nothing when none qualifies.
 
@@ -78,7 +82,11 @@ def select_pool_slot(
     absent-credential reading and never reaches the ranking.
     """
     kinds = {
-        slot: headroom_skip_kind(reading=reading, floor_percent=floor_percent)
+        slot: headroom_skip_kind(
+            reading=reading,
+            floor_percent=floor_percent,
+            weekly_floor_percent=weekly_floor_percent,
+        )
         for slot, reading in readings
     }
     qualifying = sorted(
