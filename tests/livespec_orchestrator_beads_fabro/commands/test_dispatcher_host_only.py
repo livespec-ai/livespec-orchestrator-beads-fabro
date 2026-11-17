@@ -217,6 +217,24 @@ def test_is_host_only_item_false_for_ordinary_item() -> None:
     assert is_host_only_item(item=_item()) is False
 
 
+def test_is_host_only_item_true_for_definition_of_done_with_only_host_captured_assertions() -> None:
+    item = _item(
+        description=(
+            "## Definition of Done\n"
+            "\n"
+            "### Host-captured\n"
+            "\n"
+            "Reason: the proof needs an attended operator host.\n"
+            "\n"
+            "- An attended host verifies the delivered behavior.\n"
+            "\n"
+            "References: ## Effective acceptance criteria\n"
+        )
+    )
+
+    assert is_host_only_item(item=item) is True
+
+
 def test_is_host_only_item_true_for_host_only_marker_in_title() -> None:
     item = _item(
         title="Refactor the dispatcher",

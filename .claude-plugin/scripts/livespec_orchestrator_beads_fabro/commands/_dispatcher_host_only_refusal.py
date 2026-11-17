@@ -18,6 +18,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import Dispat
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import JournalFile
 from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import store_config
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import (
+    declares_host_only_definition_of_done,
     declares_workflow_scope_refusal,
     host_only_refusal_detail,
     is_host_only_item,
@@ -61,6 +62,7 @@ def host_only_refusal(
     host-route instruction. Nothing is closed — the item stays open.
     """
     workflow_scope_refusal = declares_workflow_scope_refusal(item=item, raw_labels=raw_labels)
+    proof_modes_are_host_only = declares_host_only_definition_of_done(item=item)
     if not is_host_only_item(item=item, raw_labels=raw_labels):
         if item.awaits_scope_override:
             _set_awaits_scope_override(repo=repo, item_id=item.id, value=False)
@@ -75,7 +77,10 @@ def host_only_refusal(
         stage="host-only-refused",
         pr_number=None,
         merge_sha=None,
-        detail=host_only_refusal_detail(item_id=item.id),
+        detail=host_only_refusal_detail(
+            item_id=item.id,
+            proof_modes_are_host_only=proof_modes_are_host_only,
+        ),
     )
     journal.append(record={"stage": "outcome", "outcome": asdict(outcome)})
     _ = write_stderr(text=f"SURFACE: {outcome.detail}\n")

@@ -11,10 +11,15 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done import (
+    PROOF_MODE_FACTORY_CAPTURED,
+    definition_of_done,
+)
 from livespec_orchestrator_beads_fabro.types import WorkItem
 
 __all__: list[str] = [
     "WORKFLOW_SCOPE_OVERRIDE_LABEL",
+    "declares_host_only_definition_of_done",
     "declares_workflow_scope_refusal",
     "host_only_refusal_detail",
     "is_host_only_item",
@@ -58,6 +63,8 @@ def is_host_only_item(*, item: WorkItem, raw_labels: Sequence[str] = ()) -> bool
     """Return True when a work-item is intrinsically unsafe for the factory."""
     if item.factory_safety is not None:
         return True
+    if declares_host_only_definition_of_done(item=item):
+        return True
     if WORKFLOW_SCOPE_OVERRIDE_LABEL in raw_labels:
         return False
     return declares_workflow_scope_refusal(item=item, raw_labels=raw_labels)
@@ -72,8 +79,32 @@ def declares_workflow_scope_refusal(*, item: WorkItem, raw_labels: Sequence[str]
     return _declares_workflow_edit(item=item)
 
 
-def host_only_refusal_detail(*, item_id: str) -> str:
+def declares_host_only_definition_of_done(*, item: WorkItem) -> bool:
+    """Whether every declared Definition-of-Done assertion is off-factory.
+
+    A missing or legacy Definition of Done is not enough to host-route an item:
+    this rule is about a parsed, assertion-bearing section whose author put
+    every assertion under a host or human proof mode.  The shared parser keeps
+    this answer identical to the proof and acceptance paths' understanding of
+    those mode boundaries.
+    """
+    section = definition_of_done(description=item.description)
+    return bool(section.assertions) and all(
+        assertion.proof_mode != PROOF_MODE_FACTORY_CAPTURED for assertion in section.assertions
+    )
+
+
+def host_only_refusal_detail(*, item_id: str, proof_modes_are_host_only: bool = False) -> str:
     """Build the actionable refusal message for a factory-unsafe item."""
+    if proof_modes_are_host_only:
+        return (
+            f"factory-safety refusal: work-item {item_id} declares no "
+            "factory-captured Definition-of-Done assertion; every assertion is "
+            "proved outside the factory on an attended host or by human "
+            "attestation. It MUST NOT be dispatched to a fabro sandbox. "
+            "Host-route it through an attended host session instead; the item "
+            "remains open for that route."
+        )
     return (
         f"factory-safety refusal: work-item {item_id} carries non-null "
         "factory_safety or declares an edit under .github/workflows/, a "
