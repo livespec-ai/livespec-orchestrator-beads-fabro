@@ -3309,5 +3309,13 @@
     "test": "TODO",
     "work_item": "bd-ib-nckst7.1",
     "reason": "A real test at the integration tier or above is owed for this heading: the preserved-tree trigger and disposition driven with a run.failed at commit_green carrying committed work, no terminal patch and no needs-human ref holding the run's work, asserting the preservation publication, plus the needs-human-ref-present and unreadable-ref arms. bd-ib-nckst7.1 owns it."
+  },
+  {
+    "heading": "## Scenario 380 — A sandbox commit's hook may delegate check-per-file-coverage to a cluster gate Job and records the check's own verdict",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-22ckko",
+    "reason": "A real test at the integration tier or above is owed for this heading: a commit run whose hook delegates check-per-file-coverage to a cluster gate Job, asserting the pass, failure-naming, no-verdict and no-relaxation arms. bd-ib-22ckko owns it."
   }
 ]

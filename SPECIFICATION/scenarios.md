@@ -16017,3 +16017,38 @@ Feature: The work of any failed run survives the run
     When the Dispatcher reports the dispatch result
     Then it attempts the publication of the run's changed files to a ref under refs/livespec/preserved-publish/<work-item-id>/
 ```
+
+## Scenario 380 — A sandbox commit's hook may delegate check-per-file-coverage to a cluster gate Job and records the check's own verdict
+
+Governing clause: `contracts.md` §"ACP node timeouts" → "A commit leg completes past one tool call".
+
+```gherkin
+Feature: A delegated coverage check does not change what a commit run records
+  As the maintainer of a repository whose commit hook includes a long check-per-file-coverage member
+  I want that member to be runnable in a cluster gate Job over the committed tree
+  So that a CPU-contended sandbox does not turn a verified change into a no-verdict commit run
+
+  Scenario: A delegated member that passes lets the commit run pass
+    Given a commit run whose hook delegates check-per-file-coverage to a cluster gate Job over the same committed tree
+    When the gate Job returns the passing verdict of that check
+    Then the commit run records that verdict for the member
+    And the commit run reports the passed state when every other hook member also passes
+
+  Scenario: A delegated member's failure names its target and uncovered rows
+    Given a commit run whose hook delegates check-per-file-coverage to a cluster gate Job
+    When the gate Job returns the failing verdict of that check
+    Then the commit run reports the failed state
+    And the commit run's recorded output names the failed target and each uncovered file and line row
+
+  Scenario: A delegated member that returns no verdict makes the commit run no-verdict
+    Given a commit run whose hook delegates check-per-file-coverage to a cluster gate Job
+    When the gate Job returns no verdict within its own bound
+    Then the commit run reports the no-verdict state
+    And no passed state is reported for that commit run
+
+  Scenario: Delegation relaxes no check
+    Given a commit run whose hook delegates check-per-file-coverage to a cluster gate Job
+    Then the commit run passes no --no-verify
+    And it sets no variable that skips or relaxes a check
+    And it changes no hook's severity
+```
