@@ -257,7 +257,17 @@ main() {
     git reset
     git add -- "$test_file"
     set +e
-    git commit -m "feat: red" >"$output" 2>&1
+    # bd-ib-eyhjwr: the repository's commit-msg hook fails open, so a sandbox where its
+    # gate cannot run commits the Red with no Factory-Run-Id trailer and commit_green then
+    # cannot find its own Red. This command knows the run id, so it records it itself; a
+    # hook that stamps the same trailer adds nothing (identical neighbouring trailer).
+    local factory_run_id=""
+    local -a run_id_args=()
+    factory_run_id="$(git config --local --get livespec.factoryRunId 2>/dev/null || true)"
+    if [[ -n "$factory_run_id" ]]; then
+        run_id_args=(-m "Factory-Run-Id: $factory_run_id")
+    fi
+    git commit -m "feat: red" ${run_id_args[@]+"${run_id_args[@]}"} >"$output" 2>&1
     status=$?
     set -e
     cat "$output"
