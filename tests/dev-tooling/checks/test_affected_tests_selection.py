@@ -288,8 +288,10 @@ def test_a_workflow_change_no_test_reads_cannot_be_scoped(*, tmp_path: Path) -> 
     assert outcome.reason == "no test module reads workflow.fabro"
 
 
-def test_the_changed_paths_are_the_branch_diff_and_the_staged_additions(*, tmp_path: Path) -> None:
-    """A committed change and a staged change are both changed; a staged deletion is not."""
+def test_the_changed_paths_are_the_branch_diff_and_the_staged_changes_with_deletions(
+    *, tmp_path: Path
+) -> None:
+    """A committed change, a staged change and a staged deletion are all changed."""
     module = _load()
     root = _repo(root=tmp_path / "repo")
     _git(root=root, arguments=["add", "."])
@@ -308,7 +310,7 @@ def test_the_changed_paths_are_the_branch_diff_and_the_staged_additions(*, tmp_p
     _git(root=root, arguments=["add", f"{_PKG}/b.py"])
     _git(root=root, arguments=["rm", "-q", f"{_PKG}/c.py"])
 
-    assert module.changed_paths(root=root) == [f"{_PKG}/a.py", f"{_PKG}/b.py"]
+    assert module.changed_paths(root=root) == [f"{_PKG}/a.py", f"{_PKG}/b.py", f"{_PKG}/c.py"]
 
 
 def _fake_uv(*, directory: Path) -> Path:
