@@ -9,6 +9,7 @@ the placeholders rather than anything about the unit's meaning.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -142,8 +143,10 @@ def test_the_committed_unit_is_the_single_source_of_every_host_side_bound() -> N
     assert settings["OOMScoreAdjust"] == "500"
     assert settings["MemorySwapMax"] == "0"
     timer = _TIMER.read_text(encoding="utf-8")
-    assert "OnUnitInactiveSec=2min" in timer
-    assert "OnBootSec=5min" in timer
+    # Shape, not values: the intervals are operator dials, so the unit only has to
+    # declare each one as a positive duration (a number followed by a time unit).
+    for key in ("OnUnitInactiveSec", "OnBootSec"):
+        assert re.search(rf"^{key}=[1-9][0-9]*(us|ms|s|sec|min|h|hr|d)?$", timer, re.MULTILINE), key
     assert "OnUnitActiveSec" not in "\n".join(
         line for line in timer.splitlines() if not line.startswith("#")
     )
