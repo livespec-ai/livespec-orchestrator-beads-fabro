@@ -36,6 +36,7 @@ started="$(date +%s)"
 last_growth="$started"
 last_size=0
 ended_by="completed"
+last_live_process_summary="unavailable"
 
 # A separate process group lets the timeout end the command and everything its
 # hook spawned, without killing the watcher before it writes the last sample.
@@ -67,6 +68,7 @@ sample() {
     local output_size=0
     local pids=""
     local pid_list=""
+    local process_rows=""
     if [[ -f "$hook_output" ]]; then
         output_size="$(wc -c < "$hook_output")"
     fi
@@ -77,14 +79,23 @@ sample() {
     pids="$(descendants "$child_pid")"
     pids="${pids% }"
     pid_list="${pids// /,}"
+    process_rows="$(ps -eo pid,ppid,stat,wchan,etime,args | awk -v wanted=" $pids " \
+        'NR == 1 { print; next } index(wanted, " " $1 " ") { print }')"
+    # Preserve the last *live* view separately.  The final sample after a
+    # timeout necessarily sees an empty tree, but the diagnosis must still say
+    # which process and wait channel were blocked immediately before the kill.
+    if [[ "$(printf '%s\n' "$process_rows" | wc -l)" -gt 1 ]]; then
+        last_live_process_summary="$(printf '%s\n' "$process_rows" | awk '
+            NR > 1 { printf "pid=%s stat=%s wchan=%s args=%s; ", $1, $3, $4, substr($0, index($0, $6))
+        ')"
+    fi
     {
         printf '\n=== sample utc=%s elapsed_seconds=%s output_size=%s seconds_without_output_growth=%s ===\n' \
             "$(date -u +%FT%TZ)" "$elapsed" "$output_size" "$((now - last_growth))"
         printf '%s\n' '-- process tree (ps -eo pid,ppid,stat,wchan,etime,args) --'
         # Keep the literal command here: it makes a record independently
         # inspectable and includes wait channels (wchan) for lock/socket waits.
-        ps -eo pid,ppid,stat,wchan,etime,args | awk -v wanted=" $pids " \
-            'NR == 1 { print; next } index(wanted, " " $1 " ") { print }'
+        printf '%s\n' "$process_rows"
         printf '%s\n' '-- open locks and sockets (lsof) --'
         if command -v lsof >/dev/null 2>&1 && [[ -n "$pid_list" ]]; then
             lsof -nP -p "$pid_list" 2>&1 || true
@@ -121,8 +132,17 @@ wait "$child_pid"
 child_status=$?
 set -e
 sample "$(date +%s)"
+ended_at="$(date +%s)"
+if [[ "$ended_by" == "completed" ]]; then
+    diagnosis="completed-not-hung: commit_green exited before either observation limit; hook output grew from 0 to ${last_size} bytes"
+elif [[ "$ended_by" == no-output-growth* ]]; then
+    diagnosis="hung: ${ended_by}; last blocked process(es) and wait channel(s): ${last_live_process_summary}"
+else
+    diagnosis="slow-with-output-growth: ${ended_by}; hook output last grew $((ended_at - last_growth)) seconds ago and reached ${last_size} bytes; last live process(es): ${last_live_process_summary}"
+fi
 printf '\nobservation ended: %s; command exit status: %s; record: %s; pytest output: %s\n' \
     "$ended_by" "$child_status" "$record" "$hook_output" >> "$record"
+printf 'diagnosis: %s\n' "$diagnosis" >> "$record"
 cat "$record"
 
 if [[ "$ended_by" != completed ]]; then
