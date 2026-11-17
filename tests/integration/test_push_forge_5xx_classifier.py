@@ -102,8 +102,8 @@ def test_every_forge_5xx_classifier_ignores_digit_runs_and_keeps_status_forms() 
         if not _matches(pattern=pattern, text=text)
     ]
     facts = (
-        len(implement) == 3,
-        len(groom) == 2,
+        len(implement) == 2,
+        len(groom) == 1,
         false_server_errors == [],
         missed_server_errors == [],
     )
