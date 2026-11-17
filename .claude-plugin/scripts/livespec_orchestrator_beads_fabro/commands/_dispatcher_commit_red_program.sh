@@ -256,6 +256,13 @@ main() {
     rm -f -- "$test_snapshot"
     git reset
     git add -- "$test_file"
+    if git diff --cached --quiet; then
+        : > "$output"
+        cause="LIVESPEC_COMMIT_RED_NOTHING_TO_COMMIT: the Red turn changed no test file, so commit_red skips its empty commit and routes the existing tree through Green"
+        printf '%s\n' "$cause" | tee "$output"
+        append_verdict "$handoff" 0 "$output" "$cause"
+        return 0
+    fi
     set +e
     # bd-ib-eyhjwr: the repository's commit-msg hook fails open, so a sandbox where its
     # gate cannot run commits the Red with no Factory-Run-Id trailer and commit_green then

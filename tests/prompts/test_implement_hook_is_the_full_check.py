@@ -68,7 +68,7 @@ def test_red_runs_only_its_test_and_green_only_the_tests_its_change_touches() ->
     red = (_PROMPTS / "red.md").read_text(encoding="utf-8")
     green = (_PROMPTS / "green.md").read_text(encoding="utf-8")
 
-    assert "3. Run only that test and capture its failure output. Do not make a commit." in red
+    assert "4. Run only that test and capture its failure output. Do not make a commit." in red
     assert "2. Run only the tests your change touches. Do not make a commit." in green
 
 
