@@ -124,6 +124,7 @@ def test_gate_preview_runs_the_hook_against_a_disposable_staged_tree_and_unsets_
     assert completed.returncode == 1
     assert report == {
         "failed_targets": [_FAILED_TARGET],
+        "preview_ran": True,
         "status": 1,
         "unset_variables": ["LIVESPEC_CHECK_SKIP"],
     }
@@ -134,3 +135,71 @@ def test_gate_preview_runs_the_hook_against_a_disposable_staged_tree_and_unsets_
     )
     assert _git(repo=repo, env=env, argv=["log", "--format=%H"]) == before_history
     assert _git(repo=repo, env=env, argv=["diff", "--cached", "--name-only"]) == ""
+
+
+def test_gate_preview_trusts_its_worktree_before_running_the_hook(tmp_path: Path) -> None:
+    """A generated mise config cannot block the prospective commit checks."""
+    preview = importlib.import_module(_MODULE)
+    repo, runner, env = _preview_repository(tmp_path=tmp_path, preview=preview)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    mise = bin_dir / "mise"
+    mise.write_text(
+        "#!/bin/sh\n" 'test "$1" = trust\n' "touch .mise-trusted\n",
+        encoding="utf-8",
+    )
+    mise.chmod(0o755)
+    (repo / ".mise.toml").write_text("[tools]\n", encoding="utf-8")
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text(
+        "#!/bin/sh\n"
+        "test -f .mise-trusted || exit 9\n"
+        f"printf 'Failed targets (1):\\n  - {_FAILED_TARGET}\\n'\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+    env = {**env, "PATH": f"{bin_dir}:{env['PATH']}"}
+
+    completed = _run(
+        repo=repo,
+        env=env,
+        argv=[sys.executable, str(runner), "green"],
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert json.loads(completed.stdout.splitlines()[-1]) == {
+        "failed_targets": [_FAILED_TARGET],
+        "preview_ran": True,
+        "status": 1,
+        "unset_variables": ["LIVESPEC_CHECK_SKIP"],
+    }
+
+
+def test_gate_preview_reports_not_run_when_trusting_its_worktree_fails(tmp_path: Path) -> None:
+    """A setup refusal is not misreported as a hook with no failed targets."""
+    preview = importlib.import_module(_MODULE)
+    repo, runner, env = _preview_repository(tmp_path=tmp_path, preview=preview)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    mise = bin_dir / "mise"
+    mise.write_text("#!/bin/sh\nprintf 'untrusted mise config\\n' >&2\nexit 17\n", encoding="utf-8")
+    mise.chmod(0o755)
+    env = {**env, "PATH": f"{bin_dir}:{env['PATH']}"}
+
+    completed = _run(
+        repo=repo,
+        env=env,
+        argv=[sys.executable, str(runner), "green"],
+        check=False,
+    )
+
+    assert completed.returncode == 17
+    assert "untrusted mise config" in completed.stderr
+    assert json.loads(completed.stdout.splitlines()[-1]) == {
+        "failed_targets": [],
+        "preview_ran": False,
+        "status": 17,
+        "unset_variables": ["LIVESPEC_CHECK_SKIP"],
+    }

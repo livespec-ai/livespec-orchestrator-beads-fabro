@@ -79,7 +79,9 @@ Before Step 1, inspect
    names its test on a line written exactly as `Red test file: <path>`, the
    Definition of Done assertion it proves, the command that ran the test with
    its failure output, what the test verifies and does not verify, the code locations for the change, and the exit status and failed target names of
-   the last gate preview run. If no preview ran, state that and why. The legacy
+   the last gate preview run. When its JSON result says `"preview_ran": false`,
+   record the preview as not run and its reason, rather than recording no failed
+   targets. If no preview ran, state that and why. The legacy
    `Test file: <path>` field is accepted too, but write the exact Red field.
 
 The handoff is append-only: append your new section to the resolved file and
