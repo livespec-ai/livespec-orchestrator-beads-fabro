@@ -46,9 +46,9 @@ fi
 
 HARNESS_SLICE=${1:-all}
 case "$HARNESS_SLICE" in
-    all|scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|launcher-reexec|parity|gate-detach) ;;
+    all|scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|queue-position|launcher-reexec|parity|gate-detach) ;;
     *)
-        echo "usage: run-tests.sh [scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|launcher-reexec|parity|gate-detach]" >&2
+        echo "usage: run-tests.sh [scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|queue-position|launcher-reexec|parity|gate-detach]" >&2
         exit 2
         ;;
 esac
@@ -771,6 +771,7 @@ new_case() {
     export FLEET_LAUNCH_STOP_GRACE_S=5
     unset STUB_RESUME_UNLISTED STUB_READY_BLOCKED_UNTIL_RELEASE
     unset ONLY_GMK ONLY_HL ONLY_ARM CAPTURE_NULL CAPTURE_EXPECT TICKET_NS REWORK RELEASE_BLOCKED
+    unset FLEET_LAUNCH_PARENT_CHAIN_COMMAND FLEET_LAUNCH_PRIORITIES_RECORD
 }
 
 # run_launcher <item> [log]: one launcher invocation, captured. Sets RC.
@@ -1145,6 +1146,64 @@ else
     fail "an unknown fleet launched (rc=$RC, dispatches: $(drive_log_items))"
 fi
 
+fi
+
+# --- Queue-ticket placement: parent-chain priority, not an operator slot ---
+# The queue-position fixture is deliberately tiny and textual: the command accepts an
+# item id and returns its immediate parent, while the current priorities record maps
+# each owning plan to its rank.  The test starts plan 11 first with the smaller
+# hand-supplied namespace and plan 2 second with the larger one.  A new ticket must
+# walk its own parent chain and use the record at ticket time, so plan 2 becomes the
+# FIFO head despite those hostile values.  TICKET_NS remains available only to retain
+# an already-created ticket across a launcher restart.
+if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = queue-position ]; then
+scenario "6a. derives each new queue position from its parent chain and the priorities record"
+new_case parent-chain-ticket-position
+open_boards
+export FLEET_LAUNCH_MAX_WAIT_S=120
+: > "$HOLD_FILE"
+parent_chain="$CASE_DIR/parent-chain"
+priorities_record="$CASE_DIR/priorities-record"
+parent_chain_log="$CASE_DIR/parent-chain.log"
+: > "$parent_chain_log"
+printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf "%s\\n" "$1" >> "$FLEET_LAUNCH_PARENT_CHAIN_LOG"' \
+    'case "$1" in' \
+    '  bd-ib-priority-two-ticket) printf "%s\\n" bd-ib-priority-two-child ;;' \
+    '  bd-ib-priority-two-child) printf "%s\\n" bd-ib-priority-two-plan ;;' \
+    '  bd-ib-priority-two-plan|bd-ib-priority-eleven-plan) exit 0 ;;' \
+    '  *) exit 2 ;;' \
+    'esac' > "$parent_chain"
+chmod +x "$parent_chain"
+printf '%s\n' '02 bd-ib-priority-two-plan' '11 bd-ib-priority-eleven-plan' > "$priorities_record"
+export FLEET_LAUNCH_PARENT_CHAIN_COMMAND="$parent_chain"
+export FLEET_LAUNCH_PARENT_CHAIN_LOG="$parent_chain_log"
+export FLEET_LAUNCH_PRIORITIES_RECORD="$priorities_record"
+
+# The lower caller value belongs to the lower-priority plan.  It must not choose
+# a fresh ticket's place; only a re-exec of an already-created ticket may reuse it.
+ONLY_GMK=1 TICKET_NS=001 "$LAUNCHER" bd-ib-priority-eleven-plan > "$CASE_DIR/p11.log" 2>&1 &
+p11_pid=$!
+if ! wait_for_line "$CASE_DIR/p11.log" 'hold file present' "$OBSERVE_WAIT_S"; then
+    fail "the priority-eleven launcher did not reach the queue hold"
+fi
+ONLY_GMK=1 TICKET_NS=999 "$LAUNCHER" bd-ib-priority-two-ticket > "$CASE_DIR/p2.log" 2>&1 &
+p2_pid=$!
+if ! wait_for_line "$CASE_DIR/p2.log" 'gmktec FIFO ticket taken at start' "$OBSERVE_WAIT_S"; then
+    fail "the priority-two launcher did not create a queue ticket"
+fi
+if wait_for_line "$CASE_DIR/p11.log" 'queued behind an older gmktec ticket:' 2 \
+    && grep -qE 'queued behind an older gmktec ticket: .*item=bd-ib-priority-two-ticket$' "$CASE_DIR/p11.log" \
+    && grep -qxF bd-ib-priority-two-ticket "$parent_chain_log" \
+    && grep -qxF bd-ib-priority-two-child "$parent_chain_log"; then
+    pass "the priority-two ticket mechanically walked its parent chain at ticket time"
+else
+    fail "a priority-two ticket did not outrank priority eleven by walking its parent chain at ticket time (parent reads: $(tr '\n' ' ' < "$parent_chain_log"))"
+fi
+stop_launcher "$p11_pid" "$p2_pid"
+wait "$p11_pid" 2>/dev/null || true
+wait "$p2_pid" 2>/dev/null || true
 fi
 
 # --- 6. queued preflights, reusable passes, and FIFO binds ------------------

@@ -130,12 +130,85 @@ reexec_on_script_change() {
 }
 
 drop_ticket() { [ -n "$ticket" ] && rm -f "$ticket"; ticket=""; }
+# ticket_namespace_is_restart: a generated priority ticket has a five-digit
+# priority key followed by its ticket-time nonce.  A plain TICKET_NS remains
+# the legacy ordering seam when priority ticketing is not configured, but is
+# not allowed to hand-place a fresh priority ticket.
+ticket_namespace_is_restart() {
+  local priority nonce
+  priority=${TICKET_NS:-}; priority=${priority%%-*}
+  nonce=${TICKET_NS:-}; nonce=${nonce#*-}
+  [ -n "${TICKET_NS:-}" ] && [ "$priority" != "$TICKET_NS" ] \
+    && [ -n "$nonce" ] || return 1
+  case "$priority" in *[!0-9]*) return 1 ;; esac
+  case "$nonce" in *[!0-9]*) return 1 ;; esac
+  [ "${#priority}" -eq 5 ]
+}
+# priority_ticketing_configured: both sources are required.  This preserves
+# the ordinary timestamp FIFO for hosts that have not yet supplied the
+# mechanical parent-chain and priorities-record sources.
+priority_ticketing_configured() {
+  [ -n "${FLEET_LAUNCH_PARENT_CHAIN_COMMAND:-}" ] \
+    && [ -x "$FLEET_LAUNCH_PARENT_CHAIN_COMMAND" ] \
+    && [ -r "${FLEET_LAUNCH_PRIORITIES_RECORD:-}" ]
+}
+# priority_ticket_key: walk the item's parent chain at ticket time.  Each
+# record read is the current priorities record; an unranked or unresolvable
+# chain deliberately receives the final rank, never an operator-provided slot.
+priority_ticket_key() {
+  local node="$ITEM" parent rank hops=0
+  while [ "$hops" -lt 64 ]; do
+    rank=$(awk -v plan="$node" '$2 == plan { print $1; exit }' "$FLEET_LAUNCH_PRIORITIES_RECORD")
+    case "$rank" in
+      ''|*[!0-9]*) ;;
+      *) printf '%05d' "$((10#$rank))"; return 0 ;;
+    esac
+    parent=$("$FLEET_LAUNCH_PARENT_CHAIN_COMMAND" "$node") || return 1
+    parent=${parent%%$'\n'*}
+    [ -n "$parent" ] || return 1
+    node=$parent
+    hops=$((hops + 1))
+  done
+  return 1
+}
+ticket_number_for_new_ticket() {
+  local priority
+  if priority_ticketing_configured; then
+    priority=$(priority_ticket_key) || priority=99999
+    printf '%s-%s' "$priority" "$(date +%s%N)"
+  else
+    printf '%s' "${TICKET_NS:-$(date +%s%N)}"
+  fi
+}
+# existing_live_ticket_for_item prevents a whole-queue re-sort from creating a
+# second launcher while the first one is still inside a slow ready check.
+existing_live_ticket_for_item() {
+  local f
+  for f in "$GMK_Q"/*; do
+    [ -e "$f" ] || continue
+    ticket_fields "$f" || continue
+    [ "$TK_ITEM" = "$ITEM" ] && [ -n "$TK_PID" ] && kill -0 "$TK_PID" 2>/dev/null && return 0
+  done
+  return 1
+}
 ensure_ticket() {
   [ -n "$ticket" ] && [ -f "$ticket" ] && return
   mkdir -p "$GMK_Q"
-  ticket_number=${TICKET_NS:-${ticket_number:-$(date +%s%N)}}
+  existing_live_ticket_for_item && return 2
+  if [ -z "$ticket_number" ]; then
+    if ticket_namespace_is_restart; then ticket_number=$TICKET_NS
+    else ticket_number=$(ticket_number_for_new_ticket); fi
+  fi
   ticket="$GMK_Q/$ticket_number-$SEAT"
-  echo "owner=$SEAT pid=$$ item=$ITEM" > "$ticket"
+  if ! ( set -o noclobber; echo "owner=$SEAT pid=$$ item=$ITEM" > "$ticket" ) 2>/dev/null; then
+    ticket_fields "$ticket" 2>/dev/null || true
+    if [ "${TK_ITEM:-}" = "$ITEM" ] && [ -n "${TK_PID:-}" ] && kill -0 "$TK_PID" 2>/dev/null; then
+      ticket=""
+      return 2
+    fi
+    ticket=""
+    return 1
+  fi
   [ "$FIFO_CLASS" = hl ] && echo "server=hl" >> "$ticket"
   echo "$(date -u +%FT%TZ) gmktec FIFO ticket taken at start: ${ticket##*/}"
 }
@@ -687,6 +760,13 @@ sys.exit(3)' 2>/dev/null); local rc=$?
 # later cannot win the next freed slot ahead of it, and a refusal retried below keeps its place.
 if [ -n "${ONLY_GMK:-}" ] || [ -n "${ONLY_HL:-}" ] || [ -n "${ONLY_ARM:-}" ]; then
   ensure_ticket
+  ticket_rc=$?
+  if [ "$ticket_rc" = 2 ]; then
+    echo "$(date -u +%FT%TZ) queue ticket already has a live launcher for $ITEM: do not start a duplicate"
+    terminal_written=1
+    exit 0
+  fi
+  [ "$ticket_rc" = 0 ] || { echo "$(date -u +%FT%TZ) could not take queue ticket for $ITEM"; exit 75; }
 fi
 # A seat-gated release starts blocked, so it cannot pass the ordinary ready-set
 # check until its release valve runs.  Defer that check until after this
