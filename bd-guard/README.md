@@ -393,4 +393,12 @@ so the call runs on the local `bd-real` and one line is written to stderr and to
 is untouched. Once the command is sent it is NEVER re-run locally: ssh's status
 (including a server denial, 126) is returned as is, and a 255 prints
 `bd-remote: connection to the VPS failed after the command was sent; not retried`.
+
+One exception: when the master refuses the session (MaxSessions, ssh status 255
+with `Session open refused by peer` or `mux_client_request_session: session
+request failed` on ssh's own stderr) the remote command never started, so the
+call runs on the local `bd-real` and is logged. ssh's stderr is still passed to
+the caller. This fallback is taken only when stdin is a terminal or `/dev/null`;
+with a piped stdin ssh may have consumed part of it, so the call exits 255 as
+above and is not retried.
 Tests: `bash bd-guard/test/test-bd-remote.sh`.
