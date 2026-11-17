@@ -4,9 +4,11 @@ from __future__ import annotations
 
 __all__: list[str] = ["tdd_lineage_gate_program_body", "tdd_lineage_gate_program_source"]
 
-_PROGRAM_BODY = r"""import hashlib
+_PROGRAM_BODY = r"""import calendar
+import hashlib
 import subprocess as s
 import sys
+import time
 
 g = lambda *a: s.check_output(("git", *a), text=True).strip()
 e = lambda x: sys.exit("LIVESPEC_TDD_LINEAGE_REFUSED: " + x)
@@ -51,9 +53,33 @@ for c in z:
         try:
             recorded_parent = g("rev-parse", m[k] + "^")
         except s.CalledProcessError:
-            if c in o:
-                continue
-            e(c + " has " + k + " commit " + m[k] + " without a recorded parent")
+            at = m.get("TDD-Red-Captured-At", "")
+            try:
+                earned = calendar.timegm(time.strptime(at, "%Y-%m-%dT%H:%M:%SZ"))
+            except ValueError:
+                e(
+                    c
+                    + " has "
+                    + k
+                    + " commit "
+                    + m[k]
+                    + " that is gone and records no capture time, so its earning parent "
+                    + p
+                    + " cannot be resolved"
+                )
+            if int(g("show", "-s", "--format=%ct", p)) > earned:
+                e(
+                    c
+                    + " has "
+                    + k
+                    + " commit "
+                    + m[k]
+                    + " that is gone, and its parent "
+                    + p
+                    + " postdates the recorded capture "
+                    + at
+                )
+            continue
         if recorded_parent != p:
             e(
                 c
