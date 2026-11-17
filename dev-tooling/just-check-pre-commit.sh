@@ -56,10 +56,17 @@ read -ra delegated_skip_targets <<< "${SKIP_TARGETS:-}"
 
 staged=$(git diff --cached --name-only --diff-filter=AM)
 py_staged=$(echo "$staged" | grep -E '\.py$' || true)
+# The ordinary Red/Green shape detection below intentionally considers only
+# added and modified paths. An authoring turn's affected-tests gate, however,
+# must also cover a deleted product module: the selector includes deletions in
+# its changed set and cannot run if the hook sends that commit down doc-only.
+staged_with_deletions=$(git diff --cached --name-only --diff-filter=ACDMR)
+authoring_py_staged=$(echo "$staged_with_deletions" | grep -E '\.py$' || true)
 test_staged=$(echo "$staged" | grep -E '^tests/.*\.py$' || true)
 impl_staged=$(echo "$staged" | grep -E '^(\.claude-plugin/scripts/|dev-tooling/checks/).*\.py$' || true)
 green_amend_staged=$(echo "$py_staged" | grep -Ev '^tests/' || true)
-workflow_fabro_staged=$(echo "$staged" | grep -E '^\.claude-plugin/\.fabro/workflows/[^/]+/workflow\.fabro$' || true)
+# A deleted workflow graph is a change to it as well: the graph-reading tests must run.
+workflow_fabro_staged=$(echo "$staged_with_deletions" | grep -E '^\.claude-plugin/\.fabro/workflows/[^/]+/workflow\.fabro$' || true)
 pre_commit_hook_staged=$(echo "$staged" | grep -E '^dev-tooling/just-check-pre-commit\.sh$' || true)
 green_amend_staged=$(printf '%s\n%s\n%s\n' "$green_amend_staged" "$workflow_fabro_staged" "$pre_commit_hook_staged" | sed '/^$/d')
 test_count=0
@@ -78,6 +85,52 @@ red_test_staged=$(git diff-tree --no-commit-id --name-only --diff-filter=AM -r H
 merge_in_progress=false
 if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
     merge_in_progress=true
+fi
+# A commit made inside an implement, fix or review_fix turn runs the affected-tests
+# gate (`just check-changed`) in place of the full check aggregate; the janitor stage
+# runs the aggregate once per run before publication. The detached commit runner
+# carries the turn's stage in LIVESPEC_AUTHORING_TURN. It cannot carry
+# LIVESPEC_AGENT_STAGE, which activates the publication guard that a test suite run by
+# this hook must not meet, and it names a different gate rather than skipping a check.
+#
+# Three shapes stay on the existing paths below. A Red commit (one staged test, no
+# staged impl) is deliberately a failing test, so it keeps the Red-mode fast path. A
+# merge in progress is the merged tree, graded by the full aggregate. A commit that
+# stages neither a `.py` file nor a workflow graph has no tests to scope to and keeps
+# the doc-only path.
+#
+# Exit 75 from the gate means it cannot determine the affected tests (a shared
+# configuration file, a module no test reaches, a file the scan cannot parse): the
+# commit then falls through to the full check aggregate, which the paths below run for
+# any commit made outside these turns. Any other non-zero status is the gate's refusal
+# and its output names the failing test or each uncovered line of a changed module.
+if [[ "$merge_in_progress" == false ]] \
+    && [[ "${LIVESPEC_AUTHORING_TURN:-}" =~ ^(implement|fix|review_fix)$ ]] \
+    && [[ -n "$authoring_py_staged$workflow_fabro_staged" ]] \
+    && ! { [[ "$test_count" -eq 1 ]] && [[ "$impl_count" -eq 0 ]]; }; then
+    echo ":: $LIVESPEC_AUTHORING_TURN-turn commit: running just check-changed in place of the full check aggregate"
+    if [[ -z "$authoring_py_staged" ]]; then
+        echo ":: a workflow graph with no .py staged: running just check-pre-commit-doc-only first"
+        if ! just check-pre-commit-doc-only; then
+            echo ":: doc-only gates refused the commit" >&2
+            exit 1
+        fi
+    elif ! just check-staged-precheck; then
+        echo ":: staged pre-check phase refused the commit" >&2
+        exit 1
+    fi
+    set +e
+    just check-changed
+    changed_status=$?
+    set -e
+    if [[ "$changed_status" -eq 0 ]]; then
+        exit 0
+    fi
+    if [[ "$changed_status" -ne 75 ]]; then
+        echo ":: affected-tests gate refused the commit" >&2
+        exit "$changed_status"
+    fi
+    echo ":: check-changed could not determine the affected tests; running the full check aggregate"
 fi
 if [[ "$merge_in_progress" == false ]] \
     && [[ -n "$green_amend_staged" ]] \
