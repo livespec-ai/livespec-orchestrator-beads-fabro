@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.336.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.335.0...v0.336.0) (2026-11-17)
+
+
+### Features
+
+* **tier:** spec-change tier only for contract-bearing items ([5a3fec5](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/5a3fec5feefefe0c86786f5f1973d393e59561a6))
+
+
+### Bug Fixes
+
+* the journal tail cache re-reads a file replaced at the same path (bd-ib-gdt3qz) ([070b169](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/070b1696398c6970eaca4d8818d69fdecf527a8e))
+* **workflow:** a commit_green Red-not-found refusal names the commits inspected and the run ids matched (bd-ib-eyhjwr) ([66688dd](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/66688ddbda216916d648c4370edc4f8319b74cc1))
+
 ## [0.335.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.334.1...v0.335.0) (2026-11-17)
 
 
