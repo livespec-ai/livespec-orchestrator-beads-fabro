@@ -42,6 +42,8 @@ QUEUE=$FLEET_LAUNCH_GMK_QUEUE_DIR
 LOCK=$FLEET_LAUNCH_GMK_LOCK_DIR
 # shellcheck source=fleet-launch/launch-lib.sh
 . "$FLEET_LAUNCH_DIR/launch-lib.sh"
+# Under the gate runner's stall cap this detaches into its own session and exits; see launch-lib.sh.
+detach_if_under_gate_runner
 # The queue scan and the allowlist consume in launch-lib.sh read these.
 # shellcheck disable=SC2034
 FIFO_CLASS=gmk

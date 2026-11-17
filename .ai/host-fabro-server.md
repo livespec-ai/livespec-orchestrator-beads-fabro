@@ -284,6 +284,8 @@ that repo from this one.
   mise exec -- just gate-wait "$run_id"
   ```
 
+The committed `fleet-launch/` launchers (`dispatch-dual.sh`, `resume-capped.sh`) detach themselves when started under the gate runner: they re-exec under `setsid nohup` with `LIVESPEC_GATE_RUN_PROGRESS_STAMP` removed, print `detached pid <pid>, log file <path>` and exit 0, so the gate runner's 900-second stall cap does not kill the launcher with its drive (`FLEET_LAUNCH_ALLOW_UNDER_GATE=1` runs in place instead).
+
   `gate-start` runs the argv it is given, unchanged, so the gate command is
   whatever you would otherwise have typed — including the
   `with-<project>-env.sh` credential wrapper this repo's beads prerequisites

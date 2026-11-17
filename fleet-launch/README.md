@@ -55,6 +55,15 @@ Run it from a checkout of this repository's `master`, never from a copy under
 mise exec -- just gate-start -- bash -c 'env ONLY_GMK=1 fleet-launch/dispatch-dual.sh <item-id> >> <state-dir>/seq-<item-id>.log 2>&1'
 ```
 
+The gate runner ends a gate's whole process group after 900 s without output (its stall cap), which
+killed a launcher and its drive at 15m07s on four gate runs on 2026-11-17 while the factory run went on.
+Both launchers (`dispatch-dual.sh` and `resume-capped.sh`) therefore detect the runner, which exports
+`LIVESPEC_GATE_RUN_PROGRESS_STAMP` into everything it runs, and re-execute themselves in a new session
+with that variable removed. The call returns `0` at once and prints `detached pid <pid>, log file <path>`;
+the log is `detached-<launcher>-<UTC>-<pid>.log` under `FLEET_LAUNCH_STATE_DIR`, and its first line
+names the detached pid, its session and its parent. Set `FLEET_LAUNCH_ALLOW_UNDER_GATE=1` to run in
+place instead. The harness slice `gate-detach` covers both launchers and both controls.
+
 For another tenant, add `REPO_OVERRIDE="$HOME/workspace/<repo>"`; the launcher runs every
 launch-time command under that repository's committed `credential_wrapper`, run as written (a
 non-family one nested inside the family wrapper), so `WRAPPER=` is needed only to override that
