@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -121,6 +122,17 @@ class JournalWriter(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class _PoolAssessmentInputs:
+    """The shared policy and context used to assess every injected pool slot."""
+
+    floor_percent: int
+    weekly_floor_percent: int
+    horizon_minutes: int
+    journal_path: Path | None
+    now_iso: str
+
+
 def session_headroom_policy(
     *,
     repo: Path,
@@ -179,11 +191,13 @@ def session_headroom_policy(
                     # the pool is; an absent or invalid one assesses no slot.
                     pool=lambda: policy_pool_slots(repo=repo, environ=os.environ),
                     read=read,
-                    floor_percent=floor,
-                    weekly_floor_percent=weekly_floor,
-                    horizon_minutes=horizon,
-                    journal_path=journal_path,
-                    now_iso=now_iso,
+                    inputs=_PoolAssessmentInputs(
+                        floor_percent=floor,
+                        weekly_floor_percent=weekly_floor,
+                        horizon_minutes=horizon,
+                        journal_path=journal_path,
+                        now_iso=now_iso,
+                    ),
                 )
             )
         return taken[0]
@@ -260,15 +274,11 @@ def _assessed(
     )
 
 
-def _assessed_pool(  # noqa: PLR0913 - the evaluation's independently sourced inputs.
+def _assessed_pool(
     *,
     pool: Callable[[], tuple[str, ...]],
     read: Callable[..., SessionHeadroomReading],
-    floor_percent: int,
-    weekly_floor_percent: int,
-    horizon_minutes: int,
-    journal_path: Path | None,
-    now_iso: str,
+    inputs: _PoolAssessmentInputs,
 ) -> PoolSelection:
     """Assess EVERY injected slot once, then rank them for this evaluation.
 
@@ -279,11 +289,11 @@ def _assessed_pool(  # noqa: PLR0913 - the evaluation's independently sourced in
     slots = pool()
     if not slots:
         lone = _assessed(
-            reading=read(token=None, observed_at=now_iso),
-            floor_percent=floor_percent,
-            horizon_minutes=horizon_minutes,
-            journal_path=journal_path,
-            now_iso=now_iso,
+            reading=read(token=None, observed_at=inputs.now_iso),
+            floor_percent=inputs.floor_percent,
+            horizon_minutes=inputs.horizon_minutes,
+            journal_path=inputs.journal_path,
+            now_iso=inputs.now_iso,
         )
         return PoolSelection(readings=(lone,), chosen_slot=None, representative=lone)
     return select_pool_slot(
@@ -291,17 +301,17 @@ def _assessed_pool(  # noqa: PLR0913 - the evaluation's independently sourced in
             (
                 slot,
                 _assessed(
-                    reading=read(token=_projected_token(env_name=slot), observed_at=now_iso),
-                    floor_percent=floor_percent,
-                    horizon_minutes=horizon_minutes,
-                    journal_path=journal_path,
-                    now_iso=now_iso,
+                    reading=read(token=_projected_token(env_name=slot), observed_at=inputs.now_iso),
+                    floor_percent=inputs.floor_percent,
+                    horizon_minutes=inputs.horizon_minutes,
+                    journal_path=inputs.journal_path,
+                    now_iso=inputs.now_iso,
                 ),
             )
             for slot in slots
         ),
-        floor_percent=floor_percent,
-        weekly_floor_percent=weekly_floor_percent,
+        floor_percent=inputs.floor_percent,
+        weekly_floor_percent=inputs.weekly_floor_percent,
     )
 
 
