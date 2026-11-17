@@ -1,1 +1,0 @@
-VALUE = 'chore: engine checkpoint'
