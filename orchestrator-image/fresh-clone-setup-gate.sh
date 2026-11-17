@@ -161,8 +161,10 @@ fi
 # staged binary patch before replaying setup.  Without this, a commit that
 # removes a tracked generated pack file is graded against the old tree which
 # still contains it, rather than against the fresh clone the commit creates.
-if ! git -C "$REPO_ROOT" diff --cached --binary | git -C "$CLONE/repo" apply --index; then
-    fail "could not apply the staged tree to the fresh-clone setup probe"
+if ! git -C "$REPO_ROOT" diff --cached --quiet; then
+    if ! git -C "$REPO_ROOT" diff --cached --binary | git -C "$CLONE/repo" apply --index; then
+        fail "could not apply the staged tree to the fresh-clone setup probe"
+    fi
 fi
 
 if [ -e "$CLONE/repo/dev-tooling/worktree-lib.sh" ]; then
