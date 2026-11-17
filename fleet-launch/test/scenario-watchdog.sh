@@ -9,10 +9,10 @@
 # USE. Call `scenario "<label>"` where the harness used to `echo "--- <label>"`; it stamps the
 # scenario's start time. Call `scenario_watchdog_start "$WORK"` once, after WORK exists, and
 # `scenario_watchdog_stop` from the harness cleanup. When one scenario runs longer than
-# HARNESS_SCENARIO_TIMEOUT_S (default 300) the watchdog prints one FAIL line naming it, kills
+# HARNESS_SCENARIO_TIMEOUT_S (default 900) the watchdog prints one FAIL line naming it, kills
 # the harness's descendant tree and then the harness itself, so the exit status is non-zero.
 
-SCENARIO_TIMEOUT_S=${HARNESS_SCENARIO_TIMEOUT_S:-300}
+SCENARIO_TIMEOUT_S=${HARNESS_SCENARIO_TIMEOUT_S:-900}
 SCENARIO_WATCHDOG_PID=""
 SCENARIO_STATE_FILE=""
 

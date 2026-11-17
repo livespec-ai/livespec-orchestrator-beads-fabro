@@ -53,7 +53,7 @@ fi
 # Case 10b waits for the held direct release's waiting marker under the shared
 # hang guard only; a fixed per-attempt deadline would decide its verdict by the
 # wall clock.
-case_10b="$(sed -n '/^echo "--- 10b\./,/^stop_load$/p' "$harness")"
+case_10b="$(sed -n '/^scenario "10b\./,/^stop_load$/p' "$harness")"
 if [[ "$case_10b" == *held_deadline* ]] \
     || [[ "$case_10b" == *'+ 60 ))'* ]] \
     || [[ "$case_10b" != *'held_hang_deadline=$(( $(date +%s) + HARNESS_PREFLIGHT_HANG_GUARD_S ))'* ]] \
