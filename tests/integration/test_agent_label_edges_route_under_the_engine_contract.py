@@ -49,6 +49,7 @@ must route to `green_admission` through the committed red node.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import cast
@@ -589,7 +590,7 @@ def test_the_catch_all_edge_excludes_exactly_the_routed_labels(
 
 
 def test_the_red_and_green_prompts_direct_each_routed_label() -> None:
-    """Each routed label is one the prompt tells the agent to emit as `preferred_next_label`."""
+    """Each routed label is directed, and Red directs no unrouted label."""
     red = (_PROMPTS / "red.md").read_text(encoding="utf-8")
     green = (_PROMPTS / "green.md").read_text(encoding="utf-8")
 
@@ -599,6 +600,13 @@ def test_the_red_and_green_prompts_direct_each_routed_label() -> None:
     assert '{"preferred_next_label": "test-wrong"}' in green
     assert '{"preferred_next_label": "needs-human"}' in red
     assert '{"preferred_next_label": "needs-human"}' in green
+    assert set(re.findall(r'"preferred_next_label": "([A-Za-z0-9_-]+)"', red)) == {
+        "seeded-open-red",
+        "seeded-red-passes",
+        "already-satisfied",
+        "needs-human",
+    }
+    assert "Every\nordinary Red ending carries no label at all." in red
 
 
 # --- the completion gate reads a context key the green contract still writes -----
