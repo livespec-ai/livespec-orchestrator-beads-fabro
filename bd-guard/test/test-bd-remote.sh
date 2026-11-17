@@ -200,12 +200,24 @@ for argv in "sql select 1" "export" "edit x" "init" "import" "config set k v" "c
     if ran_local && ! ran_remote && [ "$OUT" = "local-ran" ]; then :; else fail "'$argv' did not run local"; fi
 done
 pass "local: sql, export, edit, init, import, config set/bare, and -C/--global/--profile/--directory/... (case-insensitive) run local"
-for argv in "config get k" "config list" "show x" "comment x hi"; do
+for argv in "config get k" "config get issue-prefix" "show x" "comment x hi" "list --status open --json -n 5" "update x -d newdesc" "show x -q -5"; do
     # shellcheck disable=SC2086
     run "$REPO" $argv
     if ran_remote && ! ran_local; then :; else fail "'$argv' did not go remote"; fi
 done
-pass "remote: config get/list, show, comment go remote"
+pass "remote: config get <key>, show, comment, lone short flags (-n -q -d -5) go remote"
+
+# 10d. rules mirrored from the hardened server wrapper: denied runs local.
+for argv in "config get dolt.password" "config get api_TOKEN" "config get x secret" "config list" "config set k v" \
+            "show x -f/etc/passwd" "show x -o/tmp/x" "show x -vf" "show x -fX" \
+            "update t --from-file=a" "update --graph g" "show x --graph" "update t --description=@/etc/x" \
+            "update t @/etc/x" "show x --FILE=a" "show x --some-path" "show x --my-dir" "show x --output-fmt" \
+            "show x --url=u" "show x --Credentials-x" "show x --profile=p" "show x --config=c" "show x --database=d" "show x --jsonl"; do
+    # shellcheck disable=SC2086
+    run "$REPO" $argv
+    if ran_local && ! ran_remote && [ "$OUT" = "local-ran" ]; then :; else fail "'$argv' did not run local"; fi
+done
+pass "local: secret-looking config keys, config list/set, -fX/-oX/-vf, --from-*, --graph, @file and the *file*/*path*/*dir*/*url* patterns run local"
 
 # 11. guard create post-processing still works over the remote path.
 run "$REPO" create --title "x"
