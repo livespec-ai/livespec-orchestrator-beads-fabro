@@ -53,6 +53,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_spec_identity im
     whole_tree_identity,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
+from livespec_orchestrator_beads_fabro.commands._dispatcher_pass_snapshot import pass_snapshot
 from livespec_orchestrator_beads_fabro.commands._dod_governing_heading_judge import (
     unjudged_governing_heading,
 )
@@ -408,3 +409,32 @@ def test_a_drain_excludes_a_refused_item_only_while_both_digests_still_match(
     )
 
     assert dod_unrefused_candidates(items=[item], repo=other_subject) == [item]
+
+
+def test_one_pass_parses_the_fixed_spec_tree_the_same_number_of_times_when_candidates_double(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pre-dispatch filter shares its fixed-tree sections across candidates."""
+    repo = _connected_repo(tmp_path=tmp_path)
+    item = _item()
+    _stand_a_refusal(repo=repo, item=item, rubric=_executing_rubric_digest())
+    condensation = __import__(
+        "livespec_orchestrator_beads_fabro.commands._spec_tree_condensation",
+        fromlist=["_section"],
+    )
+    real_section = condensation._section
+
+    def section_computations(candidate_count: int) -> int:
+        calls = 0
+
+        def counted_section(**kwargs: object) -> object:
+            nonlocal calls
+            calls += 1
+            return real_section(**kwargs)
+
+        monkeypatch.setattr(condensation, "_section", counted_section)
+        with pass_snapshot():
+            _ = dod_unrefused_candidates(items=[item] * candidate_count, repo=repo)
+        return calls
+
+    assert section_computations(candidate_count=2) == section_computations(candidate_count=4)
