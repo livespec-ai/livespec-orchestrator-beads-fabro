@@ -417,6 +417,35 @@ def test_an_uncovered_selected_module_is_remeasured_over_the_whole_suite_before_
     assert pytest_calls[1][-1] == "--cov-fail-under=0"
 
 
+def test_a_failing_test_in_the_whole_suite_rerun_refuses_even_when_its_coverage_is_complete(
+    *, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole-suite rerun's own pytest status is never discarded."""
+    module = _load()
+    root, _ = _committed_repo(tmp_path=tmp_path, monkeypatch=monkeypatch)
+    pytest_calls = 0
+
+    def fake_run(arguments: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        nonlocal pytest_calls
+        if arguments == ["bash", "dev-tooling/just-test-nprocs.sh"]:
+            return subprocess.CompletedProcess(arguments, 0, stdout="1\n")
+        if arguments[:3] == ["uv", "run", "pytest"]:
+            pytest_calls += 1
+            return subprocess.CompletedProcess(arguments, 0 if pytest_calls == 1 else 1)
+        coverage_calls = arguments.count("coverage")
+        assert coverage_calls == 1
+        return subprocess.CompletedProcess(arguments, 2 if pytest_calls == 1 else 0)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    status = module._run_gate(  # noqa: SLF001 - this tests the gate's coverage fallback directly.
+        root=root,
+        selection=module.Selection(measured=(f"{_PKG}/a.py",), tests=("tests/pkg/test_direct.py",)),
+    )
+
+    assert status == 1
+
+
 def test_a_workflow_only_change_runs_its_tests_without_a_coverage_report(
     *, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
