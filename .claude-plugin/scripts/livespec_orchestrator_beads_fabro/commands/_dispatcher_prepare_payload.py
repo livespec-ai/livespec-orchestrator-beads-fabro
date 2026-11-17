@@ -100,7 +100,7 @@ _DECODE_PROGRAM = (
     "import base64 as b,gzip as g,os,sys,tempfile as t\n"
     "p,a=sys.argv[1:3]\n"
     "try:d=g.decompress(b.b64decode(sys.stdin.buffer.read(),validate=1))\n"
-    f'except Exception as e:sys.exit("{DECODE_FAILED_CAUSE}: %s: %s"%(p,e))\n'
+    f'except:sys.exit("{DECODE_FAILED_CAUSE}:"+p)\n'
     "x=os.path.exists(p)\n"
     'if a=="1"and x:d=open(p,"rb").read()+d\n'
     "u=os.umask(0);os.umask(u)\n"

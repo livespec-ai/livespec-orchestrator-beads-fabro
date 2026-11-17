@@ -28,6 +28,9 @@ from __future__ import annotations
 from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_plugins import (
     sandbox_plugins_root_expansion,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_tdd_lineage_gate import (
+    tdd_lineage_gate_program_body,
+)
 
 __all__: list[str] = [
     "PUBLICATION_PUSH_PROGRAM_FILENAME",
@@ -37,30 +40,48 @@ __all__: list[str] = [
 
 PUBLICATION_PUSH_PROGRAM_FILENAME = "livespec-push-exact-head"
 
-_PROGRAM_SOURCE = """#!/bin/sh
+_PROGRAM_SOURCE = (
+    """#!/bin/sh
 set -eu
-if test "$#" -ne 2; then
-    echo 'livespec exact-head push: expected <branch> <expected-object>' >&2
+livespec_validate_tdd_lineage() {
+    python3 -c '
+"""
+    + tdd_lineage_gate_program_body()
+    + """'
+}
+if test "$#" -ne 1 && test "$#" -ne 2; then
+    echo 'livespec publication push: expected <branch> <expected-object> or <branch>' >&2
     exit 2
 fi
 branch=$1
-expected=$2
 if test -z "$branch"; then
-    echo 'livespec exact-head push: branch is empty' >&2
+    echo 'livespec publication push: branch is empty' >&2
     exit 2
 fi
-if test "${#expected}" -ne 40; then
-    echo 'livespec exact-head push: expected object is not a full lowercase sha' >&2
-    exit 2
-fi
-case "$expected" in
-    *[!0-9a-f]*)
+if test "$#" -eq 2; then
+    expected=$2
+    if test "${#expected}" -ne 40; then
         echo 'livespec exact-head push: expected object is not a full lowercase sha' >&2
         exit 2
-        ;;
-esac
-exec git push --force-with-lease="refs/heads/$branch:$expected" origin "HEAD:refs/heads/$branch"
+    fi
+    case "$expected" in
+        *[!0-9a-f]*)
+            echo 'livespec exact-head push: expected object is not a full lowercase sha' >&2
+            exit 2
+            ;;
+    esac
+    set -- --force-with-lease="refs/heads/$branch:$expected"
+else
+    if git ls-remote --exit-code --heads origin "refs/heads/$branch" >/dev/null 2>&1; then
+        echo 'livespec exact-head push: expected <branch> <expected-object>' >&2
+        exit 2
+    fi
+    set -- -u
+fi
+livespec_validate_tdd_lineage
+exec git push "$@" origin "HEAD:refs/heads/$branch"
 """
+)
 
 
 def publication_push_program_source() -> str:
