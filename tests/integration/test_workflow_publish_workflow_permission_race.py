@@ -29,6 +29,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_fabro_terminal impor
     fabro_run_terminal_outcome,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import DispatchPlan
+from livespec_orchestrator_beads_fabro.commands._dispatcher_publication_push import (
+    PUBLICATION_PUSH_PROGRAM_FILENAME,
+    publication_push_program_source,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_record_file_regeneration import (
     RECORD_FILE_PROGRAM_FILENAME,
     record_file_program_source,
@@ -204,6 +208,9 @@ def _env(*, tmp_path: Path) -> dict[str, str]:
     _ = (plugins_root / RECORD_FILE_PROGRAM_FILENAME).write_text(
         record_file_program_source(), encoding="utf-8"
     )
+    publication_push = plugins_root / PUBLICATION_PUSH_PROGRAM_FILENAME
+    _ = publication_push.write_text(publication_push_program_source(), encoding="utf-8")
+    publication_push.chmod(publication_push.stat().st_mode | stat.S_IXUSR)
     env = {
         key: value
         for key, value in os.environ.items()

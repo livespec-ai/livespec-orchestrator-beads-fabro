@@ -40,6 +40,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_hook_over_limit impo
     HOOK_OVER_LIMIT_SENTINEL,
     hook_over_limit_from_text,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_publication_push import (
+    PUBLICATION_PUSH_PROGRAM_FILENAME,
+    publication_push_program_source,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_record_file_regeneration import (
     RECORD_FILE_PROGRAM_FILENAME,
     record_file_program_source,
@@ -163,6 +167,9 @@ def _sandbox_helpers(*, tmp_path: Path, limit_seconds: int | None) -> Path:
     _ = (root / RECORD_FILE_PROGRAM_FILENAME).write_text(
         record_file_program_source(), encoding="utf-8"
     )
+    publication_push = root / PUBLICATION_PUSH_PROGRAM_FILENAME
+    _ = publication_push.write_text(publication_push_program_source(), encoding="utf-8")
+    publication_push.chmod(publication_push.stat().st_mode | stat.S_IXUSR)
     if limit_seconds is not None:
         budget = push_observation_budget_seconds(limit_seconds=limit_seconds)
         _ = (root / HOOK_LIMIT_LIMITS_FILENAME).write_text(
