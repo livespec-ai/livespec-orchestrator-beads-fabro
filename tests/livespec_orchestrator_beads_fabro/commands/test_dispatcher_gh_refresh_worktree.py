@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pytest
 from livespec_orchestrator_beads_fabro.commands._dispatcher_gh_refresh import (
+    DEFAULT_SANDBOX_GH_REFRESH_ROOT,
     SANDBOX_GH_REFRESH_ROOT_ENV_VAR,
     refreshing_gh_prepare_steps_block,
 )
@@ -45,6 +46,11 @@ _BUNDLE_DIRNAME = ".livespec-gh-refresh"
 _FETCH = "<helper-fetch>"
 _DEFAULT_BRANCH = "master"
 _RUN_BRANCH = "fabro/run/01M4Q45S5AGK"
+
+
+def test_publication_tooling_materializes_outside_the_run_worktree() -> None:
+    """An agent-writable checkout cannot replace the credential minting helper."""
+    assert not Path(DEFAULT_SANDBOX_GH_REFRESH_ROOT).is_relative_to(Path("/workspace"))
 
 
 def test_a_run_branch_rebase_is_not_blocked_by_the_gh_refresh_bundle(

@@ -42,7 +42,7 @@ if ! git diff --quiet "origin/$default_branch" HEAD 2>/dev/null; then
         lap_n="$(cat "$(git rev-parse --git-path livespec-implement-test-wrong-reentries)" 2>/dev/null || true)"
         case "$lap_n" in "" | *[!0-9]*) lap_n="$lap_sha" ;; esac
         lap_ref="refs/heads/needs-human/${preservation_id}-lap${lap_n}"
-        helper="${LIVESPEC_SANDBOX_GH_REFRESH_ROOT:-/workspace/.livespec-gh-refresh}/bin/push_origin"
+        helper="${LIVESPEC_SANDBOX_GH_REFRESH_ROOT:-${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-gh-refresh}/bin/push_origin"
         push_status=0
         if [[ -x "$helper" ]]; then
             push_out="$("$helper" git -c core.hooksPath=/dev/null push origin "HEAD:$lap_ref" 2>&1)" || push_status=$?

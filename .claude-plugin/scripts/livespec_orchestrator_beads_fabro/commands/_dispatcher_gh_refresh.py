@@ -40,16 +40,19 @@ _GITHUB_APP_ENV_KEYS = (
     "GITHUB_API_URL",
 )
 # The in-sandbox bundle root the dispatcher materializes the refreshing `gh`
-# wrapper into. `/workspace` is the fabro sandbox's own mount, so this absolute
-# path is correct in production and WRONG anywhere else -- on a CI runner it
-# resolves to the runner's filesystem root, where a write either is refused
-# (uid 1000: `mkdir: Permission denied`) or, worse, succeeds under uid 0 and
-# lands in a real /workspace. The lever below exists so a test can execute the
+# wrapper into. It holds the code that mints the run's forge credential, so it
+# lives under the Dispatcher-materialized plugins root and OUTSIDE the run's
+# working tree: an agent stage can edit and commit the working tree, and
+# anything it writes there could act with the credential when a publication
+# stage next runs. The value is a shell expression, expanded by the shell that
+# runs each prepare step. The lever below exists so a test can execute the
 # rendered steps for real against a temporary root; production never sets it.
 # Mirrors `LIVESPEC_SANDBOX_OTEL_ENDPOINT` in `_dispatcher_projection`.
 SANDBOX_GH_REFRESH_ROOT_ENV_VAR = "LIVESPEC_SANDBOX_GH_REFRESH_ROOT"
 
-DEFAULT_SANDBOX_GH_REFRESH_ROOT = "/workspace/.livespec-gh-refresh"
+DEFAULT_SANDBOX_GH_REFRESH_ROOT = (
+    "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-gh-refresh"
+)
 
 # Where each fixed piece of the bundle lands, relative to the bundle root. The
 # helper-fetch setup step writes them (`_dispatcher_helper_registry`); the
