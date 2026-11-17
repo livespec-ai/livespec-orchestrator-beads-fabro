@@ -233,6 +233,15 @@ def test_a_closed_items_ended_run_is_removed_through_its_factory_without_force(
             "--jq",
             ".[].ref",
         ],
+        # Its whole record is exported BEFORE it is removed.
+        [
+            "dump",
+            "01DONE",
+            "--server",
+            _HP,
+            "-o",
+            str(repo / "tmp" / "ended-run-exports" / "01DONE"),
+        ],
         ["rm", "01DONE", "--server", _HP],
         ["ps", "-a", "--json", "--server", _VPS],
     ]
