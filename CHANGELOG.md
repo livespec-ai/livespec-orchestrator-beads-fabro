@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.337.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.336.2...v0.337.0) (2026-11-17)
+
+
+### Features
+
+* preserve the tree of any failed ending no needs-human ref carries (bd-ib-nckst7.1) ([80ceadf](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/80ceadf76967f6b7044fc47dc99085be1fb03250))
+
+
+### Bug Fixes
+
+* **fleet-launch:** case 23's signal probes cannot lose to the 5 s no-slot give-up or hang on a swallowed signal (bd-ib-5hgrtg) ([add4520](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/add452092bfcd24c6b8cc5f715efa4a70a9fe3f6))
+* **fleet-launch:** every harness wait that only OBSERVES a launcher state gets a return-on-appearance bound of 30 s, not 5-15 s (bd-ib-5hgrtg) ([db3b5a4](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/db3b5a4cae4b41dd08e4c1462f9e8ba40d8fcd83))
+* **fleet-launch:** scenarios wait 30 s, not 5 s, for a launcher's repository-hold line (bd-ib-5hgrtg) ([aed417f](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/aed417f4e568aeb86292d22070fcb768f0ff0655))
+
 ## [0.336.2](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.336.1...v0.336.2) (2026-11-17)
 
 
