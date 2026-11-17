@@ -379,12 +379,18 @@ where `<b64>` is the base64 of the NUL-separated `bd` argv; the server side is
 worktree); the cwd must be in a git root with `.beads/`.
 
 Run LOCAL (unchanged): a leading flag, `help`/`version`/`completion`/`send-metrics`,
-and any call carrying a host-path or connection flag (`--db`, `--database`,
-`--dolt-*`, `--host`, `--port`, `--file`, `--body-file`, `--design-file`, `-f`,
-`--path`, `--dir`, `--config`, `--output`, `-o`, `--jsonl`, and `=value` forms).
+any verb the server does not allowlist (`sql`, `export`, `edit`, `init`, `import`,
+`config set/unset`, ...), and any call carrying a host-path or connection flag
+(`--db`, `--database`, `--dolt-*`, `--host`, `--port`, `--global`, `--profile`,
+`--directory`, `-C`, `--file`, `--body-file`, `--design-file`,
+`--description-file`, `-f`, `--path`, `--dir`, `--config`, `--output`, `-o`,
+`--jsonl`, `--credentials-file`, case-insensitive, and `=value` forms). The verb
+allowlist and flag denylist in `bd-remote.sh` must match the server wrapper.
 
-Fallback: if ssh itself cannot start the call (status 255) the call runs on the
-local `bd-real` and one line is written to stderr and to
-`LIVESPEC_BD_REMOTE_LOG` (default `~/.local/state/livespec-bd-remote.log`). Any
-other remote status, including a server denial (126), is returned as is and is
-never retried locally. Tests: `bash bd-guard/test/test-bd-remote.sh`.
+Fallback: before sending, `ssh -O check` must pass. If it fails nothing was sent,
+so the call runs on the local `bd-real` and one line is written to stderr and to
+`LIVESPEC_BD_REMOTE_LOG` (default `~/.local/state/livespec-bd-remote.log`); stdin
+is untouched. Once the command is sent it is NEVER re-run locally: ssh's status
+(including a server denial, 126) is returned as is, and a 255 prints
+`bd-remote: connection to the VPS failed after the command was sent; not retried`.
+Tests: `bash bd-guard/test/test-bd-remote.sh`.
