@@ -207,13 +207,17 @@ def test_the_needs_human_label_rests_the_run_with_the_turns_message(
     assert "prohibited from editing" in cause or "workflow edit" in cause
 
 
-def test_an_unknown_red_label_is_refused_into_the_handoff_and_re_enters_red(
+def test_an_unknown_red_label_is_refused_into_the_handoff_and_re_enters_red_without_spending_admission(
     tmp_path: Path,
 ) -> None:
-    """The recorded `publish_draft` ending is named in a refusal section and fails back to red."""
+    """The refusal names the label and returns directly to Red without spending its admission bound."""
     graph = _graph(_IMPLEMENT)
-    failed = {edge.destination for edge in graph.edges if edge.source == "red_unknown_label_route"}
-    assert failed == {"red_admission"}
+    routes = [
+        (edge.destination, edge.attributes.get("condition", ""))
+        for edge in graph.edges
+        if edge.source == "red_unknown_label_route"
+    ]
+    assert routes == [("red", "outcome=failed"), ("red", "")]
 
     result, checkout = _run_route(
         graph=graph, route="red_unknown_label_route", stdin=_EQTYYR_RED_2_TAIL, tmp_path=tmp_path
