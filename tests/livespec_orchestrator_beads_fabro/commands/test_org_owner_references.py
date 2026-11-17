@@ -2,7 +2,7 @@
 
 The fleet moves from the `thewoolleyman` account to the `livespec-ai` GitHub
 organization (livespec-dev-tooling plan stale-base-merge-options, note 005).
-After the move every `github.com/thewoolleyman/<repo>` URL only works through
+After the move every old-owner repository URL only works through
 GitHub's redirect, which breaks the day the old name is reused. These are the
 repository URLs the dispatcher clones from, installs from, or probes, so each
 one must name the organization directly.

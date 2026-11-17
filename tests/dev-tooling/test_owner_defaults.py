@@ -12,6 +12,7 @@ __all__: list[str] = []
 _ROOT = Path(__file__).resolve().parents[2]
 _RESOLVER = _ROOT / ".claude-plugin" / ".pi-plugin" / "lib" / "resolve-plugin-root.sh"
 _PLUGIN = "livespec-orchestrator-beads-fabro"
+_FORMER_ACCOUNT = "thewoolleyman"
 
 
 def _make_clone(home: Path, owner: str) -> Path:
@@ -65,7 +66,7 @@ def test_resolver_install_hint_names_the_new_owner(tmp_path: Path) -> None:
 def test_preserve_default_fleet_list_is_owned_by_livespec_ai() -> None:
     text = (_ROOT / "dev-tooling" / "preserve" / "preserve_runs.sh").read_text(encoding="utf-8")
     assert '"${PRESERVE_OWNER:-livespec-ai}"' in text
-    assert "github.com/thewoolleyman" not in text
+    assert f"github.com/{_FORMER_ACCOUNT}" not in text
 
 
 def test_real_work_dispatch_defaults_to_the_new_owner() -> None:

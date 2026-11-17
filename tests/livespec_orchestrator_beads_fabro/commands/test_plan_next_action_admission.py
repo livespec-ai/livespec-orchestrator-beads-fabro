@@ -351,7 +351,7 @@ def test_the_forge_path_form_of_this_project_is_refused_naming_the_bare_identity
     """A path-form identity whose last segment resolves is refused with that segment.
 
     This is the measured incident's own shape, and the author who wrote it had
-    no way to see what was wrong: `thewoolleyman/<repo>` is the project's real
+    no way to see what was wrong: `<owner>/<repo>` is the project's real
     forge path, so a refusal that only reported the value back reads as a
     refusal of the correct answer. Naming the identity that WOULD resolve is
     what makes the one-character fix visible.
