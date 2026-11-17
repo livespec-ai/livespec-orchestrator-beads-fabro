@@ -30,6 +30,7 @@ case " $* " in
         exit "${STUB_CHECK_EXIT:-0}" ;;
 esac
 printf '%s\n' "$@" >"$STUB_SSH_ARGS"
+[ -n "${STUB_SSH_ERR:-}" ] && printf '%s\n' "$STUB_SSH_ERR" >&2
 if [ -n "${STUB_SSH_EXIT:-}" ]; then exit "$STUB_SSH_EXIT"; fi
 for last in "$@"; do :; done
 b64=${last##* }
@@ -159,6 +160,31 @@ if ran_remote && ! ran_local && [ "$RC" -eq 255 ] \
     pass "check ok then ssh 255: no local run, exit 255, one error line"
 else
     fail "post-send 255 (rc=$RC err=$ERR local=$(ran_local && echo y || echo n))"
+fi
+
+# 8c. MaxSessions refusal (ssh 255 + its own phrase): safe fallback only when
+# stdin is /dev/null or a tty; logged. Any other 255, or a piped stdin: no local run.
+for phrase in "Session open refused by peer" "mux_client_request_session: session request failed: Session open refused by peer"; do
+    rm -f "$LIVESPEC_BD_REMOTE_LOG"
+    OUT=$(cd "$REPO" && STUB_SSH_EXIT=255 STUB_SSH_ERR="$phrase" "$GUARD" show demo-1 2>"${WORK}/err" </dev/null); RC=$?
+    ERR=$(cat "${WORK}/err")
+    if [ "$OUT" = "local-ran" ] && [ "$RC" -eq 0 ] && grep -q 'session refused' <<<"$ERR" \
+        && grep -q 'session refused' "$LIVESPEC_BD_REMOTE_LOG" && grep -qF "$phrase" <<<"$ERR"; then :; else fail "refused-session fallback ($phrase) rc=$RC err=$ERR"; fi
+done
+pass "session refused + 255 + stdin /dev/null: ssh stderr passed through, local bd runs, logged"
+rm -f "$STUB_REAL_ARGS"
+OUT=$(cd "$REPO" && STUB_SSH_EXIT=255 STUB_SSH_ERR="Connection reset by peer" "$GUARD" show demo-1 2>"${WORK}/err" </dev/null); RC=$?
+if [ "$RC" -eq 255 ] && ! ran_local && grep -q 'not retried' "${WORK}/err"; then
+    pass "any other 255: exit 255, error line, no local run"
+else
+    fail "other 255 (rc=$RC)"
+fi
+rm -f "$STUB_REAL_ARGS"
+OUT=$(cd "$REPO" && printf 'body' | STUB_SSH_EXIT=255 STUB_SSH_ERR="Session open refused by peer" "$GUARD" show demo-1 2>"${WORK}/err"); RC=$?
+if [ "$RC" -eq 255 ] && ! ran_local && grep -q 'not retried' "${WORK}/err"; then
+    pass "session refused with piped stdin: no local run, exit 255"
+else
+    fail "refused with piped stdin (rc=$RC)"
 fi
 
 # 9. a remote nonzero is returned and NOT retried locally.
