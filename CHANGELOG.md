@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.335.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.334.1...v0.335.0) (2026-11-17)
+
+
+### Features
+
+* red ([7b7000f](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/7b7000f880599ea303f89b483b07d7505adbbb62))
+* red ([03627bd](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/03627bd697552798d601f09baab447a2e1177dd0))
+
+
+### Bug Fixes
+
+* keep a stopped rebase resumable after a subjectless refusal (red) ([b3023ef](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/b3023ef0fc4bc1a7ce727c9fe66f9abf96e45581))
+* **pytest:** the tmp hygiene fixtures survive tests that patch rmtree or stat and threads still writing at teardown (livespec-dev-tooling-jxhi63) ([eaadc46](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/eaadc46be8540c0f56df19aaffb26d6ac61cbb83))
+* **workflow:** the publish fold keeps the authored message and runs no commit hook (bd-ib-jo3bl4) ([f15acbf](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/f15acbf4a2456a26eda88a045a34fa30c7015681))
+
 ## [0.334.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.334.0...v0.334.1) (2026-11-16)
 
 
