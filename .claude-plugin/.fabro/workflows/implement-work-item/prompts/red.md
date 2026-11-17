@@ -29,7 +29,18 @@ Before Step 1, inspect
 
    The graph sends this directly to Green, whose command commit completes that
    existing Red pair.
-1. Decide whether the Definition of Done already holds on the dispatch base.
+1. If the placed tree already contains the work item's Red test and it passes
+   before you write anything, preserve that seed instead of sending an empty
+   Red commit. Confirm that the test is the work item's test and record its
+   passing output, then append a `## seeded-red-passes` section naming that
+   test and evidence, then end the turn with exactly:
+
+       {"preferred_next_label": "seeded-red-passes"}
+
+   The graph sends this directly to Green and never enters `commit_red`.
+   Green and `commit_green` retain the complete seed without inventing a
+   second Red commit.
+2. Decide whether the Definition of Done already holds on the dispatch base.
    If it does, do not write or run a test. Append a `## already-satisfied`
    section to the handoff file with a declared `already-satisfied` outcome and
    the evidence for it, then end the turn with exactly:
@@ -51,10 +62,10 @@ Before Step 1, inspect
    Step 3 says. `commit_red` makes the Red commit on the dispatch base with the
    carried changes set aside, then restores them, so `green` and `commit_green`
    take them to publication. Never declare `already-satisfied` for such a seed.
-2. Otherwise, continue with the failing-test path. Write one failing test for one Definition of Done assertion.
+3. Otherwise, continue with the failing-test path. Write one failing test for one Definition of Done assertion.
    The test must fail on a genuine assertion rather than during collection or
    import.
-3. Run only that test and capture its failure output. Do not make a commit.
+4. Run only that test and capture its failure output. Do not make a commit.
    On a seeded tree whose earlier checkpoint commits already carry the
    implementation, the test passes on the working tree, so run it against the
    dispatch base instead: the nearest non-checkpoint commit below every
@@ -63,7 +74,7 @@ Before Step 1, inspect
    its failure, then remove the scratch worktree. The failure must be a genuine
    assertion failure on the dispatch base. If the test also fails there for a
    reason unrelated to the Definition of Done, fix the test, never the product.
-4. Before ending, run
+5. Before ending, run
 
        "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-implement-gate-preview.py" red <path of the test file you wrote>
 
@@ -71,7 +82,7 @@ Before Step 1, inspect
    commit will stage. Fix every failed target the preview names that is within
    this turn's scope, then run the preview again after each fix. The preview
    does not decide whether a commit succeeds.
-5. Resolve the handoff path with:
+6. Resolve the handoff path with:
 
        git rev-parse --git-path livespec-implement-handoff.md
 

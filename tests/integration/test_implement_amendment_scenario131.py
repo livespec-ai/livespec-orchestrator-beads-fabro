@@ -125,8 +125,8 @@ def _prompt(*, path: Path) -> str:
     return re.sub(r"\s+", " ", path.read_text(encoding="utf-8"))
 
 
-def _edge_conditions(*, source: str) -> dict[str, str]:
-    """Each target one node points at, mapped to its edge's `condition=` value.
+def _edge_conditions(*, source: str) -> dict[str, str | tuple[str, ...]]:
+    """Each target node's condition or conditions, preserving parallel edges.
 
     The parsed graph drops edge attributes, and the condition is exactly what
     distinguishes the amendment's route from the ordinary fallthrough — so this
@@ -136,14 +136,19 @@ def _edge_conditions(*, source: str) -> dict[str, str]:
     a commented line cannot match, because the match is anchored on the source
     name and a comment opens with its marker instead.
     """
-    conditions: dict[str, str] = {}
+    conditions: dict[str, list[str]] = {}
     for line in _dot().splitlines():
         edge = re.match(rf"\s*{source} -> (?P<target>\w+)\b(?P<attrs>.*)$", line)
         if edge is None:
             continue
         found = re.search(r'condition="(?P<value>[^"]*)"', edge.group("attrs"))
-        conditions[edge.group("target")] = "" if found is None else found.group("value")
-    return conditions
+        conditions.setdefault(edge.group("target"), []).append(
+            "" if found is None else found.group("value")
+        )
+    return {
+        target: values[0] if len(values) == 1 else tuple(values)
+        for target, values in conditions.items()
+    }
 
 
 def _reachable(*, graph: WorkflowGraph, start: str) -> frozenset[str]:
@@ -367,10 +372,14 @@ def test_an_implement_amendment_rests_the_item_at_blocked_needs_human_and_publis
     assert _edge_conditions(source="red") == {
         "implement_amendment_route": "outcome=failed",
         "already_satisfied_route": "preferred_label=already-satisfied",
-        "green_admission": "preferred_label=seeded-open-red",
+        "green_admission": (
+            "preferred_label=seeded-open-red",
+            "preferred_label=seeded-red-passes",
+        ),
         "red_needs_human_route": "preferred_label=needs-human",
         "red_unknown_label_route": (
             "preferred_label && preferred_label != seeded-open-red"
+            " && preferred_label != seeded-red-passes"
             " && preferred_label != already-satisfied && preferred_label != needs-human"
         ),
         "commit_red": "",
