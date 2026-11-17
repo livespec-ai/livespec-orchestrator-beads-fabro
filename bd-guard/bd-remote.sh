@@ -44,23 +44,36 @@ case "$1" in
         | statuses | types | graph | epic | supersede | todo | q | state | set-state \
         | lint | promote | find-duplicates | version) ;;
     config)
-        # Only `config get` and `config list` go remote.
-        case "${2:-}" in get | list) ;; *) _local "$@" ;; esac
+        # Only `config get <key>` (exactly 3 args) for a key that does not look
+        # like a secret; `config list/set`, bare config and secret keys run local.
+        [ "${2:-}" = "get" ] && [ "$#" -eq 3 ] || _local "$@"
+        # shellcheck disable=SC2018,SC2019  # ASCII-only, identical to the server wrapper
+        _ck=$(printf '%s' "$3" | tr 'A-Z' 'a-z')
+        case "$_ck" in
+            *pass* | *token* | *secret* | *key* | *credential* | *auth*) _local "$@" ;;
+        esac
         ;;
     *) _local "$@" ;;
 esac
+
+# FLAG DENYLIST by PATTERN, case-insensitive (mirrors the server wrapper): any
+# flag that can name a host path, file, directory, URL, credentials file, the
+# database connection or the shared database, in long form, attached short form
+# (-fX) or short cluster (-vf), and any `@file` value. A lone -n, -q, -d, -v, -5
+# stays allowed.
 for _a in "$@"; do
     # shellcheck disable=SC2018,SC2019  # ASCII-only, identical to the server wrapper
     _l=$(printf '%s' "$_a" | tr 'A-Z' 'a-z')
     case "$_l" in
-        --db | --db=* | --database | --database=* | --dolt-* | --host | --host=* \
-            | --port | --port=* | --global | --profile | --profile=* | --directory \
-            | --directory=* | -c | -c=* | --file | --file=* | --body-file \
-            | --body-file=* | --design-file | --design-file=* | --description-file \
-            | --description-file=* | -f | --path | --path=* | --dir | --dir=* \
-            | --config | --config=* | --output | --output=* | -o | --jsonl \
-            | --jsonl=* | --credentials-file | --credentials-file=*) _local "$@" ;;
+        --db | --db=* | --database* | --dolt-* | --host* | --port* | --global \
+            | --profile* | --config* | --credentials* | --graph* | --from-* \
+            | --*file* | --*path* | --*dir* | --*output* | --*url* | --*jsonl*) _local "$@" ;;
+        --*) ;;
+        -f | -c | -o) _local "$@" ;;
+        -[a-z0-9]?*)
+            case "${_l#-}" in *[fco]*) _local "$@" ;; esac ;;
     esac
+    case "$_l" in @* | *=@*) _local "$@" ;; esac
 done
 
 CONTROL_SOCKET=""
