@@ -142,7 +142,7 @@ def test_the_committed_unit_is_the_single_source_of_every_host_side_bound() -> N
     assert settings["OOMScoreAdjust"] == "500"
     assert settings["MemorySwapMax"] == "0"
     timer = _TIMER.read_text(encoding="utf-8")
-    assert "OnUnitInactiveSec=10min" in timer
+    assert "OnUnitInactiveSec=2min" in timer
     assert "OnBootSec=5min" in timer
     assert "OnUnitActiveSec" not in "\n".join(
         line for line in timer.splitlines() if not line.startswith("#")

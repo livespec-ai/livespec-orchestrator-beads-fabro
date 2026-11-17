@@ -1,8 +1,8 @@
-# Fires `reconcile-runs.service` 10 minutes after the previous pass ENDS.
+# Fires `reconcile-runs.service` 2 minutes after the previous pass ENDS.
 #
 # `OnUnitInactiveSec` rather than `OnCalendar`: the interval that matters is
 # the gap since the LAST pass, not a wall-clock grid. It is measured from the
-# end of a pass, not from its start, so a host always gets 10 idle minutes
+# end of a pass, not from its start, so a host always gets 2 idle minutes
 # between two passes. `OnUnitActiveSec` counted from the START: measured on
 # vmi3006760 on 2026-11-11, with passes at a median of 307 s, that ran a pass
 # 54% of the time. Under load, any pass that lasted 10 minutes or more was
@@ -18,12 +18,12 @@
 # off is exactly the machine most likely to have left runs behind.
 
 [Unit]
-Description=Run livespec reconcile-runs 10 minutes after the previous pass ends
+Description=Run livespec reconcile-runs 2 minutes after the previous pass ends
 Documentation=https://github.com/livespec-ai/livespec-orchestrator-beads-fabro
 
 [Timer]
 OnBootSec=5min
-OnUnitInactiveSec=10min
+OnUnitInactiveSec=2min
 AccuracySec=1min
 Persistent=true
 Unit=reconcile-runs.service
