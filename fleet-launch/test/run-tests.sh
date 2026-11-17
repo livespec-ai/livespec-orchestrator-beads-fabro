@@ -881,12 +881,25 @@ wait_for_line() {
     done
 }
 
+# OBSERVE_WAIT_S bounds every wait whose job is to OBSERVE that a launcher or a
+# stub reached a state (a log line, a rendezvous file, a ticket).  Each such wait
+# returns the instant the state appears, so a generous bound costs a healthy run
+# nothing, while a tight one turns a slow start on a loaded runner into a false
+# "never ..." failure (orchestrator CI: case 23 HUP rc=75, the 100-iteration TERM
+# loop, and "the allowlisted resume did not start as required").  It must NOT be
+# used where the bound IS the behaviour under test: the launcher's own give-up
+# (FLEET_LAUNCH_MAX_WAIT_S), STOP_GRACE_S, a stall/age bound, or a window in
+# which something must NOT happen.  EXIT_WAIT_S is the same for waiting out a
+# launcher that exits by itself.
+OBSERVE_WAIT_S=${OBSERVE_WAIT_S:-30}
+EXIT_WAIT_S=${EXIT_WAIT_S:-60}
+
 # HOLD_LINE_WAIT_S bounds how long a scenario waits for a launcher to print
 # 'repository hold present'.  wait_for_line returns the instant the line
 # appears, so a generous bound costs nothing on a healthy run; a tight one turns
 # a slow start on a loaded host into a false 'never yielded' failure (orchestrator
 # #5448 run 44070262679: iterations 27/29/61/62/63 of the 100-iteration TERM loop).
-HOLD_LINE_WAIT_S=${HOLD_LINE_WAIT_S:-30}
+HOLD_LINE_WAIT_S=${HOLD_LINE_WAIT_S:-$OBSERVE_WAIT_S}
 
 # wait_for_queue_ticket: returns a ticket only after the queue itself proves it
 # exists.  A cap log is not a file-system synchronization point for a launcher
@@ -1751,7 +1764,7 @@ echo "owner=stopped-seat pid=999999 item=bd-ib-ended factory=petri" > "$ended_ma
 printf '%s %s\n' "$GMK_URL" bd-ib-ended > "$CASE_DIR/driven/bd-ib-ended"
 ONLY_GMK=1 "$LAUNCHER" bd-ib-observer > "$CASE_DIR/observer.log" 2>&1 &
 observer_pid=$!
-if wait_for_line "$ended_marker" "listed=1" 10; then
+if wait_for_line "$ended_marker" "listed=1" "$OBSERVE_WAIT_S"; then
     pass "a board observer records that the dead launcher's run listed"
 else
     fail "the observed listed run was not recorded on its in-flight marker"
@@ -1810,7 +1823,7 @@ DISPATCH_LOG="$CASE_DIR/dispatch.log"
 RESUME_CASE_LOG="$CASE_DIR/resume.log"
 ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-held-dispatch > "$DISPATCH_LOG" 2>&1 &
 dispatch_pid=$!
-if ! wait_for_line "$DISPATCH_LOG" "repository hold present" 5; then
+if ! wait_for_line "$DISPATCH_LOG" "repository hold present" "$OBSERVE_WAIT_S"; then
     fail "a dispatch-scoped repository hold did not yield the impl launcher"
 fi
 TICKET_NS=200 "$RESUME_LAUNCHER" bd-ib-open-resume > "$RESUME_CASE_LOG" 2>&1
@@ -1839,7 +1852,7 @@ RESUME_CASE_LOG="$CASE_DIR/resume.log"
 IMPL_LOG="$CASE_DIR/impl.log"
 TICKET_NS=100 "$RESUME_LAUNCHER" bd-ib-held-resume > "$RESUME_CASE_LOG" 2>&1 &
 resume_pid=$!
-if ! wait_for_line "$RESUME_CASE_LOG" "repository hold present" 5; then
+if ! wait_for_line "$RESUME_CASE_LOG" "repository hold present" "$OBSERVE_WAIT_S"; then
     fail "a resume-scoped repository hold did not yield the resume launcher"
 fi
 ONLY_GMK=1 TICKET_NS=200 "$LAUNCHER" bd-ib-open-dispatch > "$IMPL_LOG" 2>&1
@@ -1873,8 +1886,8 @@ for hold_shape in no-kinds empty-kinds malformed-kinds; do
     impl_pid=$!
     TICKET_NS=200 "$RESUME_LAUNCHER" bd-ib-held-resume > "$CASE_DIR/resume.log" 2>&1 &
     resume_pid=$!
-    if wait_for_line "$CASE_DIR/impl.log" "repository hold present" 5 \
-        && wait_for_line "$CASE_DIR/resume.log" "repository hold present" 5 \
+    if wait_for_line "$CASE_DIR/impl.log" "repository hold present" "$OBSERVE_WAIT_S" \
+        && wait_for_line "$CASE_DIR/resume.log" "repository hold present" "$OBSERVE_WAIT_S" \
         && kill -0 "$impl_pid" 2>/dev/null && kill -0 "$resume_pid" 2>/dev/null \
         && [ ! -s "$DRIVE_LOG" ] && [ ! -s "$RESUME_LOG" ]; then
         pass "a $hold_shape repository hold fails closed for both launch kinds"
@@ -1898,7 +1911,7 @@ printf 'owner=other-seat pid=%s item=bd-ib-holder\n' "$holder_pid" > "$FLEET_LAU
 LAUNCH_POINT_LOG="$CASE_DIR/impl.log"
 ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-launch-point > "$LAUNCH_POINT_LOG" 2>&1 &
 launch_point_pid=$!
-if ! wait_for_line "$LAUNCH_POINT_LOG" "queue for the gmktec mutex" 5; then
+if ! wait_for_line "$LAUNCH_POINT_LOG" "queue for the gmktec mutex" "$OBSERVE_WAIT_S"; then
     fail "the launch-point impl launcher did not wait for the mutex"
 fi
 printf 'kinds: dispatch\n' > "$FLEET_LAUNCH_REPO_HOLD_DIR/hold-repo-$(basename "$TENANT")"
@@ -1929,8 +1942,8 @@ wait_for_hold_yield_settled() {
     done
 }
 hold_yielded=0
-if wait_for_line "$LAUNCH_POINT_LOG" "repository hold present" 5 \
-    && wait_for_hold_yield_settled 5; then
+if wait_for_line "$LAUNCH_POINT_LOG" "repository hold present" "$OBSERVE_WAIT_S" \
+    && wait_for_hold_yield_settled "$OBSERVE_WAIT_S"; then
     hold_yielded=1
 fi
 stop_launcher "$launch_point_pid"
@@ -2038,7 +2051,7 @@ ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-hold-before > "$STOP_LOG" 2>&1 &
 stop_pid=$!
 if wait_for_drive_invocations 1 "$stop_pid" "$STOP_LOG"; then
     set_hold "$HOLD_FILE" 'engine restart'
-    if wait_for_line "$STOP_LOG" "stopped the drive for bd-ib-hold-before" 10 \
+    if wait_for_line "$STOP_LOG" "stopped the drive for bd-ib-hold-before" "$OBSERVE_WAIT_S" \
         && kill -0 "$stop_pid" 2>/dev/null \
         && [ -e "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat" ] \
         && inflight_empty && drive_gone \
@@ -2081,7 +2094,7 @@ if wait_for_drive_invocations 1 "$stop_pid" "$STOP_LOG"; then
     fi
     set_hold "$FLEET_LAUNCH_REPO_HOLD_DIR/hold-repo-$(basename "$TENANT")" \
         'kinds: dispatch\nreason: commit_green ceiling\nuntil: PR 4440 merged'
-    if wait_for_line "$STOP_LOG" "stopped the drive for bd-ib-repo-hold" 10 \
+    if wait_for_line "$STOP_LOG" "stopped the drive for bd-ib-repo-hold" "$OBSERVE_WAIT_S" \
         && [ -e "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat" ] && inflight_empty \
         && line_has_all "$STOP_LOG" 'stopped the drive' 'reason=commit_green ceiling until=PR 4440 merged'; then
         pass "a dispatch-scoped repository hold stops the drive and a resume-scoped one does not"
@@ -2213,7 +2226,7 @@ for after_stop in admitted unreadable; do
     stop_pid=$!
     if wait_for_drive_invocations 1 "$stop_pid" "$STOP_LOG"; then
         if [ "$after_stop" = unreadable ]; then : > "$STUB_ITEM_STATUS_UNREADABLE_FILE"; fi
-        if [ "$after_stop" = admitted ] && ! wait_for_file "$STUB_DRIVE_WATCHER_ARMED_FILE" 10; then
+        if [ "$after_stop" = admitted ] && ! wait_for_file "$STUB_DRIVE_WATCHER_ARMED_FILE" "$OBSERVE_WAIT_S"; then
             fail "the stub drive's TERM watcher never armed its trap before case 20e set the hold"
             report_case_20e_admission_order
             stop_launcher "$stop_pid"
@@ -2429,7 +2442,7 @@ TERM_SED
                 continue
             fi
             : > "$gate"
-            gate_deadline=$(( $(date +%s) + 5 ))
+            gate_deadline=$(( $(date +%s) + ${OBSERVE_WAIT_S:-30} ))
             while [ ! -s "$gate" ] && [ "$(date +%s)" -lt "$gate_deadline" ]; do
                 sleep "$HARNESS_POLL_S"
             done
@@ -2567,7 +2580,7 @@ os.execv(sys.argv[1], sys.argv[1:])' "$launcher" bd-ib-term > "$STUB_RM_PROBE_LO
     export STUB_TERM_MUTEX_GATE
     ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-term > "$STUB_RM_PROBE_LOG_SOURCE" 2>&1 &
     term_pid=$!
-    gate_deadline=$(( $(date +%s) + 5 ))
+    gate_deadline=$(( $(date +%s) + ${OBSERVE_WAIT_S:-30} ))
     while [ ! -e "$STUB_TERM_MUTEX_GATE" ] && [ "$(date +%s)" -lt "$gate_deadline" ]; do
         sleep "$HARNESS_POLL_S"
     done
@@ -2596,7 +2609,7 @@ export FLEET_LAUNCH_POLL_S=0.2
 set_hold "$TENANT_HOLD" 'reason: harness'
 PATH="$STUB/rm-probe:$PATH" ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-term > "$STUB_RM_PROBE_LOG_SOURCE" 2>&1 &
 term_pid=$!
-if wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'repository hold present' 10; then
+if wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'repository hold present' "$OBSERVE_WAIT_S"; then
     stop_launcher "$term_pid"
     wait "$term_pid"
     term_rc=$?
@@ -2612,7 +2625,7 @@ export FLEET_LAUNCH_POLL_S=0.2
 set_hold "$TENANT_HOLD" 'reason: harness'
 PATH="$STUB/rm-probe:$PATH" "$RESUME_LAUNCHER" bd-ib-term > "$STUB_RM_PROBE_LOG_SOURCE" 2>&1 &
 term_pid=$!
-if wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'repository hold present' 10; then
+if wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'repository hold present' "$OBSERVE_WAIT_S"; then
     resume_number=$(queue_ticket_number)
     stop_launcher "$term_pid"
     wait "$term_pid"
@@ -2634,7 +2647,7 @@ export STUB_READY_REFUSALS=99
 export STUB_READY_REASON='open blockers: bd-ib-dep=active'
 PATH="$STUB/rm-probe:$PATH" ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-term > "$STUB_RM_PROBE_LOG_SOURCE" 2>&1 &
 term_pid=$!
-if wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'ready-set check refused' 10; then
+if wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'ready-set check refused' "$OBSERVE_WAIT_S"; then
     stop_launcher "$term_pid"
     wait "$term_pid"
     term_rc=$?
@@ -2755,7 +2768,7 @@ printf '0\n' > "$CAP_FILE"
 seed_queue
 PATH="$STUB/rm-probe:$PATH" ONLY_GMK=1 TICKET_NS=200 "$LAUNCHER" bd-ib-reader > "$STUB_RM_PROBE_LOG_SOURCE" 2>&1 &
 reader_pid=$!
-if wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'stall:' 10 && wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'queued behind' 10; then
+if wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'stall:' "$OBSERVE_WAIT_S" && wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'queued behind' "$OBSERVE_WAIT_S"; then
     check_stall 'impl launcher reading the queue' "$STUB_RM_PROBE_LOG_SOURCE"
 else
     fail "the impl launcher never reported the dead-pid ticket"
@@ -2770,7 +2783,7 @@ printf '0\n' > "$CAP_FILE"
 seed_queue
 PATH="$STUB/rm-probe:$PATH" "$RESUME_LAUNCHER" bd-ib-reader > "$STUB_RM_PROBE_LOG_SOURCE" 2>&1 &
 reader_pid=$!
-if wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'stall:' 10 && wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'queued behind' 10; then
+if wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'stall:' "$OBSERVE_WAIT_S" && wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'queued behind' "$OBSERVE_WAIT_S"; then
     check_stall 'resume launcher reading the queue' "$STUB_RM_PROBE_LOG_SOURCE"
 else
     fail "the resume launcher never reported the dead-pid ticket"
@@ -2819,14 +2832,14 @@ printf '0\n' > "$CAP_FILE"
 ONLY_GMK=1 TICKET_NS=100 "$launchers/dispatch-dual.sh" bd-ib-reexec > "$CASE_DIR/impl.log" 2>&1 &
 reexec_pid=$!
 ticket_path="$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat"
-wait_for_line "$CASE_DIR/impl.log" "fleet not green" 10 || fail "the impl launcher never reached its waiting loop"
+wait_for_line "$CASE_DIR/impl.log" "fleet not green" "$OBSERVE_WAIT_S" || fail "the impl launcher never reached its waiting loop"
 ticket_before=$(ticket_pid "$ticket_path")
 printf 'reason: canary gate\n' > "$FLEET_LAUNCH_REPO_HOLD_DIR/hold-repo-$(basename "$TENANT")"
 replace_script "$launchers/dispatch-dual.sh" "$CASE_DIR/committed-dispatch-dual.sh"
-wait_for_line "$CASE_DIR/impl.log" "launcher script changed on disk" 10 \
+wait_for_line "$CASE_DIR/impl.log" "launcher script changed on disk" "$OBSERVE_WAIT_S" \
     || fail "the waiting launcher never noticed its script changed on disk"
 printf '8\n' > "$CAP_FILE"
-wait_for_line "$CASE_DIR/impl.log" "repository hold present" 10 \
+wait_for_line "$CASE_DIR/impl.log" "repository hold present" "$OBSERVE_WAIT_S" \
     || fail "the waiting launcher never read the repository hold"
 sleep 0.3
 if kill -0 "$reexec_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ] \
@@ -2837,7 +2850,7 @@ else
     tail -6 "$CASE_DIR/impl.log" >&2
 fi
 rm -f "$FLEET_LAUNCH_REPO_HOLD_DIR/hold-repo-$(basename "$TENANT")"
-wait_for_line "$CASE_DIR/impl.log" "drive rc=" 20
+wait_for_line "$CASE_DIR/impl.log" "drive rc=" "$OBSERVE_WAIT_S"
 if [ "$(drive_log_items)" = bd-ib-reexec ]; then
     pass "control: removing the hold launches the same launcher"
 else
@@ -2864,14 +2877,14 @@ holder_pid=$!
 printf 'owner=other-seat pid=%s item=bd-ib-holder\n' "$holder_pid" > "$FLEET_LAUNCH_GMK_LOCK_DIR/holder"
 ONLY_GMK=1 TICKET_NS=100 "$launchers/dispatch-dual.sh" bd-ib-reexec-bound > "$CASE_DIR/impl.log" 2>&1 &
 reexec_pid=$!
-wait_for_line "$CASE_DIR/impl.log" "queue for the gmktec mutex" 10 || fail "the launcher did not wait for the mutex"
+wait_for_line "$CASE_DIR/impl.log" "queue for the gmktec mutex" "$OBSERVE_WAIT_S" || fail "the launcher did not wait for the mutex"
 printf 'reason: canary gate\n' > "$FLEET_LAUNCH_REPO_HOLD_DIR/hold-repo-$(basename "$TENANT")"
 replace_script "$launchers/dispatch-dual.sh" "$CASE_DIR/committed-dispatch-dual.sh"
 kill "$holder_pid" 2>/dev/null
 wait "$holder_pid" 2>/dev/null
 rm -f "$FLEET_LAUNCH_GMK_LOCK_DIR/holder"
 rmdir "$FLEET_LAUNCH_GMK_LOCK_DIR"
-wait_for_line "$CASE_DIR/impl.log" "repository hold present" 10 \
+wait_for_line "$CASE_DIR/impl.log" "repository hold present" "$OBSERVE_WAIT_S" \
     || fail "the bound launcher never read the repository hold"
 sleep 0.3
 if kill -0 "$reexec_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ] \
@@ -2898,20 +2911,20 @@ chmod +x "$launchers/resume-capped.sh"
 printf '0\n' > "$CAP_FILE"
 "$launchers/resume-capped.sh" bd-ib-reexec-resume > "$CASE_DIR/resume.log" 2>&1 &
 reexec_pid=$!
-wait_for_line "$CASE_DIR/resume.log" "fleet at cap under mutex" 10 || fail "the resume launcher never reached its waiting loop"
+wait_for_line "$CASE_DIR/resume.log" "fleet at cap under mutex" "$OBSERVE_WAIT_S" || fail "the resume launcher never reached its waiting loop"
 # The cap log does not prove the queue entry has reached the filesystem.  Wait
 # for the ticket itself before reading its pid so a post-cap scheduling race
 # cannot turn a correctly held launcher into a false launch-through verdict.
-ticket_path=$(wait_for_queue_ticket "$FLEET_LAUNCH_GMK_QUEUE_DIR" 10) \
+ticket_path=$(wait_for_queue_ticket "$FLEET_LAUNCH_GMK_QUEUE_DIR" "$OBSERVE_WAIT_S") \
     || fail "the resume launcher never wrote its queue ticket"
 ticket_before=""
 [ -n "$ticket_path" ] && ticket_before=$(ticket_pid "$ticket_path")
 printf 'reason: canary gate\n' > "$FLEET_LAUNCH_REPO_HOLD_DIR/hold-repo-$(basename "$TENANT")"
 replace_script "$launchers/resume-capped.sh" "$CASE_DIR/committed-resume-capped.sh"
-wait_for_line "$CASE_DIR/resume.log" "launcher script changed on disk" 10 \
+wait_for_line "$CASE_DIR/resume.log" "launcher script changed on disk" "$OBSERVE_WAIT_S" \
     || fail "the waiting resume launcher never noticed its script changed on disk"
 printf '8\n' > "$CAP_FILE"
-wait_for_line "$CASE_DIR/resume.log" "repository hold present" 10 \
+wait_for_line "$CASE_DIR/resume.log" "repository hold present" "$OBSERVE_WAIT_S" \
     || fail "the waiting resume launcher never read the repository hold"
 sleep 0.3
 case_21b_failed=0
@@ -2968,8 +2981,8 @@ ONLY_GMK=1 TICKET_NS=100 "$stale_dir/dispatch-dual.sh" bd-ib-stale > "$CASE_DIR/
 stale_pid=$!
 ONLY_GMK=1 TICKET_NS=200 "$fresh_dir/dispatch-dual.sh" bd-ib-fresh > "$CASE_DIR/fresh.log" 2>&1 &
 fresh_pid=$!
-wait_for_line "$CASE_DIR/stale.log" "fleet not green" 10 || fail "the stale-case launcher never reached its waiting loop"
-wait_for_line "$CASE_DIR/fresh.log" "queued behind an older gmktec ticket" 10 || fail "the fresh-case launcher never reached its waiting loop"
+wait_for_line "$CASE_DIR/stale.log" "fleet not green" "$OBSERVE_WAIT_S" || fail "the stale-case launcher never reached its waiting loop"
+wait_for_line "$CASE_DIR/fresh.log" "queued behind an older gmktec ticket" "$OBSERVE_WAIT_S" || fail "the fresh-case launcher never reached its waiting loop"
 { cat "$stale_dir/dispatch-dual.sh"; printf '# changed on disk\n'; } > "$CASE_DIR/stale-replacement.sh"
 replace_script "$stale_dir/dispatch-dual.sh" "$CASE_DIR/stale-replacement.sh"
 stale_on_disk=$(sha256sum < "$stale_dir/dispatch-dual.sh" | cut -c1-12)
@@ -3010,7 +3023,7 @@ open_boards
 printf '5\n' > "$STUB_WIP_COUNT_FILE"
 ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-wip-held > "$CASE_LOG" 2>&1 &
 wip_pid=$!
-if wait_for_line "$CASE_LOG" "repository WIP at cap: counted=5 cap=5" 5 \
+if wait_for_line "$CASE_LOG" "repository WIP at cap: counted=5 cap=5" "$OBSERVE_WAIT_S" \
     && kill -0 "$wip_pid" 2>/dev/null \
     && [ "$(ticket_held_lines "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat")" = 1 ] \
     && [ ! -s "$PREFLIGHT_LOG" ] && [ ! -s "$DRIVE_LOG" ]; then
@@ -3020,7 +3033,7 @@ else
     tail -5 "$CASE_LOG" >&2
 fi
 printf '4\n' > "$STUB_WIP_COUNT_FILE"
-if wait_gone "$wip_pid" 15 && wait "$wip_pid" \
+if wait_gone "$wip_pid" "$EXIT_WAIT_S" && wait "$wip_pid" \
     && [ "$(drive_log_items)" = bd-ib-wip-held ] && [ "$(preflight_count bd-ib-wip-held)" -ge 1 ]; then
     pass "control: once the count drops below the cap the launcher takes its place back, preflights and launches"
 else
@@ -3041,7 +3054,7 @@ unlisted_pid=$!
 run_launcher bd-ib-listed "$CASE_DIR/listed.log"
 listed_rc=$RC
 if [ "$listed_rc" = 0 ] && [ "$(drive_log_items)" = bd-ib-listed ] \
-    && wait_for_line "$CASE_DIR/unlisted.log" "repository WIP at cap: counted=5 cap=5 effective=5" 5 \
+    && wait_for_line "$CASE_DIR/unlisted.log" "repository WIP at cap: counted=5 cap=5 effective=5" "$OBSERVE_WAIT_S" \
     && kill -0 "$unlisted_pid" 2>/dev/null; then
     pass "at counted == wip_cap the listed item launches and the unlisted item is held"
 else
@@ -3054,7 +3067,7 @@ printf '6\n' > "$STUB_WIP_COUNT_FILE"
 : > "$DRIVE_LOG"
 ONLY_GMK=1 TICKET_NS=200 "$LAUNCHER" bd-ib-listed > "$CASE_DIR/listed-above.log" 2>&1 &
 above_pid=$!
-if wait_for_line "$CASE_DIR/listed-above.log" "repository WIP at cap: counted=6 cap=5 effective=6" 5 \
+if wait_for_line "$CASE_DIR/listed-above.log" "repository WIP at cap: counted=6 cap=5 effective=6" "$OBSERVE_WAIT_S" \
     && kill -0 "$above_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ]; then
     pass "the exception is one above the cap and no more: a listed item is held at wip_cap + 1"
 else
@@ -3192,13 +3205,13 @@ gmk_holder_pid=$!
 printf 'owner=other-seat pid=%s item=bd-ib-holder\n' "$gmk_holder_pid" > "$FLEET_LAUNCH_GMK_LOCK_DIR/holder"
 ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-gmk-launch-point > "$CASE_LOG" 2>&1 &
 gmk_lp_pid=$!
-wait_for_line "$CASE_LOG" "queue for the gmktec mutex" 5 || fail "the launcher did not wait for the gmktec mutex"
+wait_for_line "$CASE_LOG" "queue for the gmktec mutex" "$OBSERVE_WAIT_S" || fail "the launcher did not wait for the gmktec mutex"
 : > "$HOLD_FILE"
 kill "$gmk_holder_pid" 2>/dev/null
 wait "$gmk_holder_pid" 2>/dev/null
 rm -f "$FLEET_LAUNCH_GMK_LOCK_DIR/holder"
 rmdir "$FLEET_LAUNCH_GMK_LOCK_DIR"
-if wait_for_line "$CASE_LOG" "hold file present" 5 \
+if wait_for_line "$CASE_LOG" "hold file present" "$OBSERVE_WAIT_S" \
     && kill -0 "$gmk_lp_pid" 2>/dev/null \
     && [ -e "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat" ] && [ ! -s "$DRIVE_LOG" ]; then
     pass "a gmktec hold created while the launcher waits for the mutex launches nothing and keeps the ticket"
@@ -3207,7 +3220,7 @@ else
     tail -6 "$CASE_LOG" >&2
 fi
 rm -f "$HOLD_FILE"
-if wait_gone "$gmk_lp_pid" 15 && wait "$gmk_lp_pid" && [ "$(drive_log_items)" = bd-ib-gmk-launch-point ]; then
+if wait_gone "$gmk_lp_pid" "$EXIT_WAIT_S" && wait "$gmk_lp_pid" && [ "$(drive_log_items)" = bd-ib-gmk-launch-point ]; then
     pass "control: removing the gmktec hold file releases the same launcher"
 else
     fail "control: the launcher did not launch once the gmktec hold was removed"
@@ -3224,7 +3237,7 @@ write_board "$BOARD_CANDIDATE" 2 cand
 printf 'candidate\n' > "$FLEET_LAUNCH_GMK_TARGET_FILE"
 ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-candidate > "$CASE_LOG" 2>&1 &
 cand_pid=$!
-if wait_for_line "$CASE_LOG" "gmktec candidate not green: live=2 cap=2" 5 \
+if wait_for_line "$CASE_LOG" "gmktec candidate not green: live=2 cap=2" "$OBSERVE_WAIT_S" \
     && kill -0 "$cand_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ]; then
     pass "a candidate target holds while the candidate's live run count is at its cap, with the default instance idle"
 else
@@ -3232,7 +3245,7 @@ else
     tail -5 "$CASE_LOG" >&2
 fi
 write_board "$BOARD_CANDIDATE" 1 cand
-if wait_gone "$cand_pid" 15 && wait "$cand_pid" \
+if wait_gone "$cand_pid" "$EXIT_WAIT_S" && wait "$cand_pid" \
     && [ "$(drive_log_items)" = bd-ib-candidate ] \
     && [ "$(cut -d' ' -f1 "$STUB_DRIVEN_DIR/bd-ib-candidate")" = "$CANDIDATE_URL" ]; then
     pass "below the candidate cap the launch goes to the candidate instance, not the default one"
@@ -3249,7 +3262,7 @@ rm -f "$BOARD_CANDIDATE"
 printf 'candidate\n' > "$FLEET_LAUNCH_GMK_TARGET_FILE"
 ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-candidate-unreadable > "$CASE_LOG" 2>&1 &
 unreadable_pid=$!
-if wait_for_line "$CASE_LOG" "fleet not green" 5 && kill -0 "$unreadable_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ]; then
+if wait_for_line "$CASE_LOG" "fleet not green" "$OBSERVE_WAIT_S" && kill -0 "$unreadable_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ]; then
     pass "a candidate board that cannot be read holds the launch"
 else
     fail "an unreadable candidate board did not hold the launch"
@@ -3395,7 +3408,7 @@ write_board "$BOARD_ARM" 1 arm
 printf '3\n' > "$CAP_FILE"
 ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-fleet-sum > "$CASE_LOG" 2>&1 &
 sum_pid=$!
-if wait_for_line "$CASE_LOG" "fleet not green: gmktec=1 hl=0 markers=0 fleet=3 cap=3 candidate=2 arm64=1" 5 \
+if wait_for_line "$CASE_LOG" "fleet not green: gmktec=1 hl=0 markers=0 fleet=3 cap=3 candidate=2 arm64=1" "$OBSERVE_WAIT_S" \
     && kill -0 "$sum_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ] \
     && [ -e "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat" ]; then
     pass "a fleet at the cap only because of candidate-lane runs launches nothing and keeps its ticket; arm64 is outside the sum"
@@ -3404,7 +3417,7 @@ else
     tail -5 "$CASE_LOG" >&2
 fi
 printf '4\n' > "$CAP_FILE"
-if wait_gone "$sum_pid" 15 && wait "$sum_pid" && [ "$(drive_log_items)" = bd-ib-fleet-sum ] \
+if wait_gone "$sum_pid" "$EXIT_WAIT_S" && wait "$sum_pid" && [ "$(drive_log_items)" = bd-ib-fleet-sum ] \
     && [ "$(cut -d' ' -f1 "$STUB_DRIVEN_DIR/bd-ib-fleet-sum")" = "$GMK_URL" ]; then
     pass "control: one slot of headroom in the same sum launches onto the default instance"
 else
@@ -3422,7 +3435,7 @@ printf '8\n' > "$CAP_FILE"
 : > "$BOARD_ARM"
 ONLY_ARM=1 TICKET_NS=100 "$LAUNCHER" bd-ib-arm-unenrolled > "$CASE_DIR/unenrolled.log" 2>&1 &
 arm_pid=$!
-if wait_for_line "$CASE_DIR/unenrolled.log" "homelab-worker-arm64 not green: enrolled=no" 5 \
+if wait_for_line "$CASE_DIR/unenrolled.log" "homelab-worker-arm64 not green: enrolled=no" "$OBSERVE_WAIT_S" \
     && kill -0 "$arm_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ]; then
     pass "an arm64 launcher launches nothing while the instance is not enrolled"
 else
@@ -3430,7 +3443,7 @@ else
     tail -5 "$CASE_DIR/unenrolled.log" >&2
 fi
 : > "$FLEET_LAUNCH_ARM_ENROLLED_FILE"
-if wait_gone "$arm_pid" 15 && wait "$arm_pid" && [ "$(drive_log_items)" = bd-ib-arm-unenrolled ] \
+if wait_gone "$arm_pid" "$EXIT_WAIT_S" && wait "$arm_pid" && [ "$(drive_log_items)" = bd-ib-arm-unenrolled ] \
     && [ "$(cut -d' ' -f1 "$STUB_DRIVEN_DIR/bd-ib-arm-unenrolled")" = "$ARM_URL" ] \
     && grep -q 'LAUNCH target=homelab-worker-arm64' "$CASE_DIR/unenrolled.log"; then
     pass "control: once enrolled the arm64 launcher launches onto the arm64 instance with the fleet at its cap"
@@ -3445,7 +3458,7 @@ rm -f "$STUB_DRIVEN_DIR/bd-ib-arm-unenrolled"
 write_board "$BOARD_ARM" 1 arm
 ONLY_ARM=1 TICKET_NS=200 "$LAUNCHER" bd-ib-arm-capped > "$CASE_DIR/capped.log" 2>&1 &
 arm_capped_pid=$!
-if wait_for_line "$CASE_DIR/capped.log" "homelab-worker-arm64 not green: enrolled=yes arm_inflight=1 cap=1" 5 \
+if wait_for_line "$CASE_DIR/capped.log" "homelab-worker-arm64 not green: enrolled=yes arm_inflight=1 cap=1" "$OBSERVE_WAIT_S" \
     && kill -0 "$arm_capped_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ]; then
     pass "an arm64 launcher holds at the arm64 cap, whatever the fleet sum"
 else
@@ -3473,14 +3486,14 @@ fi
 : > "$DRIVE_LOG"
 ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-listed > "$CASE_DIR/second.log" 2>&1 &
 second_pid=$!
-if wait_for_line "$CASE_DIR/second.log" "hold file present" 5 && kill -0 "$second_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ]; then
+if wait_for_line "$CASE_DIR/second.log" "hold file present" "$OBSERVE_WAIT_S" && kill -0 "$second_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ]; then
     pass "a second launcher for the same item is held: one line releases one launch"
 else
     fail "the consumed allowlist line released a second launch"
     tail -5 "$CASE_DIR/second.log" >&2
 fi
 rm -f "$HOLD_FILE"
-if wait_gone "$second_pid" 15 && wait "$second_pid" && [ "$(drive_log_items)" = bd-ib-listed ]; then
+if wait_gone "$second_pid" "$EXIT_WAIT_S" && wait "$second_pid" && [ "$(drive_log_items)" = bd-ib-listed ]; then
     pass "control: removing the hold releases the held second launcher"
 else
     fail "control: the second launcher did not launch once the hold was removed"
@@ -3507,7 +3520,7 @@ open_boards
 printf '2\n' > "$STUB_ITEM_PRIORITY_FILE"
 ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-p2 > "$CASE_LOG" 2>&1 &
 p2_pid=$!
-if wait_for_line "$CASE_LOG" "hold file present" 5 && kill -0 "$p2_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ]; then
+if wait_for_line "$CASE_LOG" "hold file present" "$OBSERVE_WAIT_S" && kill -0 "$p2_pid" 2>/dev/null && [ ! -s "$DRIVE_LOG" ]; then
     pass "control: a priority-2 item without an allowlist line is held"
 else
     fail "control: a priority-2 item launched through the hold"
@@ -3522,10 +3535,10 @@ open_boards
 printf 'bd-ib-released\n' > "$FLEET_LAUNCH_FREEZE_ALLOWLIST_FILE"
 ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-held-head > "$CASE_DIR/held.log" 2>&1 &
 held_pid=$!
-wait_for_line "$CASE_DIR/held.log" "hold file present" 5 || fail "the held head never parked on the hold"
+wait_for_line "$CASE_DIR/held.log" "hold file present" "$OBSERVE_WAIT_S" || fail "the held head never parked on the hold"
 ONLY_GMK=1 TICKET_NS=200 "$LAUNCHER" bd-ib-released > "$CASE_DIR/released.log" 2>&1 &
 released_pid=$!
-if wait_gone "$released_pid" 15 && wait "$released_pid" && [ "$(drive_log_items)" = bd-ib-released ] \
+if wait_gone "$released_pid" "$EXIT_WAIT_S" && wait "$released_pid" && [ "$(drive_log_items)" = bd-ib-released ] \
     && kill -0 "$held_pid" 2>/dev/null && [ -e "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat" ]; then
     pass "the allowlisted ticket behind a held head binds and launches; the held head keeps its ticket number"
 else
@@ -3534,7 +3547,7 @@ else
     stop_launcher "$released_pid"; wait "$released_pid" 2>/dev/null
 fi
 rm -f "$HOLD_FILE"
-if wait_gone "$held_pid" 15 && wait "$held_pid" && [ "$(drive_log_items)" = "bd-ib-released bd-ib-held-head" ]; then
+if wait_gone "$held_pid" "$EXIT_WAIT_S" && wait "$held_pid" && [ "$(drive_log_items)" = "bd-ib-released bd-ib-held-head" ]; then
     pass "control: the held head takes its place back and launches when the hold is removed"
 else
     fail "control: the held head did not launch after the lift (dispatches: $(drive_log_items))"
@@ -3549,7 +3562,7 @@ set_hold "$FLEET_LAUNCH_CANARY_HOLD_DIR/canary-hold-repo-$(basename "$TENANT")" 
 printf 'bd-ib-exempt\n' > "$FLEET_LAUNCH_CANARY_EXEMPT_FILE"
 ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-canary-held > "$CASE_DIR/held.log" 2>&1 &
 canary_pid=$!
-if wait_for_line "$CASE_DIR/held.log" "canary repository hold present" 5 && kill -0 "$canary_pid" 2>/dev/null \
+if wait_for_line "$CASE_DIR/held.log" "canary repository hold present" "$OBSERVE_WAIT_S" && kill -0 "$canary_pid" 2>/dev/null \
     && grep -qx 'held=canary-hold' "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat" && [ ! -s "$DRIVE_LOG" ]; then
     pass "an unlisted item yields on the canary hold, marks its ticket held=canary-hold and launches nothing"
 else
@@ -3564,7 +3577,7 @@ else
     tail -5 "$CASE_DIR/exempt.log" >&2
 fi
 rm -f "$FLEET_LAUNCH_CANARY_HOLD_DIR/canary-hold-repo-$(basename "$TENANT")"
-if wait_gone "$canary_pid" 15 && wait "$canary_pid" && [ "$(drive_log_items)" = "bd-ib-exempt bd-ib-canary-held" ]; then
+if wait_gone "$canary_pid" "$EXIT_WAIT_S" && wait "$canary_pid" && [ "$(drive_log_items)" = "bd-ib-exempt bd-ib-canary-held" ]; then
     pass "control: removing the canary hold releases the held launcher in the order of its ticket"
 else
     fail "control: the held launcher did not launch after the canary hold was removed"
@@ -3726,10 +3739,10 @@ open_boards
 printf '5\n' > "$STUB_WIP_COUNT_FILE"
 ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-cache-a > "$CASE_DIR/a.log" 2>&1 &
 cache_a=$!
-wait_for_line "$CASE_DIR/a.log" "repository WIP at cap: counted=5 cap=5" 5 || fail "the first launcher did not read the count"
+wait_for_line "$CASE_DIR/a.log" "repository WIP at cap: counted=5 cap=5" "$OBSERVE_WAIT_S" || fail "the first launcher did not read the count"
 ONLY_GMK=1 TICKET_NS=200 "$LAUNCHER" bd-ib-cache-b > "$CASE_DIR/b.log" 2>&1 &
 cache_b=$!
-wait_for_line "$CASE_DIR/b.log" "repository WIP at cap: counted=5 cap=5" 5 || fail "the second launcher did not read the count"
+wait_for_line "$CASE_DIR/b.log" "repository WIP at cap: counted=5 cap=5" "$OBSERVE_WAIT_S" || fail "the second launcher did not read the count"
 sleep 0.3
 calls=$(grep -c . "$STUB_WIP_CALLS")
 if [ "$calls" = 1 ] && [ "$(cut -d' ' -f2- "$FLEET_LAUNCH_WIP_SHARED_DIR/wip-act.$(basename "$TENANT")" 2>/dev/null)" = "5 5" ]; then
@@ -3756,14 +3769,14 @@ open_boards
 : > "$HOLD_FILE"
 TICKET_NS=100 "$RESUME_LAUNCHER" bd-ib-resume-held > "$CASE_DIR/held.log" 2>&1 &
 resume_held_pid=$!
-if wait_for_line "$CASE_DIR/held.log" "hold file present" 5 && kill -0 "$resume_held_pid" 2>/dev/null && [ ! -s "$RESUME_LOG" ]; then
+if wait_for_line "$CASE_DIR/held.log" "hold file present" "$OBSERVE_WAIT_S" && kill -0 "$resume_held_pid" 2>/dev/null && [ ! -s "$RESUME_LOG" ]; then
     pass "a resume whose item is not allowlisted waits on the gmktec hold"
 else
     fail "a resume launched through the gmktec hold"
     tail -4 "$CASE_DIR/held.log" >&2
 fi
 printf 'bd-ib-resume-held\n' > "$FLEET_LAUNCH_FREEZE_ALLOWLIST_FILE"
-if wait_gone "$resume_held_pid" 15 && wait "$resume_held_pid" && [ "$(cat "$RESUME_LOG")" = bd-ib-resume-held ] \
+if wait_gone "$resume_held_pid" "$EXIT_WAIT_S" && wait "$resume_held_pid" && [ "$(cat "$RESUME_LOG")" = bd-ib-resume-held ] \
     && [ ! -s "$FLEET_LAUNCH_FREEZE_ALLOWLIST_FILE" ] && grep -q 'consumed at RESUME' "$FLEET_LAUNCH_FREEZE_ALLOWLIST_CONSUMED_LOG" \
     && grep -q "^$TENANT bd-ib-resume-held$" "$STUB_RESUME_ARGV_LOG"; then
     pass "an allowlisted resume starts through resume-repo.sh in the target repository and its line is consumed at RESUME"
