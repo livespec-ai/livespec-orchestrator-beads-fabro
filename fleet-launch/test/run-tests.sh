@@ -2609,24 +2609,30 @@ exec "$STUB_REAL_SED" "$@"
 TERM_SED
     chmod +x "$STUB/term-sed/sed"
 
-    # term_during_hold_substitution <launcher> <label>: each iteration waits
-    # until the launcher has a FIFO ticket, then sends TERM while its next hold
-    # read is evaluating $(sed ...).  A default TERM exit must run EXIT cleanup.
-    term_during_hold_substitution() {
-        local launcher="$1" label="$2" attempt term_pid term_rc gate gate_deadline failures=0 term_cause term_parse_error
-        for attempt in $(seq 1 100); do
-            prepare_312_case "term-substitution-$label-$attempt"
+    # signal_during_hold_substitution <launcher> <label> <signal> <rc>: each
+    # iteration waits until the launcher has a FIFO ticket, then sends the signal
+    # while its next hold read is evaluating $(sed ...).  The exit must carry
+    # 128+N, run EXIT cleanup and leave a terminal line naming that signal.
+    # HARNESS_SIGNAL_SUBSTITUTION_ATTEMPTS sets the jittered attempts per case.
+    signal_during_hold_substitution() {
+        local launcher="$1" label="$2" sig="$3" want_rc="$4" attempt sig_pid sig_rc gate gate_deadline failures=0 sig_cause sig_parse_error
+        for attempt in $(seq 1 "${HARNESS_SIGNAL_SUBSTITUTION_ATTEMPTS:-100}"); do
+            prepare_312_case "$sig-substitution-$label-$attempt"
             export FLEET_LAUNCH_POLL_S=0.01
-            set_hold "$TENANT_HOLD" 'reason: substitution-term'
+            set_hold "$TENANT_HOLD" "reason: substitution-$sig"
             gate="$CASE_DIR/substitution-gate"
             export STUB_TERM_SUBSTITUTION_GATE="$gate"
             export STUB_TERM_SUBSTITUTION_SED_DELAY_S=0.01
-            PATH="$STUB/term-sed:$PATH" ONLY_GMK=1 TICKET_NS="$attempt" "$launcher" bd-ib-term > "$STUB_RM_PROBE_LOG_SOURCE" 2>&1 &
-            term_pid=$!
+            # A background job of a non-interactive shell starts with INT ignored;
+            # restore the default before the launcher takes over.
+            PATH="$STUB/term-sed:$PATH" ONLY_GMK=1 TICKET_NS="$attempt" python3 -c 'import os, signal, sys
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+os.execv(sys.argv[1], sys.argv[1:])' "$launcher" bd-ib-term > "$STUB_RM_PROBE_LOG_SOURCE" 2>&1 &
+            sig_pid=$!
             if ! wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'repository hold present' "$HOLD_LINE_WAIT_S"; then
-                fail "$label iteration $attempt never yielded on the repository hold"
-                stop_launcher "$term_pid"
-                wait "$term_pid" 2>/dev/null
+                fail "$label $sig iteration $attempt never yielded on the repository hold"
+                stop_launcher "$sig_pid"
+                wait "$sig_pid" 2>/dev/null
                 failures=$((failures + 1))
                 continue
             fi
@@ -2636,41 +2642,53 @@ TERM_SED
                 sleep "$HARNESS_POLL_S"
             done
             if [ ! -s "$gate" ]; then
-                fail "$label iteration $attempt never entered the gated command substitution"
-                stop_launcher "$term_pid"
-                wait "$term_pid" 2>/dev/null
+                fail "$label $sig iteration $attempt never entered the gated command substitution"
+                stop_launcher "$sig_pid"
+                wait "$sig_pid" 2>/dev/null
                 failures=$((failures + 1))
                 continue
             fi
             sleep "0.00$((RANDOM % 5))"
-            stop_launcher "$term_pid"
-            wait "$term_pid"
-            term_rc=$?
-            term_cause=no
-            term_parse_error=no
-            if grep -F -- 'cause=signal TERM' "$STUB_RM_PROBE_LOG_SOURCE" >/dev/null; then
-                term_cause=yes
+            kill -"$sig" "$sig_pid" 2>/dev/null
+            gate_deadline=$(( $(date +%s) + STOP_GRACE_S ))
+            while kill -0 "$sig_pid" 2>/dev/null && [ "$(date +%s)" -lt "$gate_deadline" ]; do
+                sleep "$HARNESS_POLL_S"
+            done
+            if kill -0 "$sig_pid" 2>/dev/null; then
+                stop_launcher "$sig_pid"
+            fi
+            wait "$sig_pid"
+            sig_rc=$?
+            sig_cause=no
+            sig_parse_error=no
+            if grep -F -- "cause=signal $sig" "$STUB_RM_PROBE_LOG_SOURCE" >/dev/null; then
+                sig_cause=yes
             fi
             if grep -F -- 'unexpected EOF while looking for matching' "$STUB_RM_PROBE_LOG_SOURCE" >/dev/null; then
-                term_parse_error=yes
+                sig_parse_error=yes
             fi
-            if [ "$term_rc" != 143 ] \
+            if [ "$sig_rc" != "$want_rc" ] \
                 || [ -n "$(find "$FLEET_LAUNCH_GMK_QUEUE_DIR" -type f -print -quit)" ] \
                 || [ -d "$FLEET_LAUNCH_GMK_LOCK_DIR" ] \
-                || [ "$term_cause" != yes ] \
-                || [ "$term_parse_error" = yes ]; then
-                fail "$label iteration $attempt did not exit cleanly from TERM in a command substitution (rc=$term_rc)"
+                || [ "$(count_matching "$STUB_RM_PROBE_LOG_SOURCE" 'terminal:')" != 1 ] \
+                || [ "$sig_cause" != yes ] \
+                || [ "$sig_parse_error" = yes ]; then
+                fail "$label iteration $attempt did not exit cleanly from $sig in a command substitution (rc=$sig_rc)"
                 tail -n 4 "$STUB_RM_PROBE_LOG_SOURCE" >&2
                 failures=$((failures + 1))
             fi
         done
         if [ "$failures" = 0 ]; then
-            pass "$label exits within the stop bound for 100 jittered TERMs during repository-hold command substitutions, dropping its FIFO ticket"
+            pass "$label exits within the stop bound with rc $want_rc and a terminal line naming $sig for ${HARNESS_SIGNAL_SUBSTITUTION_ATTEMPTS:-100} jittered ${sig}s during repository-hold command substitutions, dropping its FIFO ticket"
         fi
     }
 
-    term_during_hold_substitution "$LAUNCHER" impl
-    term_during_hold_substitution "$RESUME_LAUNCHER" resume
+    signal_during_hold_substitution "$LAUNCHER" impl TERM 143
+    signal_during_hold_substitution "$RESUME_LAUNCHER" resume TERM 143
+    signal_during_hold_substitution "$LAUNCHER" impl INT 130
+    signal_during_hold_substitution "$RESUME_LAUNCHER" resume INT 130
+    signal_during_hold_substitution "$LAUNCHER" impl HUP 129
+    signal_during_hold_substitution "$RESUME_LAUNCHER" resume HUP 129
     unset STUB_TERM_SUBSTITUTION_GATE STUB_TERM_SUBSTITUTION_SED_DELAY_S
 
     # wait_for_signal_exit <pid> <signal> <log>: a directly delivered INT or HUP
