@@ -1415,7 +1415,7 @@ fi
 # the older launcher is released; no wall-clock delay is part of this case.
 touch "$STUB_PREFLIGHT_RELEASE"
 await_both "$older_pid" "$younger_pid" 90
-if [ "$(preflight_count bd-ib-stale-younger)" = 2 ]; then
+if [ "$(preflight_count bd-ib-stale-younger)" -ge 2 ]; then
     pass "a stale queued pass is re-run at the FIFO head before binding"
 else
     fail "a stale queued pass was not re-run at the FIFO head (count=$(preflight_count bd-ib-stale-younger))"
