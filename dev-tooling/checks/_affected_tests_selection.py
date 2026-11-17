@@ -224,7 +224,7 @@ def _run_gate(*, root: Path, selection: Selection) -> int:
         return max(pytest_status, coverage_status)
     # A static scan can miss a dynamic importer. Its scoped coverage result is
     # therefore never final: retry all tests before refusing solely for coverage.
-    _ = subprocess.run(
+    whole_suite_pytest_status = subprocess.run(
         ["uv", "run", "pytest", "-n", workers, *measuring, "--cov-fail-under=0"],
         cwd=root,
         env=env,
@@ -234,7 +234,7 @@ def _run_gate(*, root: Path, selection: Selection) -> int:
         root=root, data_file=data_file, measured=selection.measured
     )
     shutil.rmtree(data_dir, ignore_errors=True)
-    return whole_suite_coverage_status
+    return max(whole_suite_pytest_status, whole_suite_coverage_status)
 
 
 def main() -> int:
