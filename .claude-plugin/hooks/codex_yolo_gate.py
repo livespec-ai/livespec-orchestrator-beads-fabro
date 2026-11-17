@@ -100,7 +100,9 @@ def derive_fleet_listed(*, manifest_source: str, owner: str | None, repo: str | 
     """Derive the local marker value from the core fleet manifest contract."""
     if parse_manifest is None or owner is None or repo is None:
         return False
-    parsed = parse_manifest(source=manifest_source)
+    parsed = parse_manifest(
+        source=_without_malformed_owner_overrides(manifest_source=manifest_source)
+    )
     # CONSUMER WIRING LANDS BEFORE THE PIN THAT NEEDS IT, so this tolerates
     # BOTH shapes of `parse_manifest` (livespec `.ai/ci-gate-discipline.md`
     # step 3: dependencies and consumer wiring before the change that assumes
@@ -135,6 +137,40 @@ def derive_fleet_listed(*, manifest_source: str, owner: str | None, repo: str | 
         adopter.repo == repo and owner == adopter_owners.get(adopter.repo, fallback_owner)
         for adopter in manifest.adopters
     )
+
+
+def _without_malformed_owner_overrides(*, manifest_source: str) -> str:
+    """The manifest text with every non-string owner override dropped.
+
+    livespec-dev-tooling v1.212 onward (commit 04997e0fb) makes `parse_manifest`
+    reject the WHOLE manifest, with `owner-not-string`, when `adopter_owner` or an
+    adopter's own `owner` is not a string; v1.211.0 accepted it. An override of
+    the wrong type is absent for this gate (bd-ib-2sdcgk), so the adopter then
+    resolves under `owner`: reading the parser's rejection as "not listed" would
+    switch Codex full access off over one malformed optional field. Text that
+    plain JSON cannot read is returned unchanged, for the parser to judge.
+    """
+    try:
+        root = json.loads(_strip_jsonc_comments(text=manifest_source))
+    except json.JSONDecodeError:
+        return manifest_source
+    if not isinstance(root, dict):
+        return manifest_source
+    document = cast("dict[str, Any]", root)
+    malformed: list[dict[str, Any]] = []
+    if not isinstance(document.get("adopter_owner", ""), str):
+        malformed.append(document)
+    adopters = document.get("adopters")
+    malformed.extend(
+        cast("dict[str, Any]", entry)
+        for entry in (adopters if isinstance(adopters, list) else [])
+        if isinstance(entry, dict) and not isinstance(entry.get("owner", ""), str)
+    )
+    if not malformed:
+        return manifest_source
+    for holder in malformed:
+        del holder["adopter_owner" if holder is document else "owner"]
+    return json.dumps(document)
 
 
 def _raw_adopter_owners(*, manifest_source: str) -> tuple[str | None, dict[str, str]]:
