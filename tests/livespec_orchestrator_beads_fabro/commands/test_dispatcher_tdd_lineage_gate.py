@@ -217,21 +217,56 @@ def test_an_open_red_seed_tip_published_unchanged_is_not_refused(tmp_path: Path)
     assert completed.returncode == 0, completed.stderr
 
 
-def test_a_published_green_whose_red_object_is_gone_is_tolerated_only_when_published(
-    tmp_path: Path,
-) -> None:
-    """A sandbox clone never holds the amended-away Red, so published Greens verify by SHA."""
-    repo = _published_repo(tmp_path=tmp_path)
-    _ = _commit(
+def _published_green_without_red_object(*, repo: Path, trailers: str) -> str:
+    """Publish a Green whose recorded Red commit object no clone holds."""
+    sha = _commit(
         repo=repo,
-        message="feat: green\n\nTDD-Green-Parent-Reflog: " + "a" * 40,
+        message="feat: green\n\nTDD-Green-Parent-Reflog: " + "a" * 40 + "\n" + trailers,
         name="widget.py",
         text="widget\n",
     )
-    program = _program(tmp_path=tmp_path)
-    unpublished = _run(program=program, repo=repo)
     _git(repo=repo, argv=["push", "origin", "work"])
-    published = _run(program=program, repo=repo)
+    return sha
 
-    assert unpublished.returncode != 0
-    assert published.returncode == 0, published.stderr
+
+def test_a_published_green_whose_red_object_is_gone_is_refused_when_its_parent_postdates_the_red(
+    tmp_path: Path,
+) -> None:
+    """Origin carrying the SHA is not evidence: the parent must predate the recorded capture."""
+    repo = _published_repo(tmp_path=tmp_path)
+    green = _published_green_without_red_object(
+        repo=repo, trailers="TDD-Red-Captured-At: 2000-01-01T00:00:00Z"
+    )
+
+    completed = _run(program=_program(tmp_path=tmp_path), repo=repo)
+
+    assert completed.returncode != 0
+    assert green in completed.stderr
+    assert "parent" in completed.stderr
+
+
+def test_a_published_green_whose_red_object_is_gone_is_refused_without_a_capture_time(
+    tmp_path: Path,
+) -> None:
+    """With neither the Red object nor a capture time, the earning parent is unresolvable."""
+    repo = _published_repo(tmp_path=tmp_path)
+    green = _published_green_without_red_object(repo=repo, trailers="")
+
+    completed = _run(program=_program(tmp_path=tmp_path), repo=repo)
+
+    assert completed.returncode != 0
+    assert green in completed.stderr
+
+
+def test_a_published_green_whose_red_object_is_gone_verifies_by_capture_time(
+    tmp_path: Path,
+) -> None:
+    """A sandbox clone never holds the amended-away Red, so a parent older than it passes."""
+    repo = _published_repo(tmp_path=tmp_path)
+    _ = _published_green_without_red_object(
+        repo=repo, trailers="TDD-Red-Captured-At: 2099-01-01T00:00:00Z"
+    )
+
+    completed = _run(program=_program(tmp_path=tmp_path), repo=repo)
+
+    assert completed.returncode == 0, completed.stderr
