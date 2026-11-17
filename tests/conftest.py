@@ -90,6 +90,31 @@ from livespec_orchestrator_beads_fabro.commands._fabro_port_http import (
 # example still runs and every assert still holds. `tests/test_hypothesis_
 # profile.py` binds both halves of that — the profile, and a property that
 # genuinely outruns the old ceiling.
+# A pytest run spawned by a commit-msg or pre-push hook inherits every
+# repo-locating GIT_* variable of the surrounding repo. Left in place, any test
+# that shells out to git (a `git init`, a commit, a config write) acts on the REAL
+# repository: stray commits on the primary, `core.bare` flipped, hooksPath
+# repointed, tracked files deleted. Scrub them ONCE, at import, before collection
+# or any fixture runs, so no test ever sees the hook's repository.
+_REPO_LOCATING_GIT_VARS = (
+    "GIT_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_WORK_TREE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_PREFIX",
+)
+
+
+def _scrub_repo_locating_git_env(*, environ: dict[str, str] | os._Environ[str]) -> None:
+    """Drop every repo-locating GIT_* variable from `environ`, in place."""
+    for name in _REPO_LOCATING_GIT_VARS:
+        _ = environ.pop(name, None)
+
+
+_scrub_repo_locating_git_env(environ=os.environ)
+
 settings.register_profile("livespec", deadline=None)
 settings.load_profile("livespec")
 
@@ -1203,25 +1228,8 @@ def _hermetic_source_checkout(tmp_path_factory: pytest.TempPathFactory) -> None:
     _git_init_origin_reachable(root=tmp_path_factory.getbasetemp())
 
 
-_GIT_HOOK_PASSTHROUGH_VARS = (
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_COMMON_DIR",
-    "GIT_NAMESPACE",
-    "GIT_PREFIX",
-)
-
-
 def _git_init_origin_reachable(*, root: Path) -> None:
-    # A hook-spawned pytest inherits GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE
-    # pointing at the surrounding repo; without scrubbing them the empty commit
-    # below lands on the REAL branch and the outer commit then fails to lock HEAD.
-    scrubbed = {
-        key: value for key, value in os.environ.items() if key not in _GIT_HOOK_PASSTHROUGH_VARS
-    }
-    env = {**scrubbed, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
     author = {
         "GIT_AUTHOR_NAME": "livespec tests",
         "GIT_AUTHOR_EMAIL": "tests@example.invalid",
