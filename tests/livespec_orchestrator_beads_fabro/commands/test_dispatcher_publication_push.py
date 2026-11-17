@@ -197,6 +197,24 @@ def test_a_bad_red_checksum_is_refused_before_the_branch_moves(tmp_path: Path) -
     assert _remote_head(remote=remote) == published
 
 
+def test_a_bad_red_checksum_is_refused_before_a_first_publication(tmp_path: Path) -> None:
+    """The unleased first push applies the same lineage refusal as a republish."""
+    root = tmp_path / "first-publication"
+    work, remote, _ = _repository(root=root)
+    _git(repo=work, argv=["push", "origin", f":refs/heads/{_BRANCH}"])
+    program = _program(root=tmp_path / "plugins")
+    commit = _tdd_commit(work=work, checksum="sha256:" + "0" * 64)
+
+    completed = subprocess.run(
+        [str(program), _BRANCH], cwd=work, check=False, text=True, capture_output=True
+    )
+
+    assert completed.returncode != 0
+    assert commit in completed.stderr
+    assert "tests/test_widget.py" in completed.stderr
+    assert _remote_head(remote=remote) == ""
+
+
 def test_an_open_red_on_its_unchanged_parent_is_not_refused(tmp_path: Path) -> None:
     """A seeded open Red remains eligible for the later Green amend and push."""
     work, remote, published = _repository(root=tmp_path / "seeded-open-red")
