@@ -217,6 +217,28 @@ def test_a_workflow_graph_change_the_doc_only_gates_refuse_runs_no_tests(*, tmp_
     assert calls == ["check-pre-commit-doc-only"]
 
 
+def test_a_deleted_workflow_graph_runs_the_doc_only_gates_then_the_graph_reading_tests(
+    *, tmp_path: Path
+) -> None:
+    """Deleting the graph is a change to it: the staged-deletion list still selects the gate."""
+    repo, environment, log = _repository(tmp_path=tmp_path)
+    _stage(repo=repo, path=_WORKFLOW, text="digraph { }\n")
+    _git(repo=repo, arguments=["commit", "--quiet", "-m", "graph"])
+    _git(repo=repo, arguments=["rm", "--quiet", _WORKFLOW])
+
+    done = _run(
+        argv=["bash", str(_PRE_COMMIT)],
+        cwd=repo,
+        env={**environment, "LIVESPEC_AUTHORING_TURN": "fix"},
+    )
+
+    assert done.returncode == 0, done.stderr
+    calls = [
+        line for line in log.read_text(encoding="utf-8").splitlines() if not line.startswith("uv ")
+    ]
+    assert calls == ["check-pre-commit-doc-only", "check-changed"]
+
+
 def test_a_commit_staging_no_python_and_no_graph_keeps_the_doc_only_path(*, tmp_path: Path) -> None:
     """Nothing to scope tests to: the existing doc-only gates are the commit's gate."""
     done, calls = _hook(

@@ -115,9 +115,11 @@ class Unscoped:
 
 
 def changed_paths(*, root: Path) -> list[str] | None:
-    """The branch's changed paths plus the staged ones, or None when git cannot say."""
+    """The branch's changed paths plus the staged ones, deletions included, or None."""
     branch = git_lines(root=root, arguments=["diff", "--name-only", "origin/master...HEAD"])
-    staged = git_lines(root=root, arguments=["diff", "--cached", "--name-only", "--diff-filter=AM"])
+    staged = git_lines(
+        root=root, arguments=["diff", "--cached", "--name-only", "--diff-filter=ACDMR"]
+    )
     if branch is None or staged is None:
         return None
     return sorted({*branch, *staged})
