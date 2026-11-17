@@ -36,6 +36,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_record
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_size_gate import (
     resolved_stored_factory_size_decision,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_filing_display import (
+    MECHANICAL_FINDING_PREFIX,
+)
 from livespec_orchestrator_beads_fabro.commands._drive_valve_result import (
     invalid_source_state,
     valve_refusal,
@@ -95,6 +98,7 @@ def _definition_of_done_refusal(
     """
     template_findings = goal_template_opening_delimiter_findings(item=item)
     if template_findings:
+        _record_mechanical_findings(config=config, item=item, findings=template_findings)
         return valve_refusal(
             aid=action_id,
             wid=item.id,
@@ -104,6 +108,7 @@ def _definition_of_done_refusal(
     eligibility = acceptance_eligibility(item=item, cwd=repo)
     refusal = eligibility.refusal
     if refusal is not None:
+        _record_mechanical_findings(config=config, item=item, findings=(refusal,))
         return valve_refusal(
             aid=action_id,
             wid=item.id,
@@ -123,6 +128,23 @@ def _definition_of_done_refusal(
             msg=f"approve refused: {'; '.join(judgement.findings)}",
         )
     return None
+
+
+def _record_mechanical_findings(
+    *, config: StoreConfig, item: WorkItem, findings: tuple[str, ...]
+) -> None:
+    """Keep a renewed mechanical hold actionable on the pending item.
+
+    Intake writes the same prefixed body when it first withholds auto-admission.
+    An explicit approval re-evaluates that wall, so it must also leave the
+    current remedy on the item when the repair is still insufficient.
+    """
+    for finding in findings:
+        store.append_work_item_comment(
+            path=config,
+            work_item_id=item.id,
+            body=f"{MECHANICAL_FINDING_PREFIX} {finding}",
+        )
 
 
 def _approval(*, repo: Path, config: StoreConfig, item: WorkItem, intent: str) -> ClaimWrite:
