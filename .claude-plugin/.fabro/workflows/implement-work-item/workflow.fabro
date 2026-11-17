@@ -384,11 +384,15 @@ chmod 755 \"$runner\""
     // with this gate unsatisfied; the attribute stays to satisfy fabro's
     // goal_gate_has_retry lint alongside the real node-retry budget.
     //
-    // THE RE-ENTRY ROUTE. Red carries no `max_visits`: it is entered once from
-    // `red_admission`, whose own counter bounds the Red laps. An incomplete
-    // Green turn is re-entered through `green_incomplete_route`; the single-turn
-    // incomplete-route and commit-settle nodes that the Scenario 285 split left
-    // unreachable were removed (bd-ib-vvzd3v).
+    // THE RE-ENTRY ROUTE. `red.max_visits=4` bounds every Red entry, including
+    // the direct unknown-label refusal route below. That route deliberately
+    // bypasses `red_admission`, so an invented label does not spend the ordinary
+    // Red admission budget; the node cap remains the finite bound the credential
+    // lifetime resolver needs. `red_admission` still bounds ordinary laps that
+    // have reached `commit_red`. An incomplete Green turn is re-entered through
+    // `green_incomplete_route`; the single-turn incomplete-route and
+    // commit-settle nodes that the Scenario 285 split left unreachable were
+    // removed (bd-ib-vvzd3v).
     // NO `output_schema`, DELIBERATELY. The engine reads an agent turn's final
     // message through the contract its `output_schema` declares. A JSON-Schema
     // schema stores the parsed object ONLY as `output.structured` and
@@ -409,6 +413,7 @@ chmod 755 \"$runner\""
         acp.command="{{ inputs.implement_adapter }}"
         timeout="1800s"
         max_retries=1
+        max_visits=4
         goal_gate=true
         retry_target="red"
         prompt="@prompts/red.md"
@@ -594,9 +599,9 @@ chmod 755 \"$runner\""
     // label>`) send every label that is not one of the node's routed labels
     // here, so an invented label is logged and refused rather than read as the
     // ordinary ending; the unconditional edge is reached only by a turn that set
-    // no label at all. The red route always re-enters Red through its admission
-    // bound with a handoff section naming the label and the endings this graph
-    // routes. The green route grades a turn that stated its completion field
+    // no label at all. The red route re-enters Red directly, without spending
+    // its admission budget, with a handoff section naming the label and the
+    // endings this graph routes. The green route grades a turn that stated its completion field
     // (the label was noise on an ordinary ending) and otherwise re-enters Green
     // the same way. The guard test pins the exclusion list to the routed labels.
     red_unknown_label_route [
@@ -2645,8 +2650,8 @@ script="cut_root=$(printenv LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT || true); if te
     red -> commit_red
     already_satisfied_route -> red_admission [label="carried changes", condition="preferred_label=carried"]
     already_satisfied_route -> already_satisfied
-    red_unknown_label_route -> red_admission [label="label refused", condition="outcome=failed"]
-    red_unknown_label_route -> red_admission
+    red_unknown_label_route -> red [label="label refused", condition="outcome=failed"]
+    red_unknown_label_route -> red
     red_needs_human_route -> needs_human [label="red asked for a human", condition="outcome=failed"]
     red_needs_human_route -> red_admission
     commit_red -> red_admission [label="refused", condition="outcome=failed"]
