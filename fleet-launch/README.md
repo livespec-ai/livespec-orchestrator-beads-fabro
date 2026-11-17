@@ -68,8 +68,14 @@ For another tenant, add `REPO_OVERRIDE="$HOME/workspace/<repo>"`; the launcher r
 launch-time command under that repository's committed `credential_wrapper`, run as written (a
 non-family one nested inside the family wrapper), so `WRAPPER=` is needed only to override that
 chain, as the slot-narrowing wrapper does. For a registry-resolved capture dispatch, add
-`CAPTURE_NULL=1 CAPTURE_EXPECT=petri`. To keep a queue position across a restart, pass the old
-ticket's number as `TICKET_NS`. A resume is launched the same way through
+`CAPTURE_NULL=1 CAPTURE_EXPECT=petri`. A queue ticket's position is computed when it is taken, by
+walking the item's parent chain (`parent-of.sh`, run in the tenant repository under its wrapper) to
+the owning plan and reading that plan's rank in the priorities record
+(`FLEET_LAUNCH_PRIORITIES_RECORD`, one `<rank> <plan-id>` line per plan); an unranked chain takes the
+last rank, and a host with no readable record orders tickets by arrival. A queued launcher also
+claims its item, so a second launcher for an item that already has a live one exits without a
+ticket. To keep a queue position across a restart, pass the old ticket's number as `TICKET_NS`;
+under priority ticketing it is honored only while that ticket still exists for the item. A resume is launched the same way through
 `fleet-launch/resume-capped.sh <item-id>` (or `<ticket> <repo> <item>`).
 
 A running bash launcher executes the script content it started with, so a hold check added

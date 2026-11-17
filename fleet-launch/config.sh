@@ -107,6 +107,17 @@
 : "${FLEET_LAUNCH_INFLIGHT_DIR:=/run/user/1000/fleet-inflight.d}"
 : "${FLEET_LAUNCH_GMK_QUEUE_DIR:=/run/user/1000/gmktec-launch-queue.d}"
 : "${FLEET_LAUNCH_GMK_LOCK_DIR:=/run/user/1000/gmktec-launch-lock.d}"
+# One launcher per queued item: a launcher claims its item here (a symlink named for the item whose
+# target is the owning pid), so a whole-queue re-sort never starts a second launcher for a queued item.
+: "${FLEET_LAUNCH_GMK_CLAIM_DIR:=${FLEET_LAUNCH_GMK_QUEUE_DIR}.claims}"
+# Queue position. A ticket's rank comes from a mechanical walk of the item's parent chain to the
+# owning plan and that plan's rank in the latest priorities record, read at ticket time. The record
+# is a data file the seat refreshes from the coordinator's latest priorities-record: one
+# "<rank> <plan-id>" line per ranked plan, rank 1 first. With no readable record, tickets are ordered
+# by arrival. The parent command prints the parent id of the item it is given (nothing for a root);
+# it runs in the tenant repository under its credential wrapper.
+: "${FLEET_LAUNCH_PRIORITIES_RECORD:=$FLEET_LAUNCH_STATE_DIR/priorities-record}"
+: "${FLEET_LAUNCH_PARENT_CHAIN_COMMAND:=${FLEET_LAUNCH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/parent-of.sh}"
 
 # The orchestrator plugin registry and cache, used to resolve the installed build.
 : "${FLEET_LAUNCH_PLUGIN_REGISTRY:=/home/ubuntu/.claude/plugins/installed_plugins.json}"
