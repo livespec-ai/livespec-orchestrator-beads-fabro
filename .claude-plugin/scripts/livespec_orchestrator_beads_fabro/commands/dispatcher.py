@@ -315,6 +315,7 @@ fail-closed-when-unobservable behavior 5v9 built stays the live path.
 import argparse
 from collections.abc import Callable
 
+from livespec_orchestrator_beads_fabro.commands import _dispatcher_breakage_pass as bp
 from livespec_orchestrator_beads_fabro.commands._acp_hold_clear import (
     run_clear_acp_availability_hold_command,
 )
@@ -567,6 +568,7 @@ def _build_parser() -> argparse.ArgumentParser:
     add_post_host_record_arguments(parser=subparsers.add_parser("post-host-record"))
     add_post_plan_record_arguments(parser=subparsers.add_parser("post-plan-record"))
     add_file_canary_arguments(parser=subparsers.add_parser("file-canary"))
+    bp.register_breakage_pass(add_parser=subparsers.add_parser, handlers=_SUBCOMMAND_HANDLERS)
     add_factory_inspect_arguments(parser=subparsers.add_parser("inspect"))
     add_host_only_subcommand(subparsers=subparsers, handlers=_SUBCOMMAND_HANDLERS)
     add_probe_arguments(parser=subparsers.add_parser("probe"))
