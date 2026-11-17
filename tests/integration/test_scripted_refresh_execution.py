@@ -1417,6 +1417,114 @@ def test_a_forge_server_error_retries_the_leased_push_while_origin_is_unchanged(
     assert box.state(name=REFRESH_CHANGED_STATE_FILENAME) is None
 
 
+def test_a_pre_push_hook_rejection_with_a_5xx_phrase_is_named_and_not_retried(
+    tmp_path: Path,
+) -> None:
+    """A hook's prose cannot turn its rejection into a retryable forge error.
+
+    Git combines client-side hook output with its transport diagnostics.  The
+    hook below deliberately includes the same incidental phrase that appeared
+    in the heading-coverage check failure: it is not a transport `remote:`
+    response.  A real exact-head push is required here so the assertion counts
+    the repository's actual pre-push hook invocations rather than calls to a
+    helper double.
+    """
+    box = _build(root=tmp_path)
+    attempts = tmp_path / "pre-push-attempts"
+    hook = box.clone / ".git" / "hooks" / "pre-push"
+    _ = hook.write_text(
+        "#!/bin/sh\n"
+        f"printf x >> {attempts}\n"
+        "printf '%s\\n' '::: just check-master-ci-green' >&2\n"
+        "printf '%s\\n' 'master CI is red on its head ci-green check' >&2\n"
+        "printf '%s\\n' '## Scenario: CI creation returned an Internal server error' >&2\n"
+        "printf '%s\\n' 'Failed targets (1):' >&2\n"
+        "printf '%s\\n' '  - check-master-ci-green' >&2\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o700)
+    _ = _advance_default(box=box)
+
+    result = _run(box=box)
+
+    assert result.returncode == 1, result.stdout
+    assert attempts.read_text(encoding="utf-8").count("x") == 1
+    assert "LIVESPEC_PR_REFRESH_HOOK_REJECTED: check-master-ci-green" in result.stderr
+    assert "LIVESPEC_PR_REFRESH_FORGE_ERROR" not in result.stderr
+    assert box.state(name=REFRESH_CHANGED_STATE_FILENAME) is None
+
+
+def test_gits_own_http_5xx_transport_error_retries_the_leased_push(tmp_path: Path) -> None:
+    """Git prints an HTTP 5xx without a `remote:` prefix, and it is still a forge error.
+
+    A smart-HTTP push that the forge answers with a 5xx reports it on git's own
+    `error:` and `fatal:` lines, never on a `remote:` line, so reading only the
+    `remote:` lines would call it a lease race and never retry it.
+    """
+    box = _build(root=tmp_path)
+    before = box.remote_head(ref=_BRANCH)
+    attempts = tmp_path / "transport-push-attempts"
+    helper_root = tmp_path / "push-helper"
+    helper = helper_root / "bin" / "push_origin"
+    helper.parent.mkdir(parents=True)
+    _ = helper.write_text(
+        "#!/bin/sh\n"
+        f"printf x >> {attempts}\n"
+        "printf '%s\\n' 'error: RPC failed; HTTP 500 curl 22 The requested URL returned error: 500' >&2\n"
+        "printf '%s\\n' 'fatal: the remote end hung up unexpectedly' >&2\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    helper.chmod(0o700)
+    _ = _advance_default(box=box)
+
+    result = _run(
+        box=box,
+        extra_env={"LIVESPEC_SANDBOX_GH_REFRESH_ROOT": str(helper_root)},
+    )
+
+    assert result.returncode == 1, result.stdout
+    assert attempts.read_text(encoding="utf-8") == "xxx"
+    assert "LIVESPEC_PR_REFRESH_FORGE_ERROR" in result.stderr
+    assert "LIVESPEC_PR_REFRESH_LEASE_FAILED" not in result.stderr
+    assert box.remote_head(ref=_BRANCH) == before
+    assert box.state(name=REFRESH_CHANGED_STATE_FILENAME) is None
+
+
+def test_a_hook_printed_remote_5xx_line_is_still_a_hook_rejection_and_not_retried(
+    tmp_path: Path,
+) -> None:
+    """A hook that echoes a `remote:` 5xx line and names failed targets is not retried.
+
+    The hook's failed targets decide the classification before any transport
+    error is read, so no phrase the hook prints can make its rejection a forge
+    error.
+    """
+    box = _build(root=tmp_path)
+    attempts = tmp_path / "pre-push-remote-attempts"
+    hook = box.clone / ".git" / "hooks" / "pre-push"
+    _ = hook.write_text(
+        "#!/bin/sh\n"
+        f"printf x >> {attempts}\n"
+        "printf '%s\\n' 'remote: Internal Server Error' >&2\n"
+        "printf '%s\\n' 'error: RPC failed; HTTP 503 from a spec heading' >&2\n"
+        "printf '%s\\n' 'Failed targets (1):' >&2\n"
+        "printf '%s\\n' '  - check-master-ci-green' >&2\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o700)
+    _ = _advance_default(box=box)
+
+    result = _run(box=box)
+
+    assert result.returncode == 1, result.stdout
+    assert attempts.read_text(encoding="utf-8").count("x") == 1
+    assert "LIVESPEC_PR_REFRESH_HOOK_REJECTED: check-master-ci-green" in result.stderr
+    assert "LIVESPEC_PR_REFRESH_FORGE_ERROR" not in result.stderr
+
+
 def test_a_non_numeric_refresh_counter_fails_closed(tmp_path: Path) -> None:
     """A counter nothing can compare cannot bound anything, so it refuses.
 
