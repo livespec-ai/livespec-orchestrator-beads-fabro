@@ -91,6 +91,8 @@ run_id=$(mise exec -- just gate-start -- python3 "$PLUGIN_ROOT/scripts/bin/drive
 mise exec -- just gate-wait "$run_id"
 ```
 
+Caveat: this recipe runs `drive.py` itself, not a `fleet-launch/` launcher, so it is NOT detached by the launcher's self-detach and the gate runner's 900-second stall cap still applies to it. Use the committed `fleet-launch/` launcher, which detaches itself under the gate runner, for a drive expected to outlast that cap.
+
 Prefix the gate command with whatever the invocation ordinarily needs (the
 governed project's `with-<project>-env.sh` credential wrapper, for
 instance) — `gate-start` runs the argv it is given, unchanged. `gate-wait`
