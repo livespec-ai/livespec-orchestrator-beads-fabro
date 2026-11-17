@@ -1,7 +1,8 @@
 # Workflow-edit exemption — one exemption binds to one reviewed change.
 #
-# The change (plan stale-base-merge-options, epic livespec-dev-tooling-xowhol; rollout
-# carrier livespec-dev-tooling-ymog6r): ci.yml gains the merge-group tree-equality skip.
-# MAINTAINER tier (approval:workflow-edit): existing `if:` lines are modified.
-work_item=bd-ib-trvvug
-reason=Merge-group tree-equality skip rollout (guard skip output plus the skip term on every gating job's if, and the omitted-set step on ci-green), ratified by the maintainer 2026-11-16 on epic livespec-dev-tooling-xowhol; tier is maintainer.
+# The change (maintainer ruling 2026-11-17, Honeycomb metrics must be fixed; reference fix
+# livespec-dev-tooling-pixkgb): the export-telemetry job's `if:` also admits merge_group runs.
+# MAINTAINER tier (approval:workflow-edit): the existing `if:` line is modified, so the
+# guard refuses a change=additive claim for it.
+work_item=bd-ib-ibnwha
+reason=The export-telemetry job also runs for merge_group runs so merge-queue runs emit ci.run spans to Honeycomb (maintainer ruling 2026-11-17; reference livespec-dev-tooling-pixkgb); one modified if: line, tier is maintainer.
