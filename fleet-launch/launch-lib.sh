@@ -39,7 +39,7 @@ detach_if_under_gate_runner() {
   [ "${FLEET_LAUNCH_ALLOW_UNDER_GATE:-}" = 1 ] && return 0
   mkdir -p "$FLEET_LAUNCH_STATE_DIR" || { echo "fleet-launch: cannot create $FLEET_LAUNCH_STATE_DIR to detach under the gate runner" >&2; exit 1; }
   log="$FLEET_LAUNCH_STATE_DIR/detached-$(basename "$SELF" .sh)-$(date -u +%Y%m%dT%H%M%SZ)-$$.log"
-  env -u LIVESPEC_GATE_RUN_PROGRESS_STAMP FLEET_LAUNCH_DETACHED_FROM="$$" setsid nohup bash "$SELF" "${LAUNCHER_ARGS[@]}" > "$log" 2>&1 < /dev/null &
+  env -u LIVESPEC_GATE_RUN_PROGRESS_STAMP -u FLEET_LAUNCH_SIGNAL_SUPERVISOR_CHILD -u FLEET_LAUNCH_SIGNAL_CAUSE_FILE FLEET_LAUNCH_DETACHED_FROM="$$" setsid nohup bash "$SELF" "${LAUNCHER_ARGS[@]}" > "$log" 2>&1 < /dev/null &
   pid=$!
   printf 'fleet-launch: started under the gate runner, whose %ss stall cap would end this launcher and its drive; detached pid %s, log file %s\n' \
     "${LIVESPEC_SUITE_GREEN_STALL_SECONDS:-900}" "$pid" "$log"
