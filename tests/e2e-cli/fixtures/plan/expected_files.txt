@@ -1,5 +1,0 @@
-# The plan front-end writes only the write-once research note on disk under
-# the project root. The one epic anchor and all handoff entries are beads
-# tenant DB writes, so they are NOT per-skill file assertions here. The
-# research note below plus the exit-0 round-trip is the on-disk success signal.
-plan/harness-smoke/research/initial.md

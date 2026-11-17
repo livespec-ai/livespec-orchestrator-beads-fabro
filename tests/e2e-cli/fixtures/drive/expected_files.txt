@@ -1,1 +1,0 @@
-# Thin operator: drive emits JSON to stdout and writes NO files.
