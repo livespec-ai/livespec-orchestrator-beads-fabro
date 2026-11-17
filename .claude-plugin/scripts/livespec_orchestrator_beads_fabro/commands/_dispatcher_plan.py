@@ -96,6 +96,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_goal_recovery import
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_host_only import (
     WORKFLOW_SCOPE_OVERRIDE_LABEL,
+    declares_host_only_definition_of_done,
     declares_workflow_scope_refusal,
     host_only_refusal_detail,
     is_host_only_item,
@@ -167,6 +168,7 @@ __all__: list[str] = [
     "build_plan",
     "cc_otel_overlay_env",
     "codex_adapter",
+    "declares_host_only_definition_of_done",
     "declares_workflow_scope_refusal",
     "escape_minijinja_literal",
     "harness_shell_env_lines",

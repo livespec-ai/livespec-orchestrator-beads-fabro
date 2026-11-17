@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Protocol
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_host_only import (
+    declares_host_only_definition_of_done,
     declares_workflow_scope_refusal,
     is_host_only_item,
 )
@@ -57,9 +58,13 @@ def run_host_only_command(*, args: argparse.Namespace) -> int:
     payload: dict[str, str | bool] = {"work_item_id": item.id, "host_only": host_only}
     if host_only:
         payload["reason"] = (
-            "workflow declaration"
-            if declares_workflow_scope_refusal(item=item, raw_labels=raw_labels)
-            else "factory_safety"
+            "definition-of-done proof modes"
+            if declares_host_only_definition_of_done(item=item)
+            else (
+                "workflow declaration"
+                if declares_workflow_scope_refusal(item=item, raw_labels=raw_labels)
+                else "factory_safety"
+            )
         )
     _ = write_stdout(text=json.dumps(payload, sort_keys=True) + "\n")
     return 0

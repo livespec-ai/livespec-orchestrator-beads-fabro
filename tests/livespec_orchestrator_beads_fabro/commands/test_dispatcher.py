@@ -333,6 +333,7 @@ def test_workflow_payload_directory_encodes_dotted_work_item_ids_injectively() -
     }
     assert set(_dispatcher_host_only.__all__) == {
         "WORKFLOW_SCOPE_OVERRIDE_LABEL",
+        "declares_host_only_definition_of_done",
         "declares_workflow_scope_refusal",
         "host_only_refusal_detail",
         "is_host_only_item",
