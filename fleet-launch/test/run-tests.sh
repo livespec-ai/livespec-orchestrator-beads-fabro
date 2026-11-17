@@ -881,6 +881,13 @@ wait_for_line() {
     done
 }
 
+# HOLD_LINE_WAIT_S bounds how long a scenario waits for a launcher to print
+# 'repository hold present'.  wait_for_line returns the instant the line
+# appears, so a generous bound costs nothing on a healthy run; a tight one turns
+# a slow start on a loaded host into a false 'never yielded' failure (orchestrator
+# #5448 run 44070262679: iterations 27/29/61/62/63 of the 100-iteration TERM loop).
+HOLD_LINE_WAIT_S=${HOLD_LINE_WAIT_S:-30}
+
 # wait_for_queue_ticket: returns a ticket only after the queue itself proves it
 # exists.  A cap log is not a file-system synchronization point for a launcher
 # that can re-exec while preserving its ticket.
@@ -2414,7 +2421,7 @@ TERM_SED
             export STUB_TERM_SUBSTITUTION_SED_DELAY_S=0.01
             PATH="$STUB/term-sed:$PATH" ONLY_GMK=1 TICKET_NS="$attempt" "$launcher" bd-ib-term > "$STUB_RM_PROBE_LOG_SOURCE" 2>&1 &
             term_pid=$!
-            if ! wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'repository hold present' 5; then
+            if ! wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'repository hold present' "$HOLD_LINE_WAIT_S"; then
                 fail "$label iteration $attempt never yielded on the repository hold"
                 stop_launcher "$term_pid"
                 wait "$term_pid" 2>/dev/null
@@ -2515,7 +2522,7 @@ signal.signal(signal.SIGINT, signal.SIG_DFL)
 os.setsid()
 os.execv(sys.argv[1], sys.argv[1:])' "$launcher" bd-ib-term > "$STUB_RM_PROBE_LOG_SOURCE" 2>&1 &
         sig_pid=$!
-        if ! wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'repository hold present' 5; then
+        if ! wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'repository hold present' "$HOLD_LINE_WAIT_S"; then
             fail "$label never yielded on the repository hold before $sig"
             stop_launcher "$sig_pid"
             wait "$sig_pid" 2>/dev/null
