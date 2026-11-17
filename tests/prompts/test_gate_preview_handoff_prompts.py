@@ -21,6 +21,15 @@ def test_red_and_green_prompts_require_gate_preview_repair_and_handoff_verdicts(
         assert "If no preview ran, state that and why." in prompt
 
 
+def test_red_handoff_distinguishes_a_preview_that_did_not_run_from_no_failed_targets() -> None:
+    """A setup refusal must reach Green as an unavailable preview, not a clean gate."""
+    prompt = (_PROMPTS / "red.md").read_text(encoding="utf-8")
+
+    assert '`"preview_ran": false`' in prompt
+    assert "record the preview as not run" in prompt
+    assert "rather than recording no failed" in prompt
+
+
 def test_red_prompt_names_the_test_file_to_the_preview() -> None:
     """The Red preview is told which test file commit_red will stage."""
     prompt = (_PROMPTS / "red.md").read_text(encoding="utf-8")
