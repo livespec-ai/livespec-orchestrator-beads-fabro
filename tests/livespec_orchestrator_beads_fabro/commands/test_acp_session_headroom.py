@@ -105,6 +105,14 @@ def _write_floor(*, root: Path, value: str) -> None:
     )
 
 
+def _write_weekly_floor(*, root: Path, value: str) -> None:
+    _ = (root / ".livespec.jsonc").write_text(
+        '{"livespec-orchestrator-beads-fabro": {"dispatcher": '
+        f'{{"session_headroom_weekly_floor_percent": {value}}}}}}}',
+        encoding="utf-8",
+    )
+
+
 # ---------------------------------------------------------------------------
 # The reading itself.
 # ---------------------------------------------------------------------------
@@ -232,6 +240,7 @@ def test_the_floor_defaults_to_the_ratified_twenty_and_is_committed_only(tmp_pat
     )
 
     assert policy.floor_percent == headroom.DEFAULT_SESSION_HEADROOM_FLOOR_PERCENT
+    assert policy.weekly_floor_percent == headroom.DEFAULT_SESSION_HEADROOM_WEEKLY_FLOOR_PERCENT
     assert tokens == []
 
 
@@ -262,6 +271,34 @@ def test_a_floor_outside_the_declared_range_is_refused_rather_than_clamped(
 
     assert is_successful(resolved) is False
     assert policy.floor_percent == headroom.DEFAULT_SESSION_HEADROOM_FLOOR_PERCENT
+
+
+@pytest.mark.parametrize(("configured", "expected"), [("0", 0), ("10", 10), ("100", 100)])
+def test_a_committed_weekly_floor_inside_the_inclusive_range_is_honoured(
+    tmp_path: Path, configured: str, expected: int
+) -> None:
+    _write_weekly_floor(root=tmp_path, value=configured)
+
+    policy = headroom_gate.session_headroom_policy(
+        repo=tmp_path, now_iso=_NOW, journal_path=None, read=_recording_read([])
+    )
+
+    assert policy.weekly_floor_percent == expected
+
+
+@pytest.mark.parametrize("configured", ["101", "-1", '"10"', "true", "10.5"])
+def test_an_unreadable_weekly_floor_falls_back_to_its_ratified_default(
+    tmp_path: Path, configured: str
+) -> None:
+    _write_weekly_floor(root=tmp_path, value=configured)
+
+    resolved = headroom_gate.resolve_session_headroom_weekly_floor_percent(cwd=tmp_path)
+    policy = headroom_gate.session_headroom_policy(
+        repo=tmp_path, now_iso=_NOW, journal_path=None, read=_recording_read([])
+    )
+
+    assert is_successful(resolved) is False
+    assert policy.weekly_floor_percent == headroom.DEFAULT_SESSION_HEADROOM_WEEKLY_FLOOR_PERCENT
 
 
 # THE HORIZON DIAL IS COVERED BY `test_acp_session_headroom_horizon_dial.py`

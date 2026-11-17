@@ -86,8 +86,8 @@ def _chain() -> ResolvedAcpChain:
     )
 
 
-def _reading(*, status: str) -> headroom.SessionHeadroomReading:
-    """Ample five-hour room, and a spent weekly window the status decides on.
+def _reading(*, status: str, weekly_utilization: float = 100.0) -> headroom.SessionHeadroomReading:
+    """Ample five-hour room, with its weekly utilization set by the fixture.
 
     Both figures are PERCENTAGES, as every reading in this package is: the
     fraction the provider's own header carries is converted once, in the read,
@@ -98,12 +98,12 @@ def _reading(*, status: str) -> headroom.SessionHeadroomReading:
         credential_identity=_IDENTITY,
         observed_at=_NOW,
         utilization=5,
-        seven_day=headroom.seven_day_reading(utilization=100.0, status=status),
+        seven_day=headroom.seven_day_reading(utilization=weekly_utilization, status=status),
     )
 
 
-def _filtered(*, status: str) -> preflight.NodePreflight:
-    reading = _reading(status=status)
+def _filtered(*, status: str, weekly_utilization: float = 100.0) -> preflight.NodePreflight:
+    reading = _reading(status=status, weekly_utilization=weekly_utilization)
     # The premise of the clause, asserted rather than assumed: this reading is
     # far above the floor, so neither existing arm has anything to skip on.
     assert reading.remaining_percent == 95.0
@@ -148,16 +148,9 @@ def test_a_weekly_refusal_skips_the_covered_candidate_and_selection_continues() 
     assert node.exhausted is False
 
 
-def test_a_weekly_allowance_the_provider_has_not_refused_skips_nothing() -> None:
-    """The control: a FULLY SPENT weekly window the provider still serves.
-
-    The sharpest form of the control, since the reading differs from the
-    refused one in the status and in nothing else: a build inferring exhaustion
-    from the percentage would skip this candidate too, and the clause's "a
-    utilization below 100, or any other value is not exhaustion" forecloses
-    exactly that.
-    """
-    node = _filtered(status=_ALLOWED)
+def test_a_weekly_allowance_at_its_reserve_is_not_skipped() -> None:
+    """The control: equality with the weekly floor passes the admission filter."""
+    node = _filtered(status=_ALLOWED, weekly_utilization=90.0)
 
     assert node.skipped == ()
     assert [one.identity.candidate_key for one in node.candidates if one.identity is not None] == [

@@ -94,7 +94,10 @@ def _reading(*, weekly: headroom.SevenDayReading) -> headroom.SessionHeadroomRea
 
 
 def _filtered(
-    *, weekly: headroom.SevenDayReading, floor_percent: int = _FLOOR
+    *,
+    weekly: headroom.SevenDayReading,
+    floor_percent: int = _FLOOR,
+    weekly_floor_percent: int = headroom.DEFAULT_SESSION_HEADROOM_WEEKLY_FLOOR_PERCENT,
 ) -> preflight.NodePreflight:
     return preflight.filter_node_candidates(
         chain=_chain(),
@@ -104,6 +107,7 @@ def _filtered(
                 floor_percent=floor_percent,
                 horizon_minutes=_HORIZON,
                 read=lambda: _reading(weekly=weekly),
+                weekly_floor_percent=weekly_floor_percent,
             ),
         ),
         assessed={},
@@ -127,10 +131,6 @@ _UNREFUSED: list[tuple[str, headroom.SevenDayReading]] = [
     ("unrecognised", headroom.seven_day_reading(utilization=50.0, status="throttled_soon")),
     # The warning status the clause names outright.
     ("warning", headroom.seven_day_reading(utilization=90.0, status=_WARNING)),
-    # A utilization below 100, which the clause says is not exhaustion.
-    ("below-100", headroom.seven_day_reading(utilization=99.0, status="allowed")),
-    # And a window reported fully spent that the provider has NOT refused.
-    ("at-100-unrefused", headroom.seven_day_reading(utilization=100.0, status="allowed")),
 ]
 
 
@@ -154,6 +154,33 @@ def test_a_weekly_reading_that_is_not_a_refusal_skips_nothing(
     # node, so this admission is a reading of the status rather than a filter
     # that has nothing to say about the weekly window at all.
     assert _filtered(weekly=_refused()).exhausted is True
+
+
+@pytest.mark.parametrize(
+    "weekly",
+    [
+        headroom.seven_day_reading(utilization=99.0, status=_WARNING),
+        headroom.seven_day_reading(utilization=100.0, status="allowed"),
+    ],
+    ids=["warning-below-reserve", "allowed-spent"],
+)
+def test_a_valid_weekly_reading_below_its_reserve_is_a_seven_day_floor_skip(
+    weekly: headroom.SevenDayReading,
+) -> None:
+    """The weekly floor is strict; equality remains covered by the warning control."""
+    node = _filtered(weekly=weekly)
+
+    assert node.candidates == ()
+    [skip] = node.skipped
+    assert skip.headroom_skip_kind == "seven-day-floor"
+
+
+def test_a_zero_weekly_floor_disables_only_the_weekly_reserve() -> None:
+    """Provider refusal still wins when the configurable reserve is switched off."""
+    near_exhausted = headroom.seven_day_reading(utilization=99.0, status=_WARNING)
+
+    assert _filtered(weekly=near_exhausted, weekly_floor_percent=0).skipped == ()
+    assert _filtered(weekly=_refused(), weekly_floor_percent=0).exhausted is True
 
 
 @pytest.mark.parametrize(("label", "weekly"), _UNREFUSED, ids=[one[0] for one in _UNREFUSED])
