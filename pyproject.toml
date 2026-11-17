@@ -1,4 +1,7 @@
 [project]
-name = "item"
-version = "1.0.0"
-dependencies = []
+name = "fixture"
+version = "0.0.0"
+
+[tool.livespec_dev_tooling]
+source_trees = ["hooks"]
+source_tree_prefixes = ["hooks/"]
