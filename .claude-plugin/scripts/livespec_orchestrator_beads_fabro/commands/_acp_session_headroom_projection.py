@@ -52,6 +52,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 from livespec_orchestrator_beads_fabro.commands._acp_session_headroom import (
+    DEFAULT_SESSION_HEADROOM_WEEKLY_FLOOR_PERCENT,
     FIVE_HOUR_WINDOW_ABSENT,
     NOT_PROJECTED_RESULT,
     PROJECTED_RESULT,
@@ -73,6 +74,7 @@ __all__: list[str] = [
     "FLOOR_SKIP_KIND",
     "NO_BASELINE_REASON",
     "PROJECTION_SKIP_KIND",
+    "SEVEN_DAY_FLOOR_SKIP_KIND",
     "SEVEN_DAY_SKIP_KIND",
     "UNOBSERVABLE_READING_REASON",
     "UNREADABLE_OBSERVATION_REASON",
@@ -122,20 +124,35 @@ _HORIZON_DISABLED_MINUTES = 0
 FLOOR_SKIP_KIND = "floor"
 PROJECTION_SKIP_KIND = "projection"
 SEVEN_DAY_SKIP_KIND = "seven-day"
+SEVEN_DAY_FLOOR_SKIP_KIND = "seven-day-floor"
 
 
-def headroom_skip_kind(*, reading: SessionHeadroomReading, floor_percent: int) -> str | None:
+def headroom_skip_kind(
+    *,
+    reading: SessionHeadroomReading,
+    floor_percent: int,
+    weekly_floor_percent: int = DEFAULT_SESSION_HEADROOM_WEEKLY_FLOOR_PERCENT,
+) -> str | None:
     """Which headroom shortfall stops this candidate, or `None` for none of them.
 
-    The floor is tested first, followed by a provider-rejected weekly allowance,
-    then this dispatcher's five-hour projection. A provider rejection is more
-    authoritative than an extrapolation, while the floor remains the operator
-    dial that governs every shortfall. A zero floor disables the weekly arm via
-    `seven_day_skips_candidate`.
+    The five-hour floor is tested first, followed by the weekly arms, then this
+    dispatcher's five-hour projection. A provider rejection is more
+    authoritative than the weekly reserve and an extrapolation. A zero
+    five-hour floor disables both weekly arms.
     """
     if headroom_skips_candidate(reading=reading, floor_percent=floor_percent):
         return FLOOR_SKIP_KIND
-    if seven_day_skips_candidate(reading=reading, floor_percent=floor_percent):
+    if not reading.seven_day.exhausted and seven_day_skips_candidate(
+        reading=reading,
+        floor_percent=floor_percent,
+        weekly_floor_percent=weekly_floor_percent,
+    ):
+        return SEVEN_DAY_FLOOR_SKIP_KIND
+    if seven_day_skips_candidate(
+        reading=reading,
+        floor_percent=floor_percent,
+        weekly_floor_percent=weekly_floor_percent,
+    ):
         return SEVEN_DAY_SKIP_KIND
     if projection_skips_candidate(reading=reading):
         return PROJECTION_SKIP_KIND
