@@ -357,3 +357,34 @@ sorted `"id"` field → the follow-up targets the **new** id, not the descriptio
 `-fplan.md` batch not forced; `-C <dir>` / `--db <path>` / `--global` / `--repo`
 (and clustered `-Cdir`) creates excluded (wrong-tenant); and a `--silent`
 single-id create still forced.
+
+## Remote exec (`bd-remote.sh`)
+
+From a host far from the Dolt server a `bd` call costs ~90 sequential Dolt round
+trips. When `/usr/local/etc/livespec-bd-remote.conf` exists (override:
+`LIVESPEC_BD_REMOTE_CONF`) and its `CONTROL_SOCKET` is a live socket, the guard
+runs `bd-remote.sh` (installed beside it by `install.sh`, removed by
+`rollback.sh`) as its real command. The file is sourced shell:
+
+```sh
+CONTROL_SOCKET=/path/to/ssh-controlmaster.sock
+SSH_TARGET=host-label-matching-the-control-path
+```
+
+`bd-remote.sh` sends ONE command over that already-open ControlMaster
+(`ssh -S ... -o ControlMaster=no -o BatchMode=yes -T`), `in <repo> bd <b64>`
+where `<b64>` is the base64 of the NUL-separated `bd` argv; the server side is
+`authorized-keys-bd-exec.sh` (livespec-dev-tooling). The client reads no SSH key.
+`<repo>` is the repository name (the primary checkout's directory even from a
+worktree); the cwd must be in a git root with `.beads/`.
+
+Run LOCAL (unchanged): a leading flag, `help`/`version`/`completion`/`send-metrics`,
+and any call carrying a host-path or connection flag (`--db`, `--database`,
+`--dolt-*`, `--host`, `--port`, `--file`, `--body-file`, `--design-file`, `-f`,
+`--path`, `--dir`, `--config`, `--output`, `-o`, `--jsonl`, and `=value` forms).
+
+Fallback: if ssh itself cannot start the call (status 255) the call runs on the
+local `bd-real` and one line is written to stderr and to
+`LIVESPEC_BD_REMOTE_LOG` (default `~/.local/state/livespec-bd-remote.log`). Any
+other remote status, including a server denial (126), is returned as is and is
+never retried locally. Tests: `bash bd-guard/test/test-bd-remote.sh`.
