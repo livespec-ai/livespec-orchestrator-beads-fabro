@@ -27,7 +27,9 @@
 #                          only, once it is enrolled
 #   CAPTURE_NULL=1         dispatch naming NO factory, and require the run's argv to
 #   CAPTURE_EXPECT=<name>    carry --server of the registry-resolved CAPTURE_EXPECT
-#   TICKET_NS=<ns>         reuse a queue position (restart without losing FIFO order)
+#   TICKET_NS=<ns>         reuse a queue position (restart without losing FIFO order); under
+#                          priority ticketing it is honored only when it names an existing
+#                          ticket for this item, never to place a fresh ticket
 #   REWORK=1               ask the Dispatcher's loop dry-run instead of the ready set
 #   RELEASE_BLOCKED=1      run resolve-blocked:<item>:ready just before launching
 #
@@ -70,6 +72,7 @@ FABRO=$FLEET_LAUNCH_FABRO
 FABRO_BOARD=$FLEET_LAUNCH_FABRO_BOARD
 INFLIGHT=$FLEET_LAUNCH_INFLIGHT_DIR
 GMK_Q=$FLEET_LAUNCH_GMK_QUEUE_DIR
+GMK_CLAIMS=$FLEET_LAUNCH_GMK_CLAIM_DIR
 GMK_LOCK=$FLEET_LAUNCH_GMK_LOCK_DIR
 # shellcheck source=fleet-launch/launch-lib.sh
 . "$FLEET_LAUNCH_DIR/launch-lib.sh"
@@ -80,7 +83,7 @@ detach_if_under_gate_runner
 FIFO_CLASS=gmk; [ -n "${ONLY_HL:-}${ONLY_ARM:-}" ] && FIFO_CLASS=hl
 deadline=$(( $(date +%s) + FLEET_LAUNCH_MAX_WAIT_S ))
 wait_deadline=$(( SECONDS + FLEET_LAUNCH_MAX_WAIT_S ))
-ticket=""; ticket_number=""; lock=""; marker=""; FLEET_CAP=0; plugin=""; build=""
+ticket=""; ticket_number=""; item_claim=""; lock=""; marker=""; FLEET_CAP=0; plugin=""; build=""
 # Non-run exit accounting: a launcher that exits before its run lists writes one terminal line and,
 # when its item still reads ready, one ledger comment naming the dropped ticket (Scenario 312).
 run_listed=0; terminal_written=0; exit_cause=""; exit_comment=if-ready; ready_refusals=0
@@ -106,7 +109,7 @@ START_VERSION=$(script_version "/proc/$$/fd/255")
 [ -n "$START_VERSION" ] || START_VERSION=$(script_version "$SELF")
 bad_version=""
 if [ "${FLEET_LAUNCH_REEXEC_PID:-}" = "$$" ]; then
-  [ -f "${FLEET_LAUNCH_REEXEC_TICKET:-}" ] && grep -q "pid=$$ " "$FLEET_LAUNCH_REEXEC_TICKET" && { ticket=$FLEET_LAUNCH_REEXEC_TICKET; ticket_number=${ticket##*/}; ticket_number=${ticket_number%%-*}; }
+  [ -f "${FLEET_LAUNCH_REEXEC_TICKET:-}" ] && grep -q "pid=$$ " "$FLEET_LAUNCH_REEXEC_TICKET" && { ticket=$FLEET_LAUNCH_REEXEC_TICKET; ticket_number=${ticket##*/}; ticket_number=${ticket_number%-"$SEAT"}; }
   case ${FLEET_LAUNCH_REEXEC_DEADLINE:-} in ''|*[!0-9]*) ;; *) deadline=$FLEET_LAUNCH_REEXEC_DEADLINE ;; esac
   wait_deadline=$(( SECONDS + deadline - $(date +%s) ))
   echo "$(date -u +%FT%TZ) launcher re-executed on script version $START_VERSION: keeping ticket ${ticket##*/}"
@@ -130,31 +133,28 @@ reexec_on_script_change() {
 }
 
 drop_ticket() { [ -n "$ticket" ] && rm -f "$ticket"; ticket=""; }
-# ticket_namespace_is_restart: a generated priority ticket has a five-digit
-# priority key followed by its ticket-time nonce.  A plain TICKET_NS remains
-# the legacy ordering seam when priority ticketing is not configured, but is
-# not allowed to hand-place a fresh priority ticket.
+# ticket_namespace_is_restart: TICKET_NS is a restart only when it names a ticket that already exists
+# in the queue for THIS item.  Under priority ticketing a caller therefore cannot hand-place a fresh
+# ticket: a number naming no existing ticket for the item is ignored and the position is computed.
 ticket_namespace_is_restart() {
-  local priority nonce
-  priority=${TICKET_NS:-}; priority=${priority%%-*}
-  nonce=${TICKET_NS:-}; nonce=${nonce#*-}
-  [ -n "${TICKET_NS:-}" ] && [ "$priority" != "$TICKET_NS" ] \
-    && [ -n "$nonce" ] || return 1
-  case "$priority" in *[!0-9]*) return 1 ;; esac
-  case "$nonce" in *[!0-9]*) return 1 ;; esac
-  [ "${#priority}" -eq 5 ]
+  local file
+  [ -n "${TICKET_NS:-}" ] || return 1
+  case "$TICKET_NS" in */*) return 1 ;; esac
+  file="$GMK_Q/$TICKET_NS-$SEAT"
+  [ -f "$file" ] && ticket_fields "$file" && [ "$TK_ITEM" = "$ITEM" ]
 }
-# priority_ticketing_configured: both sources are required.  This preserves
-# the ordinary timestamp FIFO for hosts that have not yet supplied the
-# mechanical parent-chain and priorities-record sources.
+# priority_ticketing_configured: the priorities record must be readable.  The record and the
+# parent-chain command default to the committed config.sh values, so a host that keeps its latest
+# priorities record at FLEET_LAUNCH_PRIORITIES_RECORD is ranked with no further setup; a host with no
+# record keeps the ordinary timestamp FIFO.
 priority_ticketing_configured() {
-  [ -n "${FLEET_LAUNCH_PARENT_CHAIN_COMMAND:-}" ] \
-    && [ -x "$FLEET_LAUNCH_PARENT_CHAIN_COMMAND" ] \
-    && [ -r "${FLEET_LAUNCH_PRIORITIES_RECORD:-}" ]
+  [ -n "${FLEET_LAUNCH_PRIORITIES_RECORD:-}" ] && [ -r "$FLEET_LAUNCH_PRIORITIES_RECORD" ] \
+    && [ -n "${FLEET_LAUNCH_PARENT_CHAIN_COMMAND:-}" ] && [ -x "$FLEET_LAUNCH_PARENT_CHAIN_COMMAND" ]
 }
-# priority_ticket_key: walk the item's parent chain at ticket time.  Each
-# record read is the current priorities record; an unranked or unresolvable
-# chain deliberately receives the final rank, never an operator-provided slot.
+# priority_ticket_key: walk the item's parent chain at ticket time, reading the priorities record
+# (one "<rank> <plan-id>" line per ranked plan) afresh.  The parent command runs in the tenant
+# repository under its credential wrapper.  An unranked or unresolvable chain receives the final rank,
+# never an operator-provided slot.
 priority_ticket_key() {
   local node="$ITEM" parent rank hops=0
   while [ "$hops" -lt 64 ]; do
@@ -163,7 +163,7 @@ priority_ticket_key() {
       ''|*[!0-9]*) ;;
       *) printf '%05d' "$((10#$rank))"; return 0 ;;
     esac
-    parent=$("$FLEET_LAUNCH_PARENT_CHAIN_COMMAND" "$node") || return 1
+    parent=$(cd "$REPO" && wrap -- "$FLEET_LAUNCH_PARENT_CHAIN_COMMAND" "$node" 2>/dev/null) || return 1
     parent=${parent%%$'\n'*}
     [ -n "$parent" ] || return 1
     node=$parent
@@ -171,41 +171,66 @@ priority_ticket_key() {
   done
   return 1
 }
-ticket_number_for_new_ticket() {
-  local priority
-  if priority_ticketing_configured; then
-    priority=$(priority_ticket_key) || priority=99999
-    printf '%s-%s' "$priority" "$(date +%s%N)"
-  else
-    printf '%s' "${TICKET_NS:-$(date +%s%N)}"
-  fi
+# claim_item: one launcher per queued item.  The claim is a symlink named for the item whose target is
+# the owning pid; creating a symlink is atomic, so of any number of launchers started at once exactly
+# one creates it and the rest read its owner.  A claim whose owner is dead is moved aside and retaken.
+# Returns 0 when this launcher holds the claim and 2 when another live launcher does.
+claim_item() {
+  local link="$GMK_CLAIMS/$ITEM" holder stale tries=0
+  mkdir -p "$GMK_CLAIMS" || return 1
+  while [ "$tries" -lt 8 ]; do
+    tries=$((tries + 1))
+    if ln -s "$$" "$link" 2>/dev/null; then item_claim=$link; return 0; fi
+    holder=$(readlink "$link" 2>/dev/null) || continue
+    if [ "$holder" = "$$" ]; then item_claim=$link; return 0; fi
+    case "$holder" in ''|*[!0-9]*) ;; *) kill -0 "$holder" 2>/dev/null && return 2 ;; esac
+    stale="$link.stale.$$"
+    mv -T "$link" "$stale" 2>/dev/null || continue
+    # Only the dead owner's claim may be discarded; a live one moved by a race is put straight back.
+    if [ "$(readlink "$stale")" = "$holder" ]; then rm -f "$stale"; else mv -T "$stale" "$link" 2>/dev/null || rm -f "$stale"; fi
+  done
+  return 1
 }
-# existing_live_ticket_for_item prevents a whole-queue re-sort from creating a
-# second launcher while the first one is still inside a slow ready check.
+release_item_claim() {
+  [ -n "$item_claim" ] && [ "$(readlink "$item_claim" 2>/dev/null)" = "$$" ] && rm -f "$item_claim"
+  item_claim=""
+}
+# existing_live_ticket_for_item: a ticket of another live launcher for this item, as a second
+# guard for launchers that predate the claim.
 existing_live_ticket_for_item() {
   local f
   for f in "$GMK_Q"/*; do
     [ -e "$f" ] || continue
     ticket_fields "$f" || continue
-    [ "$TK_ITEM" = "$ITEM" ] && [ -n "$TK_PID" ] && kill -0 "$TK_PID" 2>/dev/null && return 0
+    [ "$TK_ITEM" = "$ITEM" ] && [ -n "$TK_PID" ] && [ "$TK_PID" != "$$" ] && kill -0 "$TK_PID" 2>/dev/null && return 0
   done
   return 1
 }
+# ensure_ticket: returns 0 holding a ticket, 2 when another live launcher already owns this item, and 1
+# when no ticket could be written.  A priority ticket is named <rank>-<ns>, its rank walked from the
+# item's parent chain to the owning plan's rank in the priorities record at this moment.
 ensure_ticket() {
+  local overwrite=0 claim_rc
   [ -n "$ticket" ] && [ -f "$ticket" ] && return
   mkdir -p "$GMK_Q"
-  existing_live_ticket_for_item && return 2
+  # Only a queued launcher (ONLY_GMK, ONLY_HL or ONLY_ARM) takes a ticket at start, so only it is
+  # held to one launcher per item.
+  if [ -n "${ONLY_GMK:-}${ONLY_HL:-}${ONLY_ARM:-}" ]; then
+    claim_item; claim_rc=$?
+    [ "$claim_rc" = 0 ] || return "$claim_rc"
+    if existing_live_ticket_for_item; then release_item_claim; return 2; fi
+  fi
   if [ -z "$ticket_number" ]; then
-    if ticket_namespace_is_restart; then ticket_number=$TICKET_NS
-    else ticket_number=$(ticket_number_for_new_ticket); fi
+    if priority_ticketing_configured; then
+      if ticket_namespace_is_restart; then ticket_number=$TICKET_NS; overwrite=1
+      else ticket_number="$(priority_ticket_key || printf 99999)-$(date +%s%N)"; fi
+    elif [ -n "${TICKET_NS:-}" ]; then ticket_number=$TICKET_NS; overwrite=1
+    else ticket_number=$(date +%s%N); fi
   fi
   ticket="$GMK_Q/$ticket_number-$SEAT"
-  if ! ( set -o noclobber; echo "owner=$SEAT pid=$$ item=$ITEM" > "$ticket" ) 2>/dev/null; then
-    ticket_fields "$ticket" 2>/dev/null || true
-    if [ "${TK_ITEM:-}" = "$ITEM" ] && [ -n "${TK_PID:-}" ] && kill -0 "$TK_PID" 2>/dev/null; then
-      ticket=""
-      return 2
-    fi
+  if [ "$overwrite" = 1 ]; then
+    echo "owner=$SEAT pid=$$ item=$ITEM" > "$ticket" || { ticket=""; return 1; }
+  elif ! ( set -o noclobber; echo "owner=$SEAT pid=$$ item=$ITEM" > "$ticket" ) 2>/dev/null; then
     ticket=""
     return 1
   fi
@@ -328,7 +353,7 @@ on_exit() {
     esac
     write_terminal "$cause"
   fi
-  drop_ticket; release_lock; [ -n "$marker" ] && rm -f "$marker"
+  drop_ticket; release_item_claim; release_lock; [ -n "$marker" ] && rm -f "$marker"
   [ -n "$cause" ] && report_dropped_ticket "$cause"
   return 0
 }
