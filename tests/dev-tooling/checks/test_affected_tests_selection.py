@@ -400,6 +400,8 @@ def test_an_uncovered_selected_module_is_remeasured_over_the_whole_suite_before_
         calls.append(arguments)
         if arguments == ["bash", "dev-tooling/just-test-nprocs.sh"]:
             return subprocess.CompletedProcess(arguments, 0, stdout="1\n")
+        if arguments[:3] == ["uv", "run", "pytest"]:
+            return subprocess.CompletedProcess(arguments, 0)
         coverage_calls = sum("coverage" in call for call in calls)
         return subprocess.CompletedProcess(arguments, 2 if coverage_calls == 1 else 0)
 
