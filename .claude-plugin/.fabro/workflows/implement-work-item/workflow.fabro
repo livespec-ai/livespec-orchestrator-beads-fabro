@@ -594,9 +594,9 @@ chmod 755 \"$runner\""
     // label>`) send every label that is not one of the node's routed labels
     // here, so an invented label is logged and refused rather than read as the
     // ordinary ending; the unconditional edge is reached only by a turn that set
-    // no label at all. The red route always re-enters Red through its admission
-    // bound with a handoff section naming the label and the endings this graph
-    // routes. The green route grades a turn that stated its completion field
+    // no label at all. The red route re-enters Red directly, without spending
+    // its admission budget, with a handoff section naming the label and the
+    // endings this graph routes. The green route grades a turn that stated its completion field
     // (the label was noise on an ordinary ending) and otherwise re-enters Green
     // the same way. The guard test pins the exclusion list to the routed labels.
     red_unknown_label_route [
@@ -2645,8 +2645,8 @@ script="cut_root=$(printenv LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT || true); if te
     red -> commit_red
     already_satisfied_route -> red_admission [label="carried changes", condition="preferred_label=carried"]
     already_satisfied_route -> already_satisfied
-    red_unknown_label_route -> red_admission [label="label refused", condition="outcome=failed"]
-    red_unknown_label_route -> red_admission
+    red_unknown_label_route -> red [label="label refused", condition="outcome=failed"]
+    red_unknown_label_route -> red
     red_needs_human_route -> needs_human [label="red asked for a human", condition="outcome=failed"]
     red_needs_human_route -> red_admission
     commit_red -> red_admission [label="refused", condition="outcome=failed"]

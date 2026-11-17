@@ -127,17 +127,18 @@ route.
 
 ## The labels this stage can route
 
-The graph routes exactly the `preferred_next_label` values this prompt names.
-Any other label is refused: the run logs the label, appends a refusal section to
-the handoff file and re-enters this stage through its admission bound, so an
-invented label costs a lap. An ordinary ending carries no label at all. The
-human decision is the failed ending above; if you end instead with
+This stage may emit `preferred_next_label` only in the three directive forms
+shown above: `seeded-open-red`, `already-satisfied`, and `needs-human`. Every
+ordinary Red ending carries no label at all. The human decision is the failed
+ending above; if you end instead with
 
     {"preferred_next_label": "needs-human"}
 
 the run reads it as the same request and rests the item at needs-human with
 your final message as the recorded question, so write the reason for the human
-in that message.
+in that message. Any other label is refused: the run logs the label, appends a
+refusal section to the handoff file, and re-enters this stage directly without
+spending its admission budget.
 
 ## Ending the turn — leave nothing running in the background
 
