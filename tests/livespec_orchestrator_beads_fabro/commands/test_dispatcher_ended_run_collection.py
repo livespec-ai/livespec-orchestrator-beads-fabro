@@ -5,11 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 
+import pytest
 from livespec_orchestrator_beads_fabro.commands._dispatcher_ended_run_collection import (
     collect_closed_ended_runs,
     journaled_refusals,
@@ -574,3 +577,58 @@ def _collect_one(*, tmp_path: Path, runner: _Runner, journal: _Journal) -> None:
         journal=journal,
         dry_run=False,
     )
+
+
+class _Usage(NamedTuple):
+    total: int
+    used: int
+    free: int
+
+
+_TOTAL = 10**12
+
+
+def _disk(monkeypatch: pytest.MonkeyPatch, *, free: int) -> None:
+    """Make the filesystem the export would land on report `free` bytes free."""
+    monkeypatch.setattr(shutil, "disk_usage", lambda _path: _Usage(_TOTAL, _TOTAL - free, free))
+
+
+@pytest.fixture(autouse=True)
+def _ample_disk(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test but the disk-pressure ones runs on a filesystem with room to export."""
+    _disk(monkeypatch, free=_TOTAL)
+
+
+def test_an_export_is_skipped_under_disk_pressure_and_the_run_is_still_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _disk(monkeypatch, free=0)
+    runner = _Runner()
+    journal = _Journal()
+
+    _collect_one(tmp_path=tmp_path, runner=runner, journal=journal)
+
+    skipped = journal.records[0]
+    assert skipped["stage"] == "ended-run-export-skipped-disk-pressure"
+    assert skipped["run_id"] == "01CLOSED"
+    assert (skipped["free_bytes"], skipped["total_bytes"]) == (0, _TOTAL)
+    assert {"min_free_fraction", "min_free_bytes"} <= set(skipped)
+    assert [call[1] for call in runner.calls] == ["rm"]
+    assert not (tmp_path / _EXPORTS / "01CLOSED").exists()
+    assert len(_collected(journal)) == 1
+
+
+def test_old_exports_are_still_pruned_when_the_disk_is_under_pressure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _disk(monkeypatch, free=0)
+    old = tmp_path / _EXPORTS / "01OLD"
+    old.mkdir(parents=True)
+    _ = (old / "events.jsonl").write_text("{}\n", encoding="utf-8")
+    aged = time.time() - 400 * 24 * 3600
+    os.utime(old / "events.jsonl", (aged, aged))
+    os.utime(old, (aged, aged))
+
+    _collect_one(tmp_path=tmp_path, runner=_Runner(), journal=_Journal())
+
+    assert not old.exists()
