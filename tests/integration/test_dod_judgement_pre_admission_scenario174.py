@@ -235,3 +235,20 @@ def test_scenario174_the_approve_valve_admits_an_item_the_judgement_passes(
 
     assert result["status"] == "green"
     assert _stored(repo=repo).status == "ready"
+
+
+def test_scenario265_approve_keeps_an_auto_item_held_and_records_its_mechanical_finding(
+    tmp_path: Path,
+) -> None:
+    """A re-check that still finds a Definition-of-Done defect leaves its remedy on the item."""
+    repo = _repo(tmp_path=tmp_path)
+    item = _item(admission_policy="auto", description="The Definition of Done was not repaired.")
+    append_work_item(path=_config(repo=repo), item=item)
+
+    result = run_action(repo=repo, action_id=f"approve:{item.id}")
+
+    assert result["status"] == "failed"
+    assert result["domain_error"] == "ungradeable-acceptance-criteria"
+    assert "no Definition of Done section" in result["summary"]
+    assert _stored(repo=repo).status == "pending-approval"
+    assert "no Definition of Done section" in _comments(repo=repo)
