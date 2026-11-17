@@ -24,6 +24,7 @@ __all__: list[str] = [
     "fresh_repayment_carrier",
     "lifecycle_state_for",
     "recovery_carrier",
+    "stored_status_for",
 ]
 
 # Phase -> canonical lifecycle state, in the contract table's own order.
@@ -61,6 +62,18 @@ REOPEN_FROM: tuple[str, ...] = (MERGED_PHASE, *REPAYMENT_PHASES, "closed")
 RECOVERY_PHASE = "reverting"
 CORRECTED_FROM = "collecting-failures"
 _CLOSED_PHASE = "closed"
+
+
+# The contract names the finished state `done`; the ledger STORES it as the
+# native lifecycle status `closed`, and the family bd-guard refuses a
+# `bd update --status done` as non-lifecycle.
+_STORED_STATUS: dict[str, str] = {"done": "closed"}
+
+
+def stored_status_for(*, phase: str) -> str | None:
+    """Return the status the ledger stores for `phase`'s canonical lifecycle state."""
+    state = PHASE_LIFECYCLE_STATES.get(phase)
+    return None if state is None else _STORED_STATUS.get(state, state)
 
 
 def lifecycle_state_for(*, phase: str) -> str | None:
