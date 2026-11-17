@@ -176,7 +176,7 @@ def test_a_malformed_policy_refuses_naming_its_defect(
 
 def test_the_committed_declaration_is_the_factory_half_of_the_partition() -> None:
     assert resolve_claude_credential_policy(cwd=_REPO_ROOT) == IOSuccess(
-        ClaudeCredentialPolicy(mode=NUMBERED_SLOTS, slots=(_slot(4), _slot(5)))
+        ClaudeCredentialPolicy(mode=NUMBERED_SLOTS, slots=(_slot(4), _slot(2)))
     )
 
 
