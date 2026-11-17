@@ -15984,3 +15984,36 @@ Feature: Factory credential from the central factory selection
     When the Dispatcher evaluates admission
     Then the slot is chosen by the whole-pool ranking of Scenario 278
 ```
+
+## Scenario 379 — A failed run whose tree nothing else carries is published to a preservation ref even when it did not fail a checkpoint
+
+Governing clause: `contracts.md` §"Failed engine checkpoint commit attribution" → "A failed run whose tree nothing else carries is published to a preservation ref whether or not it failed a checkpoint".
+
+```gherkin
+Feature: The work of any failed run survives the run
+  As the maintainer of a repository dispatched through the factory
+  I want the committed work of a failed run published to a ref when nothing else carries it
+  So that finished work is recoverable after the run's sandbox is gone
+
+  Scenario: a run that failed at commit_green with committed work and no needs-human ref is published
+    Given a dispatched run whose terminal outcome is a failure at node commit_green rather than a failed engine checkpoint
+    And the run's sandbox holds committed work
+    And its terminal run.failed event carries no terminal patch
+    And origin carries no needs-human ref holding the run's work for the run's dispatch id
+    When the Dispatcher reports the dispatch result
+    Then the forge carries a ref refs/livespec/preserved-publish/<work-item-id>/<commit-sha> whose commit's parent is the run's base commit and whose tree reflects every change the run made
+    And no git push and no repository hook ran for that publication
+    And a livespec-preserved-tree ledger comment names the run id, the factory, the preservation ref and its commit id
+
+  Scenario: a failed run that carries a needs-human ref gets no preservation ref
+    Given a dispatched run whose terminal outcome is a failure rather than a failed engine checkpoint
+    And origin carries a ref refs/heads/needs-human/<dispatch-id> holding the run's work
+    When the Dispatcher reports the dispatch result
+    Then no ref under refs/livespec/preserved-publish/<work-item-id>/ is created for that run
+
+  Scenario: a failed run whose needs-human ref cannot be read is still published
+    Given a dispatched run whose terminal outcome is a failure with no terminal patch observed
+    And the read of origin's needs-human refs fails
+    When the Dispatcher reports the dispatch result
+    Then it attempts the publication of the run's changed files to a ref under refs/livespec/preserved-publish/<work-item-id>/
+```
