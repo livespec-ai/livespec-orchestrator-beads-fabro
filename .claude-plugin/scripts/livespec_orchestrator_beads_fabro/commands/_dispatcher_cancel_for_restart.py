@@ -265,9 +265,20 @@ def _mappings(*, value: object | None) -> Iterable[Mapping[str, object]]:
 def _is_green_janitor(*, record: Mapping[str, object]) -> bool:
     node = record.get("node", record.get("name", record.get("stage")))
     status = record.get("status", record.get("state", record.get("outcome")))
-    return (
+    if (
         isinstance(node, str)
         and node == "janitor"
         and isinstance(status, str)
         and status in {"succeeded", "success", "green"}
+    ):
+        return True
+    outcome = record.get("janitor")
+    return isinstance(outcome, dict) and _stage_succeeded(
+        outcome=cast("dict[object, object]", outcome)
     )
+
+
+def _stage_succeeded(*, outcome: dict[object, object]) -> bool:
+    """Read the native ``node_outcomes`` value for one named stage."""
+    status = outcome.get("status", outcome.get("state", outcome.get("outcome")))
+    return isinstance(status, str) and status in {"succeeded", "success", "green"}
