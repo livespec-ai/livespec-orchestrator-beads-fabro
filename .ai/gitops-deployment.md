@@ -33,12 +33,14 @@ committed path, never a command shape the guard fails to recognise.
 | --- | --- | --- |
 | `bd-guard/install.sh` | the `bd` lifecycle guard at `/usr/local/bin/bd` | NOTHING — hand-run; a gap |
 | `dev-tooling/install-ci-fabro.sh` | a pinned `fabro` inside the CI runner | the committed CI workflow; no fleet host |
-| `orchestrator-image/services/reconcile-runs/install.sh` | the `reconcile-runs` root system timer | NOTHING — hand-run; a gap |
+| `orchestrator-image/services/reconcile-runs/install.sh` | the `reconcile-runs` root system timer | the `livespec-dev-tooling` ansible role `reconcile_runs` (`ansible/dev-host.yml`, tag `reconcile_runs`) renders the committed units from the workspace checkout; a hand-run `install.sh` fights it |
 | `orchestrator-image/services/work-supply/install.sh` | the `work-supply@` root system timer, per tenant | NOTHING — hand-run; a gap |
 
 Measured 2026-10-20: no role or play in `livespec-dev-tooling` `ansible/` — the
 tree that provisions the legacy Ubuntu fleet, `vps` and `hp-xubuntu` included —
-names `bd-guard`, `reconcile-runs` or `work-supply`. So for those three there is
+names `bd-guard`, `reconcile-runs` or `work-supply`. `reconcile-runs` has since
+gained one (corrected 2026-11-17, see its section below), so the next two
+sentences hold only for `bd-guard` and `work-supply`: for those two there is
 no apply path and, per rule 5, no drift report can exist either: a host no
 playbook covers is invisible to both `just ansible-apply` and
 `just ansible-drift`, and an empty report about such a host means nothing.
@@ -71,7 +73,7 @@ updates a file under `.github/workflows/`: it leaves them unchanged and reports
 that the workflow change routes to the attended host session
 (`.ai/git-pr-and-release-mechanics.md`).
 
-### `orchestrator-image/services/reconcile-runs/install.sh` — nothing deploys it
+### `orchestrator-image/services/reconcile-runs/install.sh` — the `reconcile_runs` role deploys it
 
 Writes the committed `reconcile-runs.service` and `reconcile-runs.timer` text
 into `/etc/systemd/system` (overridable via `UNIT_DIR`) and runs `systemctl
@@ -80,10 +82,19 @@ timer. It reconciles every declared factory's non-terminal run inventory against
 the ledger on the interval the timer carries, which is what closes the window a
 drained dispatch queue leaves open.
 
-Its README states it outright: "Installing it on a host is a separate operator
-action; nothing in this repository installs it" — `sudo ./install.sh --repo
-~/workspace/livespec-orchestrator-beads-fabro`. The unit TEXT is committed, so
-rule 3's layer already exists in git; what is missing is the applier.
+Its README still says "Installing it on a host is a separate operator action;
+nothing in this repository installs it", and that is true of THIS repository. The
+applier lives in `livespec-dev-tooling`: the `reconcile_runs` ansible role
+(`ansible/dev-host.yml`, tag `reconcile_runs`; livespec-dev-tooling-oxwre7). On a
+host it manages, `/etc/systemd/system/reconcile-runs.timer` is headed "Managed by
+livespec-dev-tooling role reconcile_runs" and is rendered from the committed unit
+in the workspace checkout (measured 2026-11-17 by `legacy-dispatcher-agent` with
+`systemctl cat`). So a change to the committed unit reaches such a host through
+the role's play, and a hand-run `sudo ./install.sh --repo
+~/workspace/livespec-orchestrator-beads-fabro` would fight the role rather than
+apply the change. Until the role has been applied, the host keeps the old text:
+the 10 min to 2 min `OnUnitInactiveSec` change merged in #5439 is read back with
+`systemctl cat reconcile-runs.timer`.
 
 ### `orchestrator-image/services/work-supply/install.sh` — nothing deploys it
 
@@ -120,7 +131,7 @@ one file. Then retire the shell installer per rule 4: delete it and cite its
 pre-deletion commit, because two layers that both look like the installer for the
 same file will be edited in the wrong order.
 
-Until a gap is closed, verification of those three is per-service and local, not
+Until a gap is closed, verification of the services it still covers is per-service and local, not
 a drift report:
 
 ```bash
