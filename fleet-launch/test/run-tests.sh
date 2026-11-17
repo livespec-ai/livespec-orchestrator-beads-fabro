@@ -2464,6 +2464,33 @@ TERM_SED
     term_during_hold_substitution "$RESUME_LAUNCHER" resume
     unset STUB_TERM_SUBSTITUTION_GATE STUB_TERM_SUBSTITUTION_SED_DELAY_S
 
+    # wait_for_signal_exit <pid> <signal> <log>: a directly delivered INT or HUP
+    # is normally handled as soon as the launcher returns from its short
+    # hold-poll sleep. Under CPU saturation, however, one delivery can coincide
+    # with that child exiting and be swallowed. Retry the same signal at most
+    # once a second until cleanup starts, then leave that cleanup alone: another
+    # HUP or INT while its EXIT trap writes the terminal record can interrupt
+    # the record itself. A launcher that still does not exit is stopped and
+    # reported as a failed assertion, never mistaken for a signal attribution.
+    SIGNAL_EXIT_GRACE_S=${SIGNAL_EXIT_GRACE_S:-5}
+    wait_for_signal_exit() {
+        local pid="$1" sig="$2" log="$3" deadline retry_due
+        deadline=$(( $(date +%s) + SIGNAL_EXIT_GRACE_S ))
+        retry_due=$(date +%s)
+        while kill -0 "$pid" 2>/dev/null && [ "$(date +%s)" -lt "$deadline" ]; do
+            if ! grep -qF 'terminal:' "$log" && [ "$(date +%s)" -ge "$retry_due" ]; then
+                kill -"$sig" "$pid" 2>/dev/null || true
+                retry_due=$(( $(date +%s) + 1 ))
+            fi
+            sleep "$HARNESS_POLL_S"
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+            stop_launcher "$pid"
+            return 1
+        fi
+        return 0
+    }
+
     # signal_during_hold <launcher> <label> <signal> <rc> <expected cause>:
     # an INT or HUP that lands in the repository-hold wait must be recorded as
     # that signal, not as the TERM description the wait loop preloads.
@@ -2474,10 +2501,16 @@ TERM_SED
         set_hold "$TENANT_HOLD" "reason: signal-$sig"
         # A background job of a non-interactive shell starts with INT ignored,
         # and a script cannot take that back; restore the default first.  The
-        # launcher gets its own process group so the signal reaches its waiting
-        # child as a terminal's INT or HUP would; bash defers a signal until a
-        # foreground child that the signal did not touch has exited.
-        PATH="$STUB/rm-probe:$PATH" ONLY_GMK=1 TICKET_NS=7 FLEET_LAUNCH_MAX_WAIT_S=5 python3 -c 'import os, signal, sys
+        # launcher gets its own process group, but the signal goes to its shell
+        # directly (wait_for_signal_exit): under CPU saturation a process-group
+        # INT or HUP can be consumed by its short-lived sleep before Bash runs
+        # its attribution trap.  The shell owns the trap and reaps that child.
+        # This probe always ends by delivering $sig after wait_for_line's
+        # five-second observation bound.  Give the launcher a test-only one-day
+        # give-up budget, rather than guessing at a sufficiently long start-up
+        # window, so the no-slot give-up (rc 75) cannot beat the signal to the
+        # repository-hold wait on a loaded host.
+        PATH="$STUB/rm-probe:$PATH" ONLY_GMK=1 TICKET_NS=7 FLEET_LAUNCH_MAX_WAIT_S=86400 python3 -c 'import os, signal, sys
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 os.setsid()
 os.execv(sys.argv[1], sys.argv[1:])' "$launcher" bd-ib-term > "$STUB_RM_PROBE_LOG_SOURCE" 2>&1 &
@@ -2488,7 +2521,12 @@ os.execv(sys.argv[1], sys.argv[1:])' "$launcher" bd-ib-term > "$STUB_RM_PROBE_LO
             wait "$sig_pid" 2>/dev/null
             return 0
         fi
-        kill -"$sig" -- "-$sig_pid" 2>/dev/null
+        if ! wait_for_signal_exit "$sig_pid" "$sig" "$STUB_RM_PROBE_LOG_SOURCE"; then
+            wait "$sig_pid" 2>/dev/null
+            fail "$label did not exit after bounded $sig delivery during the repository-hold wait"
+            tail -n 4 "$STUB_RM_PROBE_LOG_SOURCE" >&2
+            return 0
+        fi
         wait "$sig_pid"
         sig_rc=$?
         if [ "$sig_rc" = "$want_rc" ] \
