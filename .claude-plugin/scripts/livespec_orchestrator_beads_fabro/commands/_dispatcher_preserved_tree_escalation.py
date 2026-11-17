@@ -48,8 +48,14 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
     JournalWriter,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import ShellCommandRunner
+from livespec_orchestrator_beads_fabro.commands._dispatcher_needs_human_ref_work import (
+    needs_human_ref_holds_work,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import store_config
 from livespec_orchestrator_beads_fabro.commands._dispatcher_preserved_tree import publish_run_tree
+from livespec_orchestrator_beads_fabro.commands._dispatcher_preserved_tree_base import (
+    run_base_commit,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_preserved_tree_disposition import (
     PreservedTreeDisposition,
     Publication,
@@ -172,6 +178,15 @@ def preserve_checkpoint_failed_tree(
             factory=str(getattr(target, "name", server_url)),
             failure_text=_failure_text(outcome=outcome),
             event_records=_event_records(port=port, run_id=run_id),
+            failed_ending=outcome.status == "failed",
+            needs_human_ref_on_origin=needs_human_ref_holds_work(
+                runner=runner,
+                repo=repo,
+                dispatch_id=_dispatch_id(records=inputs.journal_records, run_id=run_id),
+                base_commit=run_base_commit(records=inputs.journal_records, work_item_id=item.id),
+            )
+            if outcome.status == "failed"
+            else None,
         ),
         journal_records=inputs.journal_records,
         publish=_publication(
@@ -183,6 +198,16 @@ def preserve_checkpoint_failed_tree(
         ),
     )
     _record(repo=repo, item=item, journal=journal, disposition=disposition)
+
+
+def _dispatch_id(*, records: tuple[dict[str, object], ...], run_id: str) -> str | None:
+    """The dispatch id the run stamp journaled for this run, or None when absent."""
+    for record in reversed(records):
+        if record.get("stage") == "dispatch-run-stamp" and record.get("run_id") == run_id:
+            found = record.get("dispatch_id")
+            if isinstance(found, str) and found:
+                return found
+    return None
 
 
 def _failure_text(*, outcome: DispatchOutcome) -> str:

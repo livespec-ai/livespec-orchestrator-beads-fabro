@@ -104,6 +104,8 @@ class TerminatedRun:
     factory: str
     failure_text: str
     event_records: tuple[dict[str, object], ...] | None
+    failed_ending: bool = False
+    needs_human_ref_on_origin: bool | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -134,6 +136,8 @@ def dispose_preserved_tree(
         records=None
         if run.event_records is None
         else cast("tuple[dict[str, Any], ...]", run.event_records),
+        failed_ending=run.failed_ending,
+        needs_human_ref_on_origin=run.needs_human_ref_on_origin,
     )
     if not trigger.preserves:
         return PreservedTreeDisposition(
