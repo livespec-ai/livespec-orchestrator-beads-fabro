@@ -245,6 +245,8 @@ Two host-only causes have produced such a red:
 launching worktree. Each directory keeps `head`, `command`, `branch`,
 `worktree`, `exit_code`, `started_at` and the full `output.log`.
 
+The committed `fleet-launch/` launchers (`dispatch-dual.sh`, `resume-capped.sh`) detach themselves when started under the gate runner: they re-exec under `setsid nohup` with `LIVESPEC_GATE_RUN_PROGRESS_STAMP` removed, print `detached pid <pid>, log file <path>` and exit 0, so the gate runner's 900-second stall cap does not kill the launcher with its drive (`FLEET_LAUNCH_ALLOW_UNDER_GATE=1` runs in place instead).
+
 `output.log` contains bytes that make grep treat it as binary, and on this
 host `grep` is aliased to `rg`, which then prints nothing, so a failure hunt
 reads as "no failures". Use `/usr/bin/grep -a`, or strip ANSI first. Measured

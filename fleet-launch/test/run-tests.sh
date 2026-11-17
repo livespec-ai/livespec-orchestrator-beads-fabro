@@ -46,9 +46,9 @@ fi
 
 HARNESS_SLICE=${1:-all}
 case "$HARNESS_SLICE" in
-    all|scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|launcher-reexec|parity) ;;
+    all|scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|launcher-reexec|parity|gate-detach) ;;
     *)
-        echo "usage: run-tests.sh [scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|launcher-reexec|parity]" >&2
+        echo "usage: run-tests.sh [scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|launcher-reexec|parity|gate-detach]" >&2
         exit 2
         ;;
 esac
@@ -3885,6 +3885,76 @@ else
     fail "control: the undeclared case did not run under the bare family wrapper: $bare"
 fi
 
+fi
+
+if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = gate-detach ]; then
+echo "--- 49. a launcher started under the gate runner detaches itself out of the runner's stall cap, and only then"
+# just gate-start ends the gate's whole process group after 900 s without output (dev-tooling/gate-run.sh),
+# which kills a launcher and its drive while the factory run goes on. The runner exports
+# LIVESPEC_GATE_RUN_PROGRESS_STAMP into everything it runs; that is the marker the launcher reads.
+pid_live() { local state; state=$(sed 's/^.*) //' "/proc/$1/stat" 2>/dev/null | cut -c1); [ -n "$state" ] && [ "$state" != Z ]; }
+wait_pid_gone() { local waited=0; while pid_live "$1" && [ "$waited" -lt 600 ]; do sleep 0.1; waited=$((waited + 1)); done; }
+detached_pid_of() { printf '%s\n' "$1" | sed -n 's/.*detached pid \([0-9][0-9]*\).*/\1/p'; }
+detached_log_of() { printf '%s\n' "$1" | sed -n 's/.*log file \(.*\)$/\1/p'; }
+
+new_case gate-detach-dispatch
+open_boards
+export FLEET_LAUNCH_MAX_WAIT_S=120
+parent_out=$(LIVESPEC_GATE_RUN_PROGRESS_STAMP="$CASE_DIR/progress-stamp" ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-gatedetach 2>&1)
+parent_rc=$?
+detached_pid=$(detached_pid_of "$parent_out")
+detached_log=$(detached_log_of "$parent_out")
+[ -n "$detached_pid" ] && wait_pid_gone "$detached_pid"
+if [ "$parent_rc" = 0 ] && [ -n "$detached_pid" ] && [ -f "$detached_log" ] \
+    && grep -qF "detached launcher: pid=$detached_pid session=$detached_pid" "$detached_log" \
+    && grep -qF "gate-stamp=absent" "$detached_log" \
+    && [ "$(drive_log_items)" = "bd-ib-gatedetach" ]; then
+    pass "dispatch-dual.sh under the gate runner returns 0 naming a detached pid and log; the child leads its own session, has no gate stamp, and dispatched the item once"
+else
+    fail "dispatch-dual.sh under the gate runner did not detach cleanly (rc=$parent_rc, pid='$detached_pid', log='$detached_log', dispatches: $(drive_log_items))"
+    printf '%s\n' "$parent_out" | tail -5 >&2
+    [ -f "$detached_log" ] && tail -8 "$detached_log" >&2
+fi
+
+new_case gate-detach-resume
+open_boards
+export FLEET_LAUNCH_MAX_WAIT_S=120
+parent_out=$(LIVESPEC_GATE_RUN_PROGRESS_STAMP="$CASE_DIR/progress-stamp" ONLY_GMK=1 TICKET_NS=100 "$RESUME_LAUNCHER" bd-ib-gatedetach-resume 2>&1)
+parent_rc=$?
+detached_pid=$(detached_pid_of "$parent_out")
+detached_log=$(detached_log_of "$parent_out")
+[ -n "$detached_pid" ] && wait_pid_gone "$detached_pid"
+if [ "$parent_rc" = 0 ] && [ -n "$detached_pid" ] && [ -f "$detached_log" ] \
+    && grep -qF "detached launcher: pid=$detached_pid session=$detached_pid" "$detached_log" \
+    && grep -qF "gate-stamp=absent" "$detached_log"; then
+    pass "resume-capped.sh under the gate runner detaches the same way: returns 0, the child leads its own session and has no gate stamp"
+else
+    fail "resume-capped.sh under the gate runner did not detach cleanly (rc=$parent_rc, pid='$detached_pid', log='$detached_log')"
+    printf '%s\n' "$parent_out" | tail -5 >&2
+    [ -f "$detached_log" ] && tail -8 "$detached_log" >&2
+fi
+
+new_case gate-detach-optout
+open_boards
+export FLEET_LAUNCH_MAX_WAIT_S=120
+parent_out=$(LIVESPEC_GATE_RUN_PROGRESS_STAMP="$CASE_DIR/progress-stamp" FLEET_LAUNCH_ALLOW_UNDER_GATE=1 ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-gateoptout 2>&1)
+parent_rc=$?
+if [ "$parent_rc" = 0 ] && [ -z "$(detached_pid_of "$parent_out")" ] && [ "$(drive_log_items)" = "bd-ib-gateoptout" ]; then
+    pass "control: FLEET_LAUNCH_ALLOW_UNDER_GATE=1 under the gate runner runs in place and dispatches without detaching"
+else
+    fail "control: the opt-out detached or did not dispatch (rc=$parent_rc, dispatches: $(drive_log_items))"
+fi
+
+new_case gate-detach-plain
+open_boards
+export FLEET_LAUNCH_MAX_WAIT_S=120
+parent_out=$(ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-gateplain 2>&1)
+parent_rc=$?
+if [ "$parent_rc" = 0 ] && [ -z "$(detached_pid_of "$parent_out")" ] && [ "$(drive_log_items)" = "bd-ib-gateplain" ]; then
+    pass "control: with no gate stamp the launcher runs in place exactly as before and dispatches"
+else
+    fail "control: a launcher with no gate stamp detached or did not dispatch (rc=$parent_rc, dispatches: $(drive_log_items))"
+fi
 fi
 
 echo
