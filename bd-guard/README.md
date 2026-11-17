@@ -396,9 +396,10 @@ is untouched. Once the command is sent it is NEVER re-run locally: ssh's status
 
 One exception: when the master refuses the session (MaxSessions, ssh status 255
 with `Session open refused by peer` or `mux_client_request_session: session
-request failed` on ssh's own stderr) the remote command never started, so the
-call runs on the local `bd-real` and is logged. ssh's stderr is still passed to
-the caller. This fallback is taken only when stdin is a terminal or `/dev/null`;
+request failed` in ssh's OWN diagnostics) the remote command never started, so the
+call runs on the local `bd-real` and is logged. ssh runs with `-E <private log>`,
+so only that log is searched and the remote command's stdout/stderr are never
+inspected; when not falling back the log is appended to the caller's stderr. This fallback is taken only when stdin is a terminal or `/dev/null`;
 with a piped stdin ssh may have consumed part of it, so the call exits 255 as
 above and is not retried.
 Tests: `bash bd-guard/test/test-bd-remote.sh`.

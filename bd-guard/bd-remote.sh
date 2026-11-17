@@ -120,38 +120,31 @@ fi
 # retry.
 #
 # Exception: the master's MaxSessions limit refuses the session BEFORE the remote
-# command starts (ssh exits 255 with `Session open refused by peer` or
-# `mux_client_request_session: session request failed` on its own stderr), so a
-# local run is safe. ssh's stderr is captured through a fifo while still being
-# passed straight to the caller's stderr. Only those two exact phrases count, and
-# only when stdin is a terminal or /dev/null: with a piped stdin ssh may already
-# have consumed part of it, so then we do NOT fall back.
-_cap=""
-_tmp=$(mktemp -d 2>/dev/null) || _tmp=""
-if [ -n "$_tmp" ] && mkfifo "$_tmp/err" 2>/dev/null; then
-    _cap="$_tmp/cap"
-    : >"$_cap"
-    tee "$_cap" <"$_tmp/err" >&2 &
-    _teepid=$!
-    ssh -S "$CONTROL_SOCKET" -o ControlMaster=no -o BatchMode=yes -o ConnectTimeout=5 \
-        -T "$SSH_TARGET" "in $_repo bd $_b64" 2>"$_tmp/err"
-    _rc=$?
-    wait "$_teepid" 2>/dev/null || :
-else
-    ssh -S "$CONTROL_SOCKET" -o ControlMaster=no -o BatchMode=yes -o ConnectTimeout=5 \
-        -T "$SSH_TARGET" "in $_repo bd $_b64"
-    _rc=$?
+# command starts (ssh exits 255 and writes `Session open refused by peer` or
+# `mux_client_request_session: session request failed` as ITS OWN diagnostic), so
+# a local run is safe. ssh's own diagnostics are sent to a private log with
+# `-E`, so they never mix with the remote command's stdout/stderr, which pass
+# untouched to the caller: only the log is searched, never the remote output. The
+# fallback is taken only when stdin is a terminal or /dev/null; with a piped stdin
+# ssh may have consumed part of it, so then we do NOT fall back. When not falling
+# back, the log's content is appended to the caller's stderr.
+_sshlog=$(mktemp 2>/dev/null) || _sshlog=/dev/null
+trap 'rm -f "$_sshlog"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+ssh -E "$_sshlog" -S "$CONTROL_SOCKET" -o ControlMaster=no -o BatchMode=yes -o ConnectTimeout=5 \
+    -T "$SSH_TARGET" "in $_repo bd $_b64"
+_rc=$?
+if [ "$_rc" -eq 255 ] && [ "$_sshlog" != /dev/null ] && { [ -t 0 ] || [ /dev/stdin -ef /dev/null ]; } \
+    && grep -qE 'Session open refused by peer|mux_client_request_session: session request failed' "$_sshlog" 2>/dev/null; then
+    rm -f "$_sshlog"
+    _msg="livespec bd-remote: ssh session refused (MaxSessions) before the command started; falling back to local bd"
+    printf '%s\n' "$_msg" >&2
+    { mkdir -p "$(dirname "$LOG")" && printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_msg" >>"$LOG"; } 2>/dev/null || :
+    _local "$@"
 fi
+[ -s "$_sshlog" ] && [ "$_sshlog" != /dev/null ] && cat "$_sshlog" >&2
 if [ "$_rc" -eq 255 ]; then
-    if [ -n "$_cap" ] && { [ -t 0 ] || [ /dev/stdin -ef /dev/null ]; } \
-        && grep -qE 'Session open refused by peer|mux_client_request_session: session request failed' "$_cap" 2>/dev/null; then
-        rm -rf "$_tmp"
-        _msg="livespec bd-remote: ssh session refused (MaxSessions) before the command started; falling back to local bd"
-        printf '%s\n' "$_msg" >&2
-        { mkdir -p "$(dirname "$LOG")" && printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_msg" >>"$LOG"; } 2>/dev/null || :
-        _local "$@"
-    fi
     printf '%s\n' "bd-remote: connection to the VPS failed after the command was sent; not retried" >&2
 fi
-[ -n "$_tmp" ] && rm -rf "$_tmp"
 exit "$_rc"

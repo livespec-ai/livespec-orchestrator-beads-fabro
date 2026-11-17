@@ -30,7 +30,13 @@ case " $* " in
         exit "${STUB_CHECK_EXIT:-0}" ;;
 esac
 printf '%s\n' "$@" >"$STUB_SSH_ARGS"
+# honour -E <file>: ssh's OWN diagnostics go there and nowhere else
+elog=""; prev=""
+for x in "$@"; do [ "$prev" = "-E" ] && elog="$x"; prev="$x"; done
+[ -n "$elog" ] && [ -n "${STUB_SSH_OWN:-}" ] && printf '%s\n' "$STUB_SSH_OWN" >>"$elog"
 [ -n "${STUB_SSH_ERR:-}" ] && printf '%s\n' "$STUB_SSH_ERR" >&2
+[ -n "$elog" ] && echo "$elog" >"${STUB_SSH_ELOGPATH:-/dev/null}"
+[ -n "${STUB_SSH_SLEEP:-}" ] && sleep "$STUB_SSH_SLEEP"
 if [ -n "${STUB_SSH_EXIT:-}" ]; then exit "$STUB_SSH_EXIT"; fi
 for last in "$@"; do :; done
 b64=${last##* }
@@ -85,7 +91,8 @@ REPO="${WORK}/repos/demo-repo"
 # 1. remote path: exact ssh argv and decodable argv.
 run "$REPO" show demo-1 --json
 if ran_remote && ! ran_local && [ "$OUT" = "remote-ran" ] && [ "$RC" -eq 0 ] \
-    && [ "$(tr '\n' ' ' <"$STUB_SSH_ARGS")" = "-S ${WORK}/ctl.sock -o ControlMaster=no -o BatchMode=yes -o ConnectTimeout=5 -T vps-ctl in demo-repo bd $(printf 'show\0demo-1\0--json' | base64 | tr -d '\n') " ]; then
+    && [ "$(head -n1 "$STUB_SSH_ARGS")" = "-E" ] \
+    && [ "$(tail -n +3 "$STUB_SSH_ARGS" | tr '\n' ' ')" = "-S ${WORK}/ctl.sock -o ControlMaster=no -o BatchMode=yes -o ConnectTimeout=5 -T vps-ctl in demo-repo bd $(printf 'show\0demo-1\0--json' | base64 | tr -d '\n') " ]; then
     pass "remote: sends exactly 'in demo-repo bd <b64>' over the control socket"
 else
     fail "remote exact ssh argv ($(tr '\n' '|' <"$STUB_SSH_ARGS" 2>/dev/null))"
@@ -162,29 +169,66 @@ else
     fail "post-send 255 (rc=$RC err=$ERR local=$(ran_local && echo y || echo n))"
 fi
 
-# 8c. MaxSessions refusal (ssh 255 + its own phrase): safe fallback only when
-# stdin is /dev/null or a tty; logged. Any other 255, or a piped stdin: no local run.
-for phrase in "Session open refused by peer" "mux_client_request_session: session request failed: Session open refused by peer"; do
-    rm -f "$LIVESPEC_BD_REMOTE_LOG"
-    OUT=$(cd "$REPO" && STUB_SSH_EXIT=255 STUB_SSH_ERR="$phrase" "$GUARD" show demo-1 2>"${WORK}/err" </dev/null); RC=$?
-    ERR=$(cat "${WORK}/err")
-    if [ "$OUT" = "local-ran" ] && [ "$RC" -eq 0 ] && grep -q 'session refused' <<<"$ERR" \
-        && grep -q 'session refused' "$LIVESPEC_BD_REMOTE_LOG" && grep -qF "$phrase" <<<"$ERR"; then :; else fail "refused-session fallback ($phrase) rc=$RC err=$ERR"; fi
-done
-pass "session refused + 255 + stdin /dev/null: ssh stderr passed through, local bd runs, logged"
+# 8c. MaxSessions refusal: ssh's OWN diagnostics go to the -E log; only that log
+# is searched. Remote-origin output can never trigger a local re-run of a write.
+PH="mux_client_request_session: session request failed: Session open refused by peer"
+# (a) phrase on the remote-origin streams only, nothing in the -E file: no local run.
 rm -f "$STUB_REAL_ARGS"
-OUT=$(cd "$REPO" && STUB_SSH_EXIT=255 STUB_SSH_ERR="Connection reset by peer" "$GUARD" show demo-1 2>"${WORK}/err" </dev/null); RC=$?
-if [ "$RC" -eq 255 ] && ! ran_local && grep -q 'not retried' "${WORK}/err"; then
-    pass "any other 255: exit 255, error line, no local run"
+OUT=$(cd "$REPO" && STUB_SSH_EXIT=255 STUB_SSH_ERR="Session open refused by peer" "$GUARD" comment demo-1 x 2>"${WORK}/err" </dev/null); RC=$?
+if [ "$RC" -eq 255 ] && ! ran_local && ! grep -q 'LOCAL' <<<"$OUT" && grep -q 'not retried' "${WORK}/err"; then
+    pass "(a) phrase only on the remote-origin stream: no local run, exit 255"
 else
-    fail "other 255 (rc=$RC)"
+    fail "(a) remote-origin phrase (rc=$RC out=$OUT)"
 fi
+# (b) phrase only in the -E file, stdin /dev/null: local run, logged.
+for phrase in "Session open refused by peer" "$PH"; do
+    rm -f "$LIVESPEC_BD_REMOTE_LOG" "$STUB_REAL_ARGS"
+    OUT=$(cd "$REPO" && STUB_SSH_EXIT=255 STUB_SSH_OWN="$phrase" "$GUARD" show demo-1 2>"${WORK}/err" </dev/null); RC=$?
+    if [ "$OUT" = "local-ran" ] && [ "$RC" -eq 0 ] && grep -q 'session refused' "${WORK}/err" \
+        && grep -q 'session refused' "$LIVESPEC_BD_REMOTE_LOG"; then :; else fail "(b) -E phrase fallback ($phrase) rc=$RC"; fi
+done
+pass "(b) phrase in the -E file, stdin /dev/null: local bd runs and is logged"
+# (c) piped stdin: no local run.
 rm -f "$STUB_REAL_ARGS"
-OUT=$(cd "$REPO" && printf 'body' | STUB_SSH_EXIT=255 STUB_SSH_ERR="Session open refused by peer" "$GUARD" show demo-1 2>"${WORK}/err"); RC=$?
+OUT=$(cd "$REPO" && printf 'body' | STUB_SSH_EXIT=255 STUB_SSH_OWN="Session open refused by peer" "$GUARD" show demo-1 2>"${WORK}/err"); RC=$?
 if [ "$RC" -eq 255 ] && ! ran_local && grep -q 'not retried' "${WORK}/err"; then
-    pass "session refused with piped stdin: no local run, exit 255"
+    pass "(c) phrase in the -E file with piped stdin: no local run, exit 255"
 else
-    fail "refused with piped stdin (rc=$RC)"
+    fail "(c) piped stdin (rc=$RC)"
+fi
+# (d) other 255 with an unrelated -E line: shown on stderr, no local run.
+rm -f "$STUB_REAL_ARGS"
+OUT=$(cd "$REPO" && STUB_SSH_EXIT=255 STUB_SSH_OWN="ssh: unrelated transport error" "$GUARD" show demo-1 2>"${WORK}/err" </dev/null); RC=$?
+if [ "$RC" -eq 255 ] && ! ran_local && grep -q 'unrelated transport error' "${WORK}/err" && grep -q 'not retried' "${WORK}/err"; then
+    pass "(d) other 255: the -E line is shown on stderr, exit 255, no local run"
+else
+    fail "(d) other 255 (rc=$RC)"
+fi
+# (e) exit 0 and exit 1 with the phrase in the -E file: status as is, no fallback.
+for st in 0 1; do
+    rm -f "$STUB_REAL_ARGS"
+    OUT=$(cd "$REPO" && STUB_SSH_REMOTE_RC=$st STUB_SSH_OWN="Session open refused by peer" "$GUARD" show demo-1 2>/dev/null </dev/null); RC=$?
+    if [ "$RC" -eq "$st" ] && ! ran_local; then :; else fail "(e) status $st (rc=$RC)"; fi
+done
+pass "(e) exit 0 and 1 with the phrase in the -E file: status returned as is, no fallback"
+# (f) the temp log is removed on normal exit and on SIGTERM.
+ELOGP="${WORK}/elogpath"; rm -f "$ELOGP"
+(cd "$REPO" && STUB_SSH_ELOGPATH="$ELOGP" "$GUARD" show demo-1 >/dev/null 2>&1 </dev/null)
+if [ -s "$ELOGP" ] && [ ! -e "$(cat "$ELOGP")" ]; then
+    pass "(f) the -E temp log is removed on normal exit"
+else
+    fail "(f) temp log left behind on normal exit"
+fi
+rm -f "$ELOGP"
+(cd "$REPO" && STUB_SSH_SLEEP=2 STUB_SSH_ELOGPATH="$ELOGP" exec "$GUARD" show demo-1 >/dev/null 2>&1 </dev/null) &
+GPID=$!
+for _ in $(seq 1 100); do [ -s "$ELOGP" ] && break; sleep 0.05; done
+kill -TERM "$GPID" 2>/dev/null
+wait "$GPID" 2>/dev/null
+if [ -s "$ELOGP" ] && [ ! -e "$(cat "$ELOGP")" ]; then
+    pass "(f) the -E temp log is removed on SIGTERM"
+else
+    fail "(f) temp log left behind after SIGTERM"
 fi
 
 # 9. a remote nonzero is returned and NOT retried locally.
