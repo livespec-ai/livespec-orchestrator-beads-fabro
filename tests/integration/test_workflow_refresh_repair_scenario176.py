@@ -407,6 +407,9 @@ def _run_publish_draft(
     _ = (plugins / RECORD_FILE_PROGRAM_FILENAME).write_text(
         record_file_program_source(), encoding="utf-8"
     )
+    publication_push = plugins / PUBLICATION_PUSH_PROGRAM_FILENAME
+    _ = publication_push.write_text(publication_push_program_source(), encoding="utf-8")
+    publication_push.chmod(0o700)
     push_refusal_path = ""
     if push_refusal is not None:
         push_refusal_path = f"{_push_refusal_bin(world=world, refusal=push_refusal)}{os.pathsep}"
@@ -765,6 +768,9 @@ def test_a_clean_draft_refresh_reinstalls_the_refreshed_tree_s_conformance_hooks
     _ = (plugins / RECORD_FILE_PROGRAM_FILENAME).write_text(
         record_file_program_source(), encoding="utf-8"
     )
+    publication_push = plugins / PUBLICATION_PUSH_PROGRAM_FILENAME
+    _ = publication_push.write_text(publication_push_program_source(), encoding="utf-8")
+    publication_push.chmod(0o700)
 
     result = subprocess.run(
         [
@@ -1758,24 +1764,19 @@ def test_publish_draft_still_refuses_a_foreign_divergent_tip_after_a_repair(
     assert world.head() == repaired.repaired_head
 
 
-def test_a_repaired_visit_pushes_a_plain_fast_forward_when_it_owes_no_rewrite(
+def test_a_repaired_visit_pushes_a_lineage_gated_fast_forward_when_it_owes_no_rewrite(
     tmp_path: Path,
 ) -> None:
-    """The two unchanged arms of the repaired visit, proved by WITHHOLDING the helper.
+    """The two unchanged arms still publish through the lineage-gated helper.
 
-    The clause keeps both pre-v146 arms: an absent remote tip and a tip that is
-    an ancestor of the repaired head are each published by a plain
-    fast-forward. "A plain fast-forward rather than a lease" is otherwise hard to
-    observe -- both arms move the ref to the same sha -- so the discriminator is
-    the exact-head push helper, WITHHELD from the sandbox plugins root. A build
-    that took the lease route on either arm fails closed naming the absent
-    helper, which is an assertion the moved ref cannot make on its own.
+    An absent remote tip and a tip that is an ancestor of the repaired head do
+    not need an expected-object lease. They still invoke the same materialized
+    helper, so first publication cannot bypass TDD-evidence validation.
 
-    The two arms are one case because each is the other's control for that
-    discriminator: the absent-tip arm never reaches the ancestry test at all, so
-    on its own it would pass against a build whose ancestry arm leased.
+    The two arms remain one case because the absent-tip arm never reaches the
+    ancestry test while the ancestor-tip arm does.
     """
-    absent = _repaired_run(root=tmp_path / "absent-tip", push_program=False)
+    absent = _repaired_run(root=tmp_path / "absent-tip", push_program=True)
     _ = _git("push", "origin", "--delete", f"refs/heads/{_BRANCH}", cwd=absent.world.clone)
     assert absent.world.remote_head(ref=_BRANCH) == ""
 
@@ -1786,7 +1787,7 @@ def test_a_repaired_visit_pushes_a_plain_fast_forward_when_it_owes_no_rewrite(
     assert "LIVESPEC_PUBLISH_DRAFT_PUSH_PROGRAM_ABSENT" not in created.stderr
     assert absent.world.remote_head(ref=_BRANCH) == absent.repaired_head
 
-    ancestor = _repaired_run(root=tmp_path / "ancestor-tip", push_program=False)
+    ancestor = _repaired_run(root=tmp_path / "ancestor-tip", push_program=True)
     _ = _git(
         "push",
         "--force",
