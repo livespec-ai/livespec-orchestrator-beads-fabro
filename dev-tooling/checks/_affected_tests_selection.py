@@ -177,8 +177,29 @@ def select(*, root: Path, changed: list[str]) -> Selection | Unscoped:
     )
 
 
+def _coverage_report(*, root: Path, data_file: str, measured: tuple[str, ...]) -> int:
+    """Report whether every measured module has complete coverage in `data_file`."""
+    if not measured:
+        return 0
+    return subprocess.run(
+        [
+            "uv",
+            "run",
+            "coverage",
+            "report",
+            "--rcfile=pyproject.toml",
+            f"--data-file={data_file}",
+            f"--include={','.join(measured)}",
+            f"--fail-under={_COVERAGE_FLOOR}",
+            "--show-missing",
+        ],
+        cwd=root,
+        check=False,
+    ).returncode
+
+
 def _run_gate(*, root: Path, selection: Selection) -> int:
-    """Run the selected tests under coverage, then hold each measured module to 100%."""
+    """Run selected tests, confirming a coverage miss against the whole test suite."""
     data_dir = tempfile.mkdtemp(prefix="livespec-affected-tests-")
     data_file = str(Path(data_dir) / "coverage.dat")
     env = {k: v for k, v in os.environ.items() if not k.startswith("COV_CORE_")}
@@ -197,22 +218,23 @@ def _run_gate(*, root: Path, selection: Selection) -> int:
         env=env,
         check=False,
     ).returncode
-    report = [
-        "uv",
-        "run",
-        "coverage",
-        "report",
-        "--rcfile=pyproject.toml",
-        f"--data-file={data_file}",
-        f"--include={','.join(selection.measured)}",
-        f"--fail-under={_COVERAGE_FLOOR}",
-        "--show-missing",
-    ]
-    coverage_status = (
-        subprocess.run(report, cwd=root, check=False).returncode if selection.measured else 0
+    coverage_status = _coverage_report(root=root, data_file=data_file, measured=selection.measured)
+    if pytest_status or not coverage_status:
+        shutil.rmtree(data_dir, ignore_errors=True)
+        return max(pytest_status, coverage_status)
+    # A static scan can miss a dynamic importer. Its scoped coverage result is
+    # therefore never final: retry all tests before refusing solely for coverage.
+    _ = subprocess.run(
+        ["uv", "run", "pytest", "-n", workers, *measuring, "--cov-fail-under=0"],
+        cwd=root,
+        env=env,
+        check=False,
+    ).returncode
+    whole_suite_coverage_status = _coverage_report(
+        root=root, data_file=data_file, measured=selection.measured
     )
     shutil.rmtree(data_dir, ignore_errors=True)
-    return max(pytest_status, coverage_status)
+    return whole_suite_coverage_status
 
 
 def main() -> int:

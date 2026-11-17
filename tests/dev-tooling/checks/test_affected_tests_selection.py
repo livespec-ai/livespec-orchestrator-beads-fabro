@@ -388,6 +388,35 @@ def test_a_failing_test_or_an_uncovered_line_refuses_the_commit(
     assert module.main() == max(pytest_status, coverage_status)
 
 
+def test_an_uncovered_selected_module_is_remeasured_over_the_whole_suite_before_refusal(
+    *, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scoped coverage miss is not final when the whole suite covers the module."""
+    module = _load()
+    root, _ = _committed_repo(tmp_path=tmp_path, monkeypatch=monkeypatch)
+    calls: list[list[str]] = []
+
+    def fake_run(arguments: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(arguments)
+        if arguments == ["bash", "dev-tooling/just-test-nprocs.sh"]:
+            return subprocess.CompletedProcess(arguments, 0, stdout="1\n")
+        coverage_calls = sum("coverage" in call for call in calls)
+        return subprocess.CompletedProcess(arguments, 2 if coverage_calls == 1 else 0)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    status = module._run_gate(  # noqa: SLF001 - this tests the gate's coverage fallback directly.
+        root=root,
+        selection=module.Selection(measured=(f"{_PKG}/a.py",), tests=("tests/pkg/test_direct.py",)),
+    )
+
+    assert status == 0
+    pytest_calls = [call for call in calls if call[:3] == ["uv", "run", "pytest"]]
+    assert len(pytest_calls) == 2
+    assert pytest_calls[0][-1] == "tests/pkg/test_direct.py"
+    assert pytest_calls[1][-1] == "--cov-fail-under=0"
+
+
 def test_a_workflow_only_change_runs_its_tests_without_a_coverage_report(
     *, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
