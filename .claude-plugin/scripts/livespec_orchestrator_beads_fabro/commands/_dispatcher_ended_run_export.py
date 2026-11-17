@@ -30,15 +30,31 @@ from pathlib import Path
 from livespec_orchestrator_beads_fabro.commands._fabro_port import FabroPort
 
 __all__: list[str] = [
+    "EXPORT_CEILING_BYTES",
+    "EXPORT_FREE_SPACE_MULTIPLE",
     "EXPORT_RETENTION_SECONDS",
     "EXPORT_ROOT",
+    "MIN_FREE_BYTES",
+    "MIN_FREE_FRACTION",
+    "DiskPressure",
     "EndedRunExport",
+    "disk_pressure",
     "export_ended_run",
     "prune_expired_exports",
 ]
 
 EXPORT_ROOT = Path("tmp") / "ended-run-exports"
-EXPORT_RETENTION_SECONDS = 30 * 24 * 3600
+# Seven days, measured against the host rather than chosen for comfort: a failed
+# run exports about 0.2 MB per run-minute plus about 4 MB fixed, to a ceiling near
+# 100 MB (n=3 failed runs, no succeeded run measured), and the dispatching
+# host's disk was at 90% with 69 GB free on 2026-11-17.
+EXPORT_RETENTION_SECONDS = 7 * 24 * 3600
+# The measured per-export ceiling. The free-space floor below is a multiple of it,
+# so the floor follows the ceiling instead of being a second number to keep in step.
+EXPORT_CEILING_BYTES = 100 * 1024 * 1024
+EXPORT_FREE_SPACE_MULTIPLE = 20
+MIN_FREE_BYTES = EXPORT_CEILING_BYTES * EXPORT_FREE_SPACE_MULTIPLE
+MIN_FREE_FRACTION = 0.05
 _MANIFEST_NAME = "MANIFEST.json"
 _DUMP_TIMEOUT_SECONDS = 600.0
 _DETAIL_CHARS = 500
@@ -54,6 +70,44 @@ class EndedRunExport:
     detail: str
     total_bytes: int
     sha256: str | None
+
+
+@dataclass(frozen=True, kw_only=True)
+class DiskPressure:
+    """The free-space reading that made the export skip, with the floor it was held to."""
+
+    free_bytes: int
+    total_bytes: int
+    min_free_fraction: float
+    min_free_bytes: int
+
+
+def disk_pressure(*, repo: Path) -> DiskPressure | None:
+    """The reading when the export root's filesystem is below the free-space floor.
+
+    The floor is the LARGER of a fraction of the filesystem and a multiple of the
+    per-export ceiling, so a big disk is held to its fraction and a small one to
+    the byte floor. The reading is taken on the nearest existing ancestor of the
+    export root, because the root is created by the first export. A filesystem
+    that cannot be read is NOT pressure: the export is best effort and the run is
+    removed either way, so an unreadable reading must not silence the one thing
+    that preserves its evidence.
+    """
+    probe = repo / EXPORT_ROOT
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    try:
+        usage = shutil.disk_usage(probe)
+    except OSError:
+        return None
+    if usage.free >= max(int(usage.total * MIN_FREE_FRACTION), MIN_FREE_BYTES):
+        return None
+    return DiskPressure(
+        free_bytes=usage.free,
+        total_bytes=usage.total,
+        min_free_fraction=MIN_FREE_FRACTION,
+        min_free_bytes=MIN_FREE_BYTES,
+    )
 
 
 def export_ended_run(*, port: FabroPort, repo: Path, run_id: str) -> EndedRunExport:

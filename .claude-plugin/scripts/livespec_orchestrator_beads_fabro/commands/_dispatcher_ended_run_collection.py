@@ -28,6 +28,7 @@ import time
 from pathlib import Path
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_ended_run_export import (
+    disk_pressure,
     export_ended_run,
     prune_expired_exports,
 )
@@ -59,6 +60,7 @@ _ENDED_STATUS_KINDS = frozenset({"canceled", "cancelled", "dead", "failed", "suc
 _COLLECTION_STAGE = "ended-run-collected"
 _EXPORTED_STAGE = "ended-run-exported"
 _EXPORT_FAILED_STAGE = "ended-run-export-failed"
+_EXPORT_SKIPPED_STAGE = "ended-run-export-skipped-disk-pressure"
 JOURNAL_STAGE_COLLECTION_REFUSED = "ended-run-collection-refused"
 _REASON_NOT_CLOSED = "item-not-closed"
 _REASON_NO_STATUS = "item-status-unreadable"
@@ -93,7 +95,10 @@ def collect_closed_ended_runs(
     because the deletion takes the run's event journal and stage logs with it. A
     failed export is journaled with its failing step and the run is STILL removed:
     the ratified collection duty deletes a closed item's run unconditionally.
-    Exports past the retention constant are pruned on every pass.
+    Exports past the retention constant are pruned on every pass. When the export
+    root's filesystem is under the free-space floor the export is SKIPPED with an
+    `ended-run-export-skipped-disk-pressure` row and the run is removed all the same,
+    because a full disk must never stop the deletion the contract mandates.
     """
     if not dry_run:
         prune_expired_exports(repo=repo, now_epoch=time.time())
@@ -144,14 +149,27 @@ def _journal_export(
     journal: JournalWriter,
     row: AttributedRun,
 ) -> None:
-    """Export the run's record and journal where it went, or the step that failed."""
-    exported = export_ended_run(port=port, repo=repo, run_id=row.run.run_id)
+    """Export the run's record and journal where it went, or why it was not taken."""
     base: dict[str, object] = {
         "run_id": row.run.run_id,
         "factory_name": inventory.factory_name,
         "dispatching_repository": repo.name,
         "work_item_id": row.work_item_id,
     }
+    pressure = disk_pressure(repo=repo)
+    if pressure is not None:
+        journal.append(
+            record={
+                "stage": _EXPORT_SKIPPED_STAGE,
+                **base,
+                "free_bytes": pressure.free_bytes,
+                "total_bytes": pressure.total_bytes,
+                "min_free_fraction": pressure.min_free_fraction,
+                "min_free_bytes": pressure.min_free_bytes,
+            }
+        )
+        return
+    exported = export_ended_run(port=port, repo=repo, run_id=row.run.run_id)
     if exported.ok:
         journal.append(
             record={
