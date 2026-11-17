@@ -1203,8 +1203,25 @@ def _hermetic_source_checkout(tmp_path_factory: pytest.TempPathFactory) -> None:
     _git_init_origin_reachable(root=tmp_path_factory.getbasetemp())
 
 
+_GIT_HOOK_PASSTHROUGH_VARS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+)
+
+
 def _git_init_origin_reachable(*, root: Path) -> None:
-    env = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
+    # A hook-spawned pytest inherits GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE
+    # pointing at the surrounding repo; without scrubbing them the empty commit
+    # below lands on the REAL branch and the outer commit then fails to lock HEAD.
+    scrubbed = {
+        key: value for key, value in os.environ.items() if key not in _GIT_HOOK_PASSTHROUGH_VARS
+    }
+    env = {**scrubbed, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
     author = {
         "GIT_AUTHOR_NAME": "livespec tests",
         "GIT_AUTHOR_EMAIL": "tests@example.invalid",
