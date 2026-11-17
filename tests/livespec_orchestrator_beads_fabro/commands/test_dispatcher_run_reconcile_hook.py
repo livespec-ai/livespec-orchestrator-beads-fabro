@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import importlib
 import json
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
@@ -207,8 +209,13 @@ def test_only_the_named_items_run_is_reconciled(tmp_path: Path) -> None:
 
 
 def test_a_closed_items_ended_run_is_removed_through_its_factory_without_force(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The export runs only on a filesystem with room: pin the reading so the
+    # assertion below does not depend on how full the machine running it is.
+    monkeypatch.setattr(
+        shutil, "disk_usage", lambda _path: SimpleNamespace(total=10**12, used=0, free=10**12)
+    )
     hook = importlib.import_module(_MODULE)
     repo = _repo(tmp_path=tmp_path)
     append_work_item(path=_config(), item=_item(status="done"))
