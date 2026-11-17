@@ -462,7 +462,7 @@ gate_check_suite = [
 # hard-fail today; a 201-250 file still WARNs (soft band), a >250 file fails.
 # This is a SEVERITY increase, never a bypass (per .ai/ci-gate-discipline.md and
 # the fleet-check-coverage golden rules). Requires livespec-dev-tooling >= v0.39.0
-# (the flip lever; this repo is pinned at v0.39.0).
+# (the flip lever; this repo's actual pin is the tag in [tool.uv.sources]).
 # MUST stay above the [[...mirror_pairings]] array-of-tables below (a bare TOML
 # key after an array-of-tables header attaches to that sub-table, not the parent).
 file_lloc_hard_gate = true
