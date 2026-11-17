@@ -30,6 +30,7 @@ import pytest
 from livespec_orchestrator_beads_fabro.commands._dispatcher_gh_refresh import (
     DEFAULT_SANDBOX_GH_REFRESH_ROOT,
     SANDBOX_GH_REFRESH_ROOT_ENV_VAR,
+    gh_mint_helper_source,
     refreshing_gh_prepare_steps_block,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_git_push import PUSH_ORIGIN_SOURCE
@@ -51,6 +52,29 @@ _RUN_BRANCH = "fabro/run/01M4Q45S5AGK"
 def test_publication_tooling_materializes_outside_the_run_worktree() -> None:
     """An agent-writable checkout cannot replace the credential minting helper."""
     assert not Path(DEFAULT_SANDBOX_GH_REFRESH_ROOT).is_relative_to(Path("/workspace"))
+
+
+def test_materialized_mint_helper_lints_without_late_module_imports() -> None:
+    """The Dispatcher-generated credential helper must pass the repository linter."""
+    lint = subprocess.run(
+        [
+            "uv",
+            "run",
+            "ruff",
+            "check",
+            "--select",
+            "E402",
+            "--stdin-filename",
+            "mint_app_token.py",
+            "-",
+        ],
+        input=gh_mint_helper_source(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert lint.returncode == 0, lint.stdout
 
 
 def test_a_run_branch_rebase_is_not_blocked_by_the_gh_refresh_bundle(
