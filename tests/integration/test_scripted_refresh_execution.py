@@ -1417,6 +1417,44 @@ def test_a_forge_server_error_retries_the_leased_push_while_origin_is_unchanged(
     assert box.state(name=REFRESH_CHANGED_STATE_FILENAME) is None
 
 
+def test_a_pre_push_hook_rejection_with_a_5xx_phrase_is_named_and_not_retried(
+    tmp_path: Path,
+) -> None:
+    """A hook's prose cannot turn its rejection into a retryable forge error.
+
+    Git combines client-side hook output with its transport diagnostics.  The
+    hook below deliberately includes the same incidental phrase that appeared
+    in the heading-coverage check failure: it is not a transport `remote:`
+    response.  A real exact-head push is required here so the assertion counts
+    the repository's actual pre-push hook invocations rather than calls to a
+    helper double.
+    """
+    box = _build(root=tmp_path)
+    attempts = tmp_path / "pre-push-attempts"
+    hook = box.clone / ".git" / "hooks" / "pre-push"
+    _ = hook.write_text(
+        "#!/bin/sh\n"
+        f"printf x >> {attempts}\n"
+        "printf '%s\\n' '::: just check-master-ci-green' >&2\n"
+        "printf '%s\\n' 'master CI is red on its head ci-green check' >&2\n"
+        "printf '%s\\n' '## Scenario: CI creation returned an Internal server error' >&2\n"
+        "printf '%s\\n' 'Failed targets (1):' >&2\n"
+        "printf '%s\\n' '  - check-master-ci-green' >&2\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o700)
+    _ = _advance_default(box=box)
+
+    result = _run(box=box)
+
+    assert result.returncode == 1, result.stdout
+    assert attempts.read_text(encoding="utf-8").count("x") == 1
+    assert "LIVESPEC_PR_REFRESH_HOOK_REJECTED: check-master-ci-green" in result.stderr
+    assert "LIVESPEC_PR_REFRESH_FORGE_ERROR" not in result.stderr
+    assert box.state(name=REFRESH_CHANGED_STATE_FILENAME) is None
+
+
 def test_a_non_numeric_refresh_counter_fails_closed(tmp_path: Path) -> None:
     """A counter nothing can compare cannot bound anything, so it refuses.
 
