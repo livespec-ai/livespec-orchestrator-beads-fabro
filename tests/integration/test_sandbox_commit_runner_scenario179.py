@@ -45,6 +45,7 @@ _TRAILERS = (("Hook-Trailer-One", "alpha"), ("Hook-Trailer-Two", "beta"))
 _FAILED_TARGET = "check-lint"
 _FIRST_WAIT_SECONDS = "1"
 _TERMINAL_WAIT_SECONDS = "120"
+_DELEGATED_COVERAGE_NO_VERDICT = "LIVESPEC_DELEGATED_MEMBER_NO_VERDICT"
 
 # The hook polls for the release file, then answers with its content: `pass`
 # lets the commit proceed, anything else refuses it with the gate aggregate's
@@ -279,6 +280,35 @@ def test_a_commit_ended_by_a_signal_has_no_verdict_and_is_never_reported_passed(
         _assert_terminal_state(report=report, expected="no-verdict")
         assert report["exit_code"] is None
         assert report["head"] is None
+    assert _head(sandbox=sandbox) == before
+
+
+def test_a_delegated_coverage_member_without_a_verdict_makes_the_commit_run_no_verdict(
+    sandbox: _Sandbox,
+) -> None:
+    """Scenario 380: a delegated member's absent verdict is never a passing commit."""
+    delegate = sandbox.repo / "delegated-coverage"
+    delegate.write_text(
+        "#!/bin/sh\n"
+        f"printf '{_DELEGATED_COVERAGE_NO_VERDICT}: target=check-per-file-coverage\\n'\n"
+        "exit 75\n",
+        encoding="utf-8",
+    )
+    delegate.chmod(0o755)
+    _install_hook(
+        repo=sandbox.repo,
+        name="pre-commit",
+        body=f"#!/bin/sh\n{delegate}\n",
+    )
+
+    before = _head(sandbox=sandbox)
+    run_id = _start_commit(sandbox=sandbox, message="feat: delegated coverage no verdict")
+    final = _wait(sandbox=sandbox, run_id=run_id, seconds=_TERMINAL_WAIT_SECONDS)
+
+    _assert_terminal_state(report=final, expected="no-verdict")
+    assert final["exit_code"] is None
+    assert final["head"] is None
+    assert _DELEGATED_COVERAGE_NO_VERDICT in str(final["output_tail"])
     assert _head(sandbox=sandbox) == before
 
 
