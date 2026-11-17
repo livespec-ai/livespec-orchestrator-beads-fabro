@@ -373,6 +373,7 @@ for argument in "$@"; do
                 "${LIVESPEC_DOD_JUDGEMENT_MODEL:-unset}" "${LIVESPEC_DRIFT_JUDGE_MODEL:-unset}" "${LIVESPEC_REFLECTOR_MODEL:-unset}" \
                 "${BEADS_DOLT_PASSWORD:+present}" >> "$STUB_DRIVE_ENV_LOG"
             printf '%s\n' "$item" >> "$STUB_DRIVE_LOG"
+            printf '%s %s\n' "$(date +%s%N)" "$item" >> "$STUB_DRIVE_TIME_LOG"
             if [ -n "${STUB_DRIVE_FAIL_TIMES:-}" ] \
                 && [ "$(grep -cxF -- "$item" "$STUB_DRIVE_LOG")" -le "$STUB_DRIVE_FAIL_TIMES" ]; then
                 # A drive that exits before its run lists, optionally printing a scripted JSON answer.
@@ -576,6 +577,7 @@ write_board() {
 CASE_DIR=""
 CASE_LOG=""
 DRIVE_LOG=""
+DRIVE_TIME_LOG=""
 DRIVE_MUTEX_LOG=""
 FACTORY_READ_WRAPPER_LOG=""
 PREFLIGHT_LOG=""
@@ -600,6 +602,8 @@ new_case() {
     CASE_LOG="$CASE_DIR/launcher.log"
     DRIVE_LOG="$CASE_DIR/drive-log"
     : > "$DRIVE_LOG"
+    DRIVE_TIME_LOG="$CASE_DIR/drive-time-log"
+    : > "$DRIVE_TIME_LOG"
     DRIVE_MUTEX_LOG="$CASE_DIR/drive-mutex-log"
     : > "$DRIVE_MUTEX_LOG"
     FACTORY_READ_WRAPPER_LOG="$CASE_DIR/factory-read-wrapper-log"
@@ -653,6 +657,7 @@ new_case() {
     export STUB_DRIVE_LISTED_DIR="$CASE_DIR/listed"
     export STUB_RESUMED_DIR="$CASE_DIR/resumed"
     export STUB_DRIVE_LOG="$DRIVE_LOG"
+    export STUB_DRIVE_TIME_LOG="$DRIVE_TIME_LOG"
     export STUB_DRIVE_MUTEX_LOG="$DRIVE_MUTEX_LOG"
     export STUB_FACTORY_READ_WRAPPER_LOG="$FACTORY_READ_WRAPPER_LOG"
     export STUB_PREFLIGHT_LOG="$PREFLIGHT_LOG"
@@ -785,6 +790,23 @@ log_has() { grep -qF -- "$2" "$1"; }
 ps_count() { grep -cxF -- "$1" "$PS_LOG" 2>/dev/null || true; }
 drive_log_items() { tr '\n' ' ' < "$DRIVE_LOG" | sed 's/ *$//'; }
 preflight_count() { grep -c " $1$" "$PREFLIGHT_LOG" 2>/dev/null || true; }
+# first_drive_ns <item>: the nanosecond stamp of the first drive of <item>; empty when it never drove.
+first_drive_ns() {
+    local stamp name first=""
+    while read -r stamp name; do
+        if [ "$name" = "$1" ] && { [ -z "$first" ] || [ "$stamp" -lt "$first" ]; }; then first=$stamp; fi
+    done < "$DRIVE_TIME_LOG"
+    printf '%s' "$first"
+}
+# preflight_between <item> <after_ns> <before_ns>: succeed when a preflight of <item> is stamped after
+# <after_ns> and before <before_ns>, however many other preflights ran.
+preflight_between() {
+    local stamp name
+    while read -r stamp name; do
+        if [ "$name" = "$1" ] && [ "$stamp" -gt "$2" ] && [ "$stamp" -lt "$3" ]; then return 0; fi
+    done < "$PREFLIGHT_LOG"
+    return 1
+}
 
 # This protects the harness from a hung launcher. It is not a startup budget:
 # each Scenario 297 launcher normally reaches the stub preflight in milliseconds.
@@ -1413,12 +1435,17 @@ elif [ -s "$DRIVE_LOG" ]; then
 fi
 # A zero-second reuse window makes the observed queued pass stale as soon as
 # the older launcher is released; no wall-clock delay is part of this case.
+release_ns=$(date +%s%N)
 touch "$STUB_PREFLIGHT_RELEASE"
 await_both "$older_pid" "$younger_pid" 90
-if [ "$(preflight_count bd-ib-stale-younger)" -ge 2 ]; then
+# The verdict is the ordering of observed events, not a preflight count: any
+# number of head polls may run, so long as one follows the older release and
+# precedes the younger launcher's drive (taken under the factory mutex).
+younger_drive_ns=$(first_drive_ns bd-ib-stale-younger)
+if [ -n "$younger_drive_ns" ] && preflight_between bd-ib-stale-younger "$release_ns" "$younger_drive_ns"; then
     pass "a stale queued pass is re-run at the FIFO head before binding"
 else
-    fail "a stale queued pass was not re-run at the FIFO head (count=$(preflight_count bd-ib-stale-younger))"
+    fail "a stale queued pass was not re-run at the FIFO head (preflights=$(preflight_count bd-ib-stale-younger) release=$release_ns drive=${younger_drive_ns:-none})"
 fi
 
 # A queued preflight failure is terminal for that launcher.  The older ticket
