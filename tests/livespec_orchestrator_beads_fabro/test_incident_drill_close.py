@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from livespec_orchestrator_beads_fabro._beads_client import FakeBeadsClient, IssueDraft
 from livespec_orchestrator_beads_fabro._incident_authority_payload import (
     GENESIS_MARKER,
@@ -16,6 +18,7 @@ from livespec_orchestrator_beads_fabro._incident_authority_payload import (
 from livespec_orchestrator_beads_fabro._incident_authority_types import IncidentReading
 from livespec_orchestrator_beads_fabro._store_claim_tokens import create_claim_token
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
+from livespec_orchestrator_beads_fabro.errors import BeadsCommandError
 from livespec_orchestrator_beads_fabro.incident_authority import read_incident_authority
 
 REPOSITORY = "owner/repository"
@@ -54,8 +57,36 @@ def _attempt(**changes: Any) -> dict[str, Any]:
     } | changes
 
 
+_LIFECYCLE = frozenset(
+    {
+        "backlog",
+        "pending-approval",
+        "ready",
+        "active",
+        "acceptance",
+        "blocked",
+        "closed",
+        "deferred",
+    }
+)
+
+
+class _GuardedClient(FakeBeadsClient):
+    """A ledger double that refuses non-lifecycle statuses as the family bd-guard does."""
+
+    def update_issue(self, **fields: Any) -> None:  # type: ignore[override]
+        status = fields.get("status")
+        if status is not None and status not in _LIFECYCLE:
+            raise BeadsCommandError(
+                command=f"update {fields['issue_id']} --status {status}",
+                exit_code=3,
+                stderr=f"'bd update --status {status}' is non-lifecycle",
+            )
+        super().update_issue(**fields)
+
+
 def _seed(*, snapshot: dict[str, Any]) -> tuple[FakeBeadsClient, IncidentReading]:
-    client = FakeBeadsClient()
+    client = _GuardedClient()
     _ = client.create_issue(
         draft=IssueDraft(
             issue_id=ITEM,
@@ -142,4 +173,37 @@ def test_a_recorded_scratch_branch_drill_closes_done_without_repayment(tmp_path:
         "done",
         False,
     )
-    assert client.show_issue(issue_id=ITEM)["status"] == "done"
+    assert client.show_issue(issue_id=ITEM)["status"] == "closed"
+
+
+def test_a_rerun_finishes_a_close_whose_item_write_crashed_after_the_authority_advanced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = importlib.import_module("livespec_orchestrator_beads_fabro.incident_drill_close")
+    client, reading = _seed(snapshot=_attempt())
+    real_update = client.update_issue
+    crashes = {"left": 1}
+
+    def _crash_once(**fields: Any) -> None:
+        if fields.get("status") == "closed" and crashes["left"]:
+            crashes["left"] -= 1
+            raise BeadsCommandError(command="update", exit_code=3, stderr="crash")
+        real_update(**fields)
+
+    client.update_issue = _crash_once  # type: ignore[method-assign]
+    with contextlib.suppress(BeadsCommandError):
+        module.close_drill(
+            client=client, reading=reading, runner=_Forge(), repo=tmp_path, repository=REPOSITORY
+        )
+    assert client.show_issue(issue_id=ITEM)["status"] == "active"
+
+    now = {"t": 0.0}
+    monkeypatch.setattr(module, "_clock", lambda: now["t"])
+    monkeypatch.setattr(module, "_sleep", lambda seconds: now.__setitem__("t", now["t"] + seconds))
+
+    again = module.close_drill(
+        client=client, reading=reading, runner=_Forge(), repo=tmp_path, repository=REPOSITORY
+    )
+
+    assert client.show_issue(issue_id=ITEM)["status"] == "closed"
+    assert getattr(again, "lifecycle_state", None) == "done"
