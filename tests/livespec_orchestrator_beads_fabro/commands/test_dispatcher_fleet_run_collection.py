@@ -98,7 +98,9 @@ def test_one_pass_collects_a_closed_item_of_another_repository_and_journals_each
         ),
     )
 
-    assert runner.calls == [["fabro", "rm", "01E", "--server", "https://factory.test"]]
+    assert [call for call in runner.calls if call[1] == "rm"] == [
+        ["fabro", "rm", "01E", "--server", "https://factory.test"]
+    ]
     assert set(forge.cwds) == {other}
     assert [
         (
@@ -109,6 +111,7 @@ def test_one_pass_collects_a_closed_item_of_another_repository_and_journals_each
             record["work_item_status"],
         )
         for record in journal.records
+        if record["stage"] in {"ended-run-collected", "ended-run-collection-refused"}
     ] == [
         ("ended-run-collected", "01E", "livespec-q", "q-e", "closed"),
         ("ended-run-collection-refused", "01F", "livespec-q", "q-f", "blocked"),

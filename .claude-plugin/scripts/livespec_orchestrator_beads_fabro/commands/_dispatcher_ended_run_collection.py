@@ -24,8 +24,13 @@ append every standing refusal on every tick.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_ended_run_export import (
+    export_ended_run,
+    prune_expired_exports,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
     CommandRunner,
     JournalWriter,
@@ -52,6 +57,8 @@ __all__: list[str] = [
 _CLOSED_ITEM_STATUSES = frozenset({"closed", "done"})
 _ENDED_STATUS_KINDS = frozenset({"canceled", "cancelled", "dead", "failed", "succeeded"})
 _COLLECTION_STAGE = "ended-run-collected"
+_EXPORTED_STAGE = "ended-run-exported"
+_EXPORT_FAILED_STAGE = "ended-run-export-failed"
 JOURNAL_STAGE_COLLECTION_REFUSED = "ended-run-collection-refused"
 _REASON_NOT_CLOSED = "item-not-closed"
 _REASON_NO_STATUS = "item-status-unreadable"
@@ -81,7 +88,15 @@ def collect_closed_ended_runs(
     journaled so a Cleaned, Preserved or Absent result and any lease-prune
     problem stay visible for diagnosis and for the next periodic pass to retry.
     A targeted inventory collects only its own item's runs.
+
+    The run's whole record is exported BEFORE the `rm` (`_dispatcher_ended_run_export`),
+    because the deletion takes the run's event journal and stage logs with it. A
+    failed export is journaled with its failing step and the run is STILL removed:
+    the ratified collection duty deletes a closed item's run unconditionally.
+    Exports past the retention constant are pruned on every pass.
     """
+    if not dry_run:
+        prune_expired_exports(repo=repo, now_epoch=time.time())
     for row in attributed_runs(inventory=inventory, include_terminal=True):
         if inventory.only_work_item_id not in (None, row.work_item_id):
             continue
@@ -99,6 +114,7 @@ def collect_closed_ended_runs(
             run_id=row.run.run_id,
         ):
             continue
+        _journal_export(inventory=inventory, port=port, repo=repo, journal=journal, row=row)
         removed = port.rm(
             run_id=row.run.run_id,
             timeout_seconds=_RM_TIMEOUT_SECONDS,
@@ -118,6 +134,43 @@ def collect_closed_ended_runs(
                 "rm_stderr": removed.command.stderr.strip()[:_RM_OUTPUT_EXCERPT_CHARS],
             }
         )
+
+
+def _journal_export(
+    *,
+    inventory: FactoryRunInventory,
+    port: FabroPort,
+    repo: Path,
+    journal: JournalWriter,
+    row: AttributedRun,
+) -> None:
+    """Export the run's record and journal where it went, or the step that failed."""
+    exported = export_ended_run(port=port, repo=repo, run_id=row.run.run_id)
+    base: dict[str, object] = {
+        "run_id": row.run.run_id,
+        "factory_name": inventory.factory_name,
+        "dispatching_repository": repo.name,
+        "work_item_id": row.work_item_id,
+    }
+    if exported.ok:
+        journal.append(
+            record={
+                "stage": _EXPORTED_STAGE,
+                **base,
+                "export_location": str(exported.location),
+                "export_bytes": exported.total_bytes,
+                "export_sha256": exported.sha256,
+            }
+        )
+        return
+    journal.append(
+        record={
+            "stage": _EXPORT_FAILED_STAGE,
+            **base,
+            "export_failed_step": exported.failed_step,
+            "export_detail": exported.detail,
+        }
+    )
 
 
 def journaled_refusals(*, journal_path: Path | None) -> frozenset[tuple[str, str | None]]:

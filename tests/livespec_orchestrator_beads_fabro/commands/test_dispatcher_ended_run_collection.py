@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,13 +25,21 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_runs_attri
 from livespec_orchestrator_beads_fabro.commands._fabro_port import FabroPort, FabroTarget
 from livespec_orchestrator_beads_fabro.commands._fabro_port_records import FabroRunSummary
 
+_EXPORTS = Path("tmp") / "ended-run-exports"
+_DUMP_FILES = {"events.jsonl": '{"event":"run.completed"}\n', "stages/red.log": "red stage log\n"}
+
 
 @dataclass(kw_only=True)
 class _Runner:
+    """The factory CLI's reference interface: `dump` writes the run's files, `rm` deletes it."""
+
     calls: list[list[str]] = field(default_factory=list)
     exit_code: int = 0
     stdout: str = ""
     stderr: str = ""
+    dump_exit_code: int = 0
+    dump_files: Mapping[str, str] = field(default_factory=lambda: dict(_DUMP_FILES))
+    manifest_present_at_rm: list[bool] = field(default_factory=list)
 
     def run(
         self,
@@ -38,8 +50,19 @@ class _Runner:
         env: Mapping[str, str | None] | None = None,
         stdin: int | None = None,
     ) -> CommandResult:
-        _ = (cwd, timeout_seconds, env, stdin)
+        _ = (timeout_seconds, env, stdin)
         self.calls.append(argv)
+        if argv[1] == "dump":
+            if self.dump_exit_code == 0:
+                out = Path(argv[argv.index("-o") + 1])
+                for name, text in self.dump_files.items():
+                    (out / name).parent.mkdir(parents=True, exist_ok=True)
+                    _ = (out / name).write_text(text, encoding="utf-8")
+            return CommandResult(exit_code=self.dump_exit_code, stdout="", stderr="")
+        if argv[1] == "rm":
+            self.manifest_present_at_rm.append(
+                (cwd / _EXPORTS / argv[2] / "MANIFEST.json").exists()
+            )
         return CommandResult(exit_code=self.exit_code, stdout=self.stdout, stderr=self.stderr)
 
 
@@ -111,8 +134,14 @@ def test_collects_only_ended_runs_of_closed_items_and_journals_the_provider_resu
         dry_run=False,
     )
 
-    assert runner.calls == [["fabro", "rm", "01CLOSED", "--server", "https://factory.test"]]
-    assert journal.records == [
+    assert [call[1] for call in runner.calls] == ["dump", "rm"]
+    assert runner.calls[1] == ["fabro", "rm", "01CLOSED", "--server", "https://factory.test"]
+    assert [record["stage"] for record in journal.records] == [
+        "ended-run-exported",
+        "ended-run-collected",
+        "ended-run-collection-refused",
+    ]
+    assert journal.records[1:] == [
         {
             "stage": "ended-run-collected",
             "run_id": "01CLOSED",
@@ -159,6 +188,10 @@ def test_dry_run_leaves_an_ended_closed_run_and_its_journal_unchanged(tmp_path: 
     assert (runner.calls, journal.records) == ([], [])
 
 
+def _collected(journal: _Journal) -> list[dict[str, object]]:
+    return [record for record in journal.records if record["stage"] == "ended-run-collected"]
+
+
 def test_failed_provider_delete_is_journaled_for_the_next_collection_pass(tmp_path: Path) -> None:
     runner = _Runner(exit_code=1)
     forge = _Forge()
@@ -177,7 +210,7 @@ def test_failed_provider_delete_is_journaled_for_the_next_collection_pass(tmp_pa
         dry_run=False,
     )
 
-    assert journal.records[0]["rm_exit_code"] == 1
+    assert _collected(journal)[0]["rm_exit_code"] == 1
 
 
 def test_journal_carries_the_bounded_rm_response_for_diagnosis_and_retry(tmp_path: Path) -> None:
@@ -202,7 +235,7 @@ def test_journal_carries_the_bounded_rm_response_for_diagnosis_and_retry(tmp_pat
         dry_run=False,
     )
 
-    record = journal.records[0]
+    record = _collected(journal)[0]
     stdout = record["rm_stdout"]
     assert isinstance(stdout, str)
     assert stdout.startswith("Preserved: sandbox_preserved")
@@ -232,8 +265,8 @@ def test_targeted_pass_collects_only_its_own_items_closed_runs(tmp_path: Path) -
         dry_run=False,
     )
 
-    assert runner.calls == [["fabro", "rm", "01MINE", "--server", "https://factory.test"]]
-    assert [record["run_id"] for record in journal.records] == ["01MINE"]
+    assert [call[1:3] for call in runner.calls] == [["dump", "01MINE"], ["rm", "01MINE"]]
+    assert {record["run_id"] for record in journal.records} == {"01MINE"}
 
 
 def _inventory(
@@ -316,7 +349,7 @@ def test_collecting_a_closed_items_run_deletes_its_refs_and_not_an_open_items(
         "refs/livespec/preserved-publish/bd-ib-closed/abc123",
         "refs/heads/needs-human/01CLOSED",
     ]
-    assert runner.calls == [["fabro", "rm", "01CLOSED", "--server", "https://factory.test"]]
+    assert [call[1:3] for call in runner.calls] == [["dump", "01CLOSED"], ["rm", "01CLOSED"]]
 
 
 def test_dry_run_deletes_no_preservation_ref(tmp_path: Path) -> None:
@@ -452,3 +485,92 @@ def test_journaled_refusals_reads_only_refusal_records_with_their_status(tmp_pat
 
     assert journaled_refusals(journal_path=path) == {("01A", "blocked"), ("01B", None)}
     assert journaled_refusals(journal_path=None) == frozenset()
+
+
+def test_the_runs_record_is_exported_and_read_back_before_the_run_is_removed(
+    tmp_path: Path,
+) -> None:
+    runner = _Runner()
+    journal = _Journal()
+
+    _collect_one(tmp_path=tmp_path, runner=runner, journal=journal)
+
+    export = tmp_path / _EXPORTS / "01CLOSED"
+    manifest = json.loads((export / "MANIFEST.json").read_text(encoding="utf-8"))
+    assert {entry["path"] for entry in manifest["files"]} == set(_DUMP_FILES)
+    for entry in manifest["files"]:
+        body = (export / entry["path"]).read_bytes()
+        assert (entry["bytes"], entry["sha256"]) == (len(body), hashlib.sha256(body).hexdigest())
+    assert runner.manifest_present_at_rm == [True]
+    exported = journal.records[0]
+    assert exported["stage"] == "ended-run-exported"
+    assert exported["run_id"] == "01CLOSED"
+    assert exported["export_location"] == str(export)
+    assert exported["export_bytes"] == sum(len(text.encode()) for text in _DUMP_FILES.values())
+    digest = hashlib.sha256()
+    for entry in sorted(manifest["files"], key=lambda item: item["path"]):
+        digest.update(f"{entry['path']}\0{entry['sha256']}\n".encode())
+    assert exported["export_sha256"] == digest.hexdigest()
+
+
+def test_a_failed_dump_is_journaled_with_its_step_and_the_run_is_still_removed(
+    tmp_path: Path,
+) -> None:
+    runner = _Runner(dump_exit_code=1)
+    journal = _Journal()
+
+    _collect_one(tmp_path=tmp_path, runner=runner, journal=journal)
+
+    failed = journal.records[0]
+    assert (failed["stage"], failed["run_id"], failed["export_failed_step"]) == (
+        "ended-run-export-failed",
+        "01CLOSED",
+        "dump",
+    )
+    assert [call[1] for call in runner.calls] == ["dump", "rm"]
+    assert len(_collected(journal)) == 1
+
+
+def test_a_dump_that_wrote_nothing_is_a_failed_export_and_the_run_is_still_removed(
+    tmp_path: Path,
+) -> None:
+    runner = _Runner(dump_files={})
+    journal = _Journal()
+
+    _collect_one(tmp_path=tmp_path, runner=runner, journal=journal)
+
+    assert journal.records[0]["stage"] == "ended-run-export-failed"
+    assert journal.records[0]["export_failed_step"] == "dump-empty"
+    assert [call[1] for call in runner.calls] == ["dump", "rm"]
+
+
+def test_an_export_older_than_the_retention_period_is_pruned_and_a_fresh_one_kept(
+    tmp_path: Path,
+) -> None:
+    old = tmp_path / _EXPORTS / "01OLD"
+    fresh = tmp_path / _EXPORTS / "01FRESH"
+    for directory in (old, fresh):
+        directory.mkdir(parents=True)
+        _ = (directory / "events.jsonl").write_text("{}\n", encoding="utf-8")
+    aged = time.time() - 400 * 24 * 3600
+    os.utime(old / "events.jsonl", (aged, aged))
+    os.utime(old, (aged, aged))
+
+    _collect_one(tmp_path=tmp_path, runner=_Runner(), journal=_Journal())
+
+    assert (old.exists(), fresh.exists()) == (False, True)
+
+
+def _collect_one(*, tmp_path: Path, runner: _Runner, journal: _Journal) -> None:
+    collect_closed_ended_runs(
+        inventory=_inventory(
+            runs=(_run(run_id="01CLOSED", status_kind="succeeded"),),
+            statuses={"bd-ib-closed": "done"},
+            stamps=(("01CLOSED", "bd-ib-closed"),),
+        ),
+        port=_port(tmp_path=tmp_path, runner=runner),
+        runner=_Forge(),
+        repo=tmp_path,
+        journal=journal,
+        dry_run=False,
+    )

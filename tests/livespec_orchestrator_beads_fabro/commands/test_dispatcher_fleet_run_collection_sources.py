@@ -155,8 +155,12 @@ def test_a_run_the_first_repository_attributes_is_not_collected_through_the_seco
         ),
     )
 
-    assert [call[2] for call in runner.calls] == ["01X", "01Y", "01Z"]
-    assert [(r["run_id"], r["dispatching_repository"]) for r in journal.records] == [
+    assert [call[2] for call in runner.calls if call[1] == "rm"] == ["01X", "01Y", "01Z"]
+    assert [
+        (r["run_id"], r["dispatching_repository"])
+        for r in journal.records
+        if r["stage"] == "ended-run-collected"
+    ] == [
         ("01X", "first"),
         ("01Y", "first"),
         ("01Z", "second"),
@@ -178,7 +182,7 @@ def test_no_further_repository_is_consulted_once_every_run_is_claimed(tmp_path: 
         ),
     )
 
-    assert [call[2] for call in runner.calls] == ["01X"]
+    assert [call[2] for call in runner.calls if call[1] == "rm"] == ["01X"]
 
 
 def test_a_standing_refusal_is_not_journaled_again_for_another_repository(
