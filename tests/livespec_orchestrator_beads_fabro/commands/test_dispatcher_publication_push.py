@@ -10,6 +10,7 @@ does not fail, it silently becomes a much weaker assertion.
 
 from __future__ import annotations
 
+import hashlib
 import stat
 import subprocess
 from pathlib import Path
@@ -22,6 +23,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_publication_push imp
     PUBLICATION_PUSH_PROGRAM_FILENAME,
     publication_push_program_path_expansion,
     publication_push_program_source,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_tdd_lineage_gate import (
+    tdd_lineage_gate_program_source,
 )
 
 from tests.prepare_step_support import plugins_helper
@@ -48,6 +52,16 @@ def test_the_helper_fetch_lands_the_single_safe_push_recipe() -> None:
     assert path == f"{default_helper_roots()[PLUGINS_ROOT]}/{PUBLICATION_PUSH_PROGRAM_FILENAME}"
     assert helper.compose() == source.encode("utf-8")
     assert helper.mode == 0o700
+
+
+def test_the_exact_head_push_refuses_unearned_tdd_lineage_before_pushing() -> None:
+    """A refresh cannot publish evidence whose recorded parent it rewrote."""
+    source = publication_push_program_source()
+
+    assert "livespec_validate_tdd_lineage" in source
+    assert "TDD-Green-Parent-Reflog" in source
+    assert "TDD-Red-Test-File-Checksum" in source
+    assert tdd_lineage_gate_program_source().startswith("#!/usr/bin/env python3\n")
 
 
 def _git(*, repo: Path, argv: list[str]) -> subprocess.CompletedProcess[str]:
@@ -103,6 +117,28 @@ def _rewritten(*, work: Path) -> str:
     return _git(repo=work, argv=["rev-parse", "HEAD"]).stdout.strip()
 
 
+def _tdd_commit(*, work: Path, checksum: str | None) -> str:
+    """Add a commit carrying the requested Red evidence to the publish branch."""
+    test_path = "tests/test_widget.py"
+    contents = b"def test_widget() -> None:\n    assert True\n"
+    path = work / test_path
+    path.parent.mkdir(parents=True)
+    _ = path.write_bytes(contents)
+    recorded = checksum or f"sha256:{hashlib.sha256(contents).hexdigest()}"
+    _git(repo=work, argv=["add", test_path])
+    _git(
+        repo=work,
+        argv=[
+            "commit",
+            "-m",
+            "feat: evidence fixture\n\n"
+            f"TDD-Red-Test: {test_path}\n"
+            f"TDD-Red-Test-File-Checksum: {recorded}\n",
+        ],
+    )
+    return _git(repo=work, argv=["rev-parse", "HEAD"]).stdout.strip()
+
+
 def test_a_rewrite_against_the_recorded_object_lands(tmp_path: Path) -> None:
     """The success path, executed: the ref moves to this clone's HEAD."""
     work, remote, published = _repository(root=tmp_path / "match")
@@ -142,6 +178,68 @@ def test_a_rewrite_against_a_stale_object_is_rejected_and_moves_nothing(tmp_path
     )
 
     assert completed.returncode != 0
+    assert _remote_head(remote=remote) == published
+
+
+def test_a_bad_red_checksum_is_refused_before_the_branch_moves(tmp_path: Path) -> None:
+    """The refusal names both the offending commit and its recorded test path."""
+    work, remote, published = _repository(root=tmp_path / "bad-red-checksum")
+    program = _program(root=tmp_path / "plugins")
+    commit = _tdd_commit(work=work, checksum="sha256:" + "0" * 64)
+
+    completed = subprocess.run(
+        [str(program), _BRANCH, published], cwd=work, check=False, text=True, capture_output=True
+    )
+
+    assert completed.returncode != 0
+    assert commit in completed.stderr
+    assert "tests/test_widget.py" in completed.stderr
+    assert _remote_head(remote=remote) == published
+
+
+def test_an_open_red_on_its_unchanged_parent_is_not_refused(tmp_path: Path) -> None:
+    """A seeded open Red remains eligible for the later Green amend and push."""
+    work, remote, published = _repository(root=tmp_path / "seeded-open-red")
+    program = _program(root=tmp_path / "plugins")
+    open_red = _tdd_commit(work=work, checksum=None)
+
+    completed = subprocess.run(
+        [str(program), _BRANCH, published], cwd=work, check=False, text=True, capture_output=True
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert _remote_head(remote=remote) == open_red
+
+
+def test_a_rebased_green_commit_is_refused_before_the_branch_moves(tmp_path: Path) -> None:
+    """The actual push helper checks a Green parent after rebase, before its exec."""
+    work, remote, published = _repository(root=tmp_path / "rebased-green")
+    program = _program(root=tmp_path / "plugins")
+    _ = (work / "widget.py").write_text("def widget() -> int:\n    return 1\n", encoding="utf-8")
+    _git(repo=work, argv=["add", "widget.py"])
+    _git(
+        repo=work,
+        argv=[
+            "commit",
+            "-m",
+            "feat: original Green\n\n" f"TDD-Green-Parent-Reflog: {published}\n",
+        ],
+    )
+    _git(repo=work, argv=["switch", "master"])
+    _ = (work / "moved.txt").write_text("moved\n", encoding="utf-8")
+    _git(repo=work, argv=["add", "moved.txt"])
+    _git(repo=work, argv=["commit", "-m", "base moved"])
+    _git(repo=work, argv=["switch", _BRANCH])
+    _git(repo=work, argv=["rebase", "master"])
+    rebased = _git(repo=work, argv=["rev-parse", "HEAD"]).stdout.strip()
+
+    completed = subprocess.run(
+        [str(program), _BRANCH, published], cwd=work, check=False, text=True, capture_output=True
+    )
+
+    assert completed.returncode != 0
+    assert rebased in completed.stderr
+    assert "parent" in completed.stderr
     assert _remote_head(remote=remote) == published
 
 
