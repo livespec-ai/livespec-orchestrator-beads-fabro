@@ -270,3 +270,51 @@ def test_a_published_green_whose_red_object_is_gone_verifies_by_capture_time(
     completed = _run(program=_program(tmp_path=tmp_path), repo=repo)
 
     assert completed.returncode == 0, completed.stderr
+
+
+def test_an_unpublished_green_whose_red_object_is_gone_is_refused(tmp_path: Path) -> None:
+    """A commit origin never carried has no published history to stand in for its Red."""
+    repo = _published_repo(tmp_path=tmp_path)
+    green = _commit(
+        repo=repo,
+        message=(
+            "feat: green\n\nTDD-Green-Parent-Reflog: " + "a" * 40 + "\n"
+            "TDD-Red-Captured-At: 2099-01-01T00:00:00Z\n"
+        ),
+        name="widget.py",
+        text="widget\n",
+    )
+
+    completed = _run(program=_program(tmp_path=tmp_path), repo=repo)
+
+    assert completed.returncode != 0
+    assert green in completed.stderr
+    assert "parent" in completed.stderr
+
+
+def test_a_rebased_open_red_without_a_run_id_is_refused_naming_commit_and_test(
+    tmp_path: Path,
+) -> None:
+    """A missing Factory-Run-Id is not this run's: the Red cannot count as earned here."""
+    repo = _published_repo(tmp_path=tmp_path)
+    path = repo / _TEST_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _ = path.write_bytes(_TEST_BYTES)
+    _git(repo=repo, argv=["add", _TEST_PATH])
+    _git(
+        repo=repo,
+        argv=[
+            "commit",
+            "-m",
+            "feat: open red\n\n"
+            f"TDD-Red-Test: {_TEST_PATH}\n"
+            f"TDD-Red-Test-File-Checksum: sha256:{hashlib.sha256(_TEST_BYTES).hexdigest()}",
+        ],
+    )
+    rebased = _move_master_and_rebase(repo=repo)
+
+    completed = _run(program=_program(tmp_path=tmp_path), repo=repo)
+
+    assert completed.returncode != 0
+    assert rebased in completed.stderr
+    assert _TEST_PATH in completed.stderr

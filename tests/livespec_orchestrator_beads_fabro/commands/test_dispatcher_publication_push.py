@@ -264,13 +264,14 @@ def test_a_green_amend_with_its_red_reflog_remains_publishable(tmp_path: Path) -
 
 
 def test_an_open_red_on_its_unchanged_parent_is_not_refused(tmp_path: Path) -> None:
-    """A seeded open Red remains eligible for the later Green amend and push."""
+    """A seeded open Red, already on origin as the seed tip, stays eligible for its Green push."""
     work, remote, published = _repository(root=tmp_path / "seeded-open-red")
     program = _program(root=tmp_path / "plugins")
     open_red = _tdd_commit(work=work, checksum=None)
+    _git(repo=work, argv=["push", "origin", _BRANCH])
 
     completed = subprocess.run(
-        [str(program), _BRANCH, published], cwd=work, check=False, text=True, capture_output=True
+        [str(program), _BRANCH, open_red], cwd=work, check=False, text=True, capture_output=True
     )
 
     assert completed.returncode == 0, completed.stderr

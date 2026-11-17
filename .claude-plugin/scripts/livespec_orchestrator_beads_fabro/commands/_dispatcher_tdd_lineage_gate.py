@@ -53,6 +53,18 @@ for c in z:
         try:
             recorded_parent = g("rev-parse", m[k] + "^")
         except s.CalledProcessError:
+            if c not in o:
+                e(
+                    c
+                    + " has "
+                    + k
+                    + " commit "
+                    + m[k]
+                    + " that is gone and origin never carried "
+                    + c
+                    + ", so its earning parent cannot be resolved against published parent "
+                    + p
+                )
             at = m.get("TDD-Red-Captured-At", "")
             try:
                 earned = calendar.timegm(time.strptime(at, "%Y-%m-%dT%H:%M:%SZ"))
@@ -90,7 +102,7 @@ for c in z:
                 + ", not published parent "
                 + p
             )
-    if u and t and not any(m.get(k) for k in q) and c not in o and m.get("Factory-Run-Id", w) != w:
+    if u and t and not any(m.get(k) for k in q) and c not in o and m.get("Factory-Run-Id") != w:
         e(c + " carries TDD Red evidence for " + t + " that this run never recorded on " + p)
     if u and t:
         try:
