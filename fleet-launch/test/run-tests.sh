@@ -1204,6 +1204,126 @@ fi
 stop_launcher "$p11_pid" "$p2_pid"
 wait "$p11_pid" 2>/dev/null || true
 wait "$p2_pid" 2>/dev/null || true
+
+# queue_position_fixture: a one-plan parent chain and a priorities record naming the plan rank 11, wired
+# through the two environment overrides; the launcher parks at the queue hold once it holds a ticket.
+queue_position_fixture() {
+    open_boards
+    export FLEET_LAUNCH_MAX_WAIT_S=120
+    : > "$HOLD_FILE"
+    printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        'case "$1" in bd-ib-queue-child) printf "%s\\n" bd-ib-queue-plan ;; *) exit 0 ;; esac' \
+        > "$CASE_DIR/parent-chain"
+    chmod +x "$CASE_DIR/parent-chain"
+    printf '%s\n' '11 bd-ib-queue-plan' > "$CASE_DIR/priorities-record"
+    export FLEET_LAUNCH_PARENT_CHAIN_COMMAND="$CASE_DIR/parent-chain"
+    export FLEET_LAUNCH_PRIORITIES_RECORD="$CASE_DIR/priorities-record"
+}
+
+scenario "6b. a hand-supplied TICKET_NS cannot place a fresh priority ticket"
+new_case hand-placed-ticket-ns
+queue_position_fixture
+ONLY_GMK=1 TICKET_NS=00001-1 "$LAUNCHER" bd-ib-queue-child > "$CASE_DIR/hand.log" 2>&1 &
+hand_pid=$!
+if wait_for_line "$CASE_DIR/hand.log" 'gmktec FIFO ticket taken at start' "$OBSERVE_WAIT_S" \
+    && grep -qE 'taken at start: 00011-[0-9]+-harness-seat$' "$CASE_DIR/hand.log"; then
+    pass "a fresh ticket takes its plan's rank from the priorities record, not the supplied TICKET_NS"
+else
+    fail "a hand-supplied TICKET_NS placed a fresh priority ticket: $(grep 'ticket taken' "$CASE_DIR/hand.log")"
+fi
+stop_launcher "$hand_pid"
+wait "$hand_pid" 2>/dev/null || true
+
+scenario "6c. TICKET_NS restarts only a ticket that exists for the same item"
+new_case restart-ticket-ns
+queue_position_fixture
+mkdir -p "$FLEET_LAUNCH_GMK_QUEUE_DIR"
+printf 'owner=harness-seat pid=999999 item=bd-ib-queue-child\n' > "$FLEET_LAUNCH_GMK_QUEUE_DIR/00002-5-harness-seat"
+printf 'owner=harness-seat pid=999999 item=bd-ib-other-item\n' > "$FLEET_LAUNCH_GMK_QUEUE_DIR/00003-7-harness-seat"
+ONLY_GMK=1 TICKET_NS=00002-5 "$LAUNCHER" bd-ib-queue-child > "$CASE_DIR/restart.log" 2>&1 &
+restart_pid=$!
+if wait_for_line "$CASE_DIR/restart.log" 'gmktec FIFO ticket taken at start: 00002-5-harness-seat' "$OBSERVE_WAIT_S"; then
+    pass "a restart naming the item's own existing ticket keeps that ticket's place"
+else
+    fail "a restart naming the item's own ticket did not keep it: $(grep 'ticket' "$CASE_DIR/restart.log")"
+fi
+stop_launcher "$restart_pid"
+wait "$restart_pid" 2>/dev/null || true
+rm -f "$FLEET_LAUNCH_GMK_QUEUE_DIR"/* "$FLEET_LAUNCH_GMK_QUEUE_DIR.claims"/* 2>/dev/null
+printf 'owner=harness-seat pid=999999 item=bd-ib-other-item\n' > "$FLEET_LAUNCH_GMK_QUEUE_DIR/00003-7-harness-seat"
+ONLY_GMK=1 TICKET_NS=00003-7 "$LAUNCHER" bd-ib-queue-child > "$CASE_DIR/foreign.log" 2>&1 &
+foreign_pid=$!
+if wait_for_line "$CASE_DIR/foreign.log" 'gmktec FIFO ticket taken at start' "$OBSERVE_WAIT_S" \
+    && grep -qE 'taken at start: 00011-' "$CASE_DIR/foreign.log"; then
+    pass "a TICKET_NS naming another item's ticket is not honored as a restart"
+else
+    fail "a TICKET_NS naming another item's ticket was honored: $(grep 'ticket taken' "$CASE_DIR/foreign.log")"
+fi
+stop_launcher "$foreign_pid"
+wait "$foreign_pid" 2>/dev/null || true
+
+scenario "6d. a whole-queue re-sort starts exactly one launcher per queued item"
+new_case resort-one-launcher
+queue_position_fixture
+dup_pids=()
+for n in 1 2 3 4 5; do
+    ONLY_GMK=1 "$LAUNCHER" bd-ib-queue-child > "$CASE_DIR/dup$n.log" 2>&1 &
+    dup_pids+=("$!")
+done
+dup_exits=0
+deadline=$(( $(date +%s) + OBSERVE_WAIT_S ))
+while [ "$dup_exits" -lt 4 ] && [ "$(date +%s)" -lt "$deadline" ]; do
+    dup_exits=$(cat "$CASE_DIR"/dup?.log 2>/dev/null | grep -c 'already has a live launcher for bd-ib-queue-child')
+    sleep "$HARNESS_POLL_S"
+done
+dup_tickets=$(grep -l 'item=bd-ib-queue-child' "$FLEET_LAUNCH_GMK_QUEUE_DIR"/* 2>/dev/null | wc -l)
+if [ "$dup_exits" -eq 4 ] && [ "$dup_tickets" -eq 1 ]; then
+    pass "five simultaneous launchers for one item leave one ticket and four duplicate refusals"
+else
+    fail "simultaneous launchers for one item left $dup_tickets tickets and $dup_exits refusals"
+fi
+stop_launcher "${dup_pids[@]}"
+for pid in "${dup_pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+
+scenario "6e. the committed defaults supply the parent-chain and priorities-record sources"
+new_case default-queue-sources
+open_boards
+export FLEET_LAUNCH_MAX_WAIT_S=120
+: > "$HOLD_FILE"
+default_config=$(env -i HOME="$HOME" FLEET_LAUNCH_STATE_DIR=/state FLEET_LAUNCH_GMK_QUEUE_DIR=/queue \
+    bash -c '. "$1"; printf "%s\n%s\n%s\n" "$FLEET_LAUNCH_PRIORITIES_RECORD" "$FLEET_LAUNCH_PARENT_CHAIN_COMMAND" "$FLEET_LAUNCH_GMK_CLAIM_DIR"' _ "$LAUNCH_DIR/config.sh")
+if [ "$default_config" = "/state/priorities-record
+$LAUNCH_DIR/parent-of.sh
+/queue.claims" ] && [ -x "$LAUNCH_DIR/parent-of.sh" ]; then
+    pass "config.sh defaults the priorities record, the committed parent-of.sh command and the claim directory"
+else
+    fail "config.sh defaults are not the committed sources: $default_config"
+fi
+mkdir -p "$CASE_DIR/fake-bin"
+printf '%s\n' '#!/usr/bin/env bash' \
+    'case "$2" in' \
+    '  bd-ib-default-child) printf "%s\\n" "[{\"id\":\"bd-ib-default-child\",\"dependencies\":[{\"id\":\"bd-ib-default-plan\",\"dependency_type\":\"parent-child\"},{\"id\":\"bd-ib-blocker\",\"dependency_type\":\"blocks\"}]}]" ;;' \
+    '  *) printf "%s\\n" "[{\"id\":\"$2\"}]" ;;' \
+    'esac' > "$CASE_DIR/fake-bin/bd"
+chmod +x "$CASE_DIR/fake-bin/bd"
+if [ "$(PATH="$CASE_DIR/fake-bin:$PATH" "$LAUNCH_DIR/parent-of.sh" bd-ib-default-child)" = bd-ib-default-plan ] \
+    && [ -z "$(PATH="$CASE_DIR/fake-bin:$PATH" "$LAUNCH_DIR/parent-of.sh" bd-ib-default-plan)" ]; then
+    pass "parent-of.sh reads the parent-child edge and prints nothing for a root"
+else
+    fail "parent-of.sh did not read the parent-child edge of a bd show record"
+fi
+printf '%s\n' '03 bd-ib-default-plan' > "$FLEET_LAUNCH_STATE_DIR/priorities-record"
+PATH="$CASE_DIR/fake-bin:$PATH" ONLY_GMK=1 "$LAUNCHER" bd-ib-default-child > "$CASE_DIR/default.log" 2>&1 &
+default_pid=$!
+if wait_for_line "$CASE_DIR/default.log" 'gmktec FIFO ticket taken at start' "$OBSERVE_WAIT_S" \
+    && grep -qE 'taken at start: 00003-[0-9]+-harness-seat$' "$CASE_DIR/default.log"; then
+    pass "with no override set, the launcher ranks a ticket from the default record and parent command"
+else
+    fail "the default sources did not rank the ticket: $(grep 'ticket taken' "$CASE_DIR/default.log")"
+fi
+stop_launcher "$default_pid"
+wait "$default_pid" 2>/dev/null || true
 fi
 
 # --- 6. queued preflights, reusable passes, and FIFO binds ------------------
