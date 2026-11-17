@@ -55,7 +55,7 @@ _MODULE_PATH = (
     / "_dispatcher_run_from_clones.py"
 )
 _WORKFLOW_DIR = _REPO_ROOT / ".claude-plugin" / ".fabro" / "workflows" / "implement-work-item"
-_OWNER = "thewoolleyman"
+_OWNER = "livespec-ai"
 # Every child is spawned with the repository-selecting `GIT_*` variables and the coverage
 # hooks removed: this suite can itself run under a commit hook, whose `GIT_INDEX_FILE`
 # would otherwise point a fixture's commits at the outer repository, and a child that
