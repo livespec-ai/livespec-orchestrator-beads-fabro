@@ -41,6 +41,9 @@ if [ ! -f "$LAUNCHER" ] || [ ! -f "$RESUME_LAUNCHER" ]; then
     exit 1
 fi
 
+# shellcheck source=fleet-launch/test/scenario-watchdog.sh
+. "$(dirname "$0")/scenario-watchdog.sh"
+
 HARNESS_SLICE=${1:-all}
 case "$HARNESS_SLICE" in
     all|scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|launcher-reexec|parity) ;;
@@ -65,10 +68,12 @@ stop_load() {
     LOAD_PIDS=""
 }
 cleanup() {
+    scenario_watchdog_stop
     stop_load
     rm -rf "$WORK"
 }
 trap cleanup EXIT
+scenario_watchdog_start "$WORK"
 
 PASS=0
 FAIL=0
@@ -936,7 +941,12 @@ if [ "$HARNESS_SLICE" = all ]; then
 # The count must be the LIVE rows only: not the header, and not the terminal
 # runs a real `ps -a` board carries beside them. The absent fleet-cap file is
 # what stops the launcher here, so the refusal line carries both board counts.
-echo "--- 1. reads a stub factory board"
+scenario "1. reads a stub factory board"
+if bash "$HARNESS_DIR/test-scenario-watchdog.sh" >/dev/null; then
+    pass "a scenario that runs past HARNESS_SCENARIO_TIMEOUT_S is killed, named and fails the run, while healthy scenarios are untouched"
+else
+    fail "the per-scenario watchdog regressed"
+fi
 new_case board-read
 write_board "$BOARD_GMK" 2 gmk
 write_board "$BOARD_HL" 1 hl
@@ -959,7 +969,7 @@ else
 fi
 
 # --- 2. refusing a launch at the shared fleet cap ---------------------------
-echo "--- 2. refuses a launch when the shared fleet cap is reached"
+scenario "2. refuses a launch when the shared fleet cap is reached"
 new_case fleet-cap
 write_board "$BOARD_GMK" 3 gmk
 write_board "$BOARD_HL" 1 hl
@@ -997,7 +1007,7 @@ fi
 # barrier: both launchers are parked on it, the second is then observed to have
 # queued behind the older ticket, and only then is the hold released — so the
 # later launcher cannot have slipped past the ticket check in the same poll.
-echo "--- 3. launches two queued tickets in FIFO order"
+scenario "3. launches two queued tickets in FIFO order"
 new_case fifo
 # This case PARKS both launchers on the barrier on purpose, so the give-up
 # deadline every other case leans on would fire while they are waiting for each
@@ -1049,7 +1059,7 @@ else
 fi
 
 # --- 4. holding a launch while the hold file exists -------------------------
-echo "--- 4. holds a launch while the hold file exists"
+scenario "4. holds a launch while the hold file exists"
 new_case hold
 : > "$BOARD_GMK"
 : > "$BOARD_HL"
@@ -1076,7 +1086,7 @@ fi
 # The defect this case exists for: a launcher that reads an idle board as
 # UNKNOWN sees the fleet as unknown and never launches at all. That is the
 # 2026-10-24 outage the README records, and it looks exactly like a busy fleet.
-echo "--- 5. counts a retired factory's board as zero, not as unknown"
+scenario "5. counts a retired factory's board as zero, not as unknown"
 new_case retired-board
 write_board "$BOARD_GMK" 1 gmk
 : > "$BOARD_HL"
@@ -1123,7 +1133,7 @@ fi
 # for the older launcher to bind first.  The same observation also proves that
 # its fresh pass is not needlessly repeated at the head.
 if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = scenario297 ]; then
-echo "--- 6. preflights while queued and reuses a fresh pass at the FIFO head"
+scenario "6. preflights while queued and reuses a fresh pass at the FIFO head"
 if bash "$HARNESS_DIR/test-scenario297-polling.sh"; then
     pass "the Scenario 297 cases poll observed state at the harness interval instead of sleeping fixed seconds"
 else
@@ -1182,7 +1192,7 @@ fi
 # A young pass expires while the older launcher is held in its own
 # preflight.  Its ticket must re-run the preflight at the FIFO head before it
 # can take the mutex.
-echo "--- 7. re-runs a stale queued preflight at the FIFO head"
+scenario "7. re-runs a stale queued preflight at the FIFO head"
 new_case stale-preflight
 export FLEET_LAUNCH_MAX_WAIT_S=300
 export FLEET_LAUNCH_PREFLIGHT_REUSE_S=0
@@ -1215,7 +1225,7 @@ fi
 # A queued preflight failure is terminal for that launcher.  The older ticket
 # is deliberately still in its preflight, so a failed younger launcher cannot
 # have touched the mutex on its way out.
-echo "--- 8. drops a ticket when its queued preflight fails"
+scenario "8. drops a ticket when its queued preflight fails"
 new_case queued-preflight-failure
 export FLEET_LAUNCH_MAX_WAIT_S=300
 export STUB_PREFLIGHT_SLOW_ITEM=bd-ib-failing-older
@@ -1261,7 +1271,7 @@ if [ "$HARNESS_SLICE" = all ]; then
 # shared cap.  Once the board drops by one the impl binds, restoring the cap
 # with its in-flight marker/run.  The resume keeps its own ticket while it sees
 # that cap, then starts only after the older run disappears.
-echo "--- 9. a resume waits at the fleet cap and shares the gmktec FIFO"
+scenario "9. a resume waits at the fleet cap and shares the gmktec FIFO"
 new_case resume-cap-fifo
 export FLEET_LAUNCH_MAX_WAIT_S=120
 write_board "$BOARD_GMK" 8 gmk
@@ -1317,7 +1327,7 @@ fi
 # action runs.  The release must therefore bypass that first ready-set read,
 # but only after the normal FIFO/cap binding has made space and retained its
 # in-flight marker.
-echo "--- 10. a seat-gated direct release waits for the fleet cap"
+scenario "10. a seat-gated direct release waits for the fleet cap"
 new_case direct-release-cap
 export FLEET_LAUNCH_MAX_WAIT_S=120
 export STUB_READY_BLOCKED_UNTIL_RELEASE=1
@@ -1351,7 +1361,7 @@ fi
 # kept must count against the cap for a queued second launcher: with one slot
 # free on the board, the held release fills it, so the second launcher sees the
 # fleet at the cap and starts no drive of its own.
-echo "--- 10b. a queued launcher counts a held direct release as in flight"
+scenario "10b. a queued launcher counts a held direct release as in flight"
 load_capacity=$(nproc 2>/dev/null || echo 1)
 case $load_capacity in ''|*[!0-9]*|0) load_capacity=1 ;; esac
 if [ -r /sys/fs/cgroup/cpu.max ]; then
@@ -1441,7 +1451,7 @@ stop_load
 # The resume client returns at once, before the run lists on the board.  The
 # launcher must keep its in-flight marker so concurrent launchers still count
 # the resume, and drop it only after the board lists the run.
-echo "--- 10. a resume marker stays counted after the client returns, until the board lists the run"
+scenario "10. a resume marker stays counted after the client returns, until the board lists the run"
 new_case resume-marker-retained
 : > "$BOARD_GMK"
 : > "$BOARD_HL"
@@ -1470,7 +1480,7 @@ fi
 # A regular file stands where the in-flight directory belongs, so the count of
 # in-flight launches cannot be read.  With empty boards and headroom under the
 # cap, the resume must still refuse to start.
-echo "--- 11. a resume refuses to start when the in-flight directory cannot be read"
+scenario "11. a resume refuses to start when the in-flight directory cannot be read"
 new_case resume-inflight-unreadable
 : > "$BOARD_GMK"
 : > "$BOARD_HL"
@@ -1491,7 +1501,7 @@ fi
 # its marker (the hook below does both, after the read has captured its rows).
 # The resume must still count that launch: its board read predates the listing,
 # so the marker it read must be counted, and the fleet stays at the cap.
-echo "--- 12. a launch listed between the board read and the marker read stays counted"
+scenario "12. a launch listed between the board read and the marker read stays counted"
 new_case resume-listing-race
 export FLEET_LAUNCH_MAX_WAIT_S=6
 write_board "$BOARD_GMK" 7 gmk
@@ -1519,7 +1529,7 @@ fi
 
 # --- 14. the impl launcher counts a launch listed mid-read too -------------
 # The same race as case 12, against the impl launcher's fleet-green count.
-echo "--- 13. the impl launcher keeps a launch listed mid-read counted"
+scenario "13. the impl launcher keeps a launch listed mid-read counted"
 new_case impl-listing-race
 export FLEET_LAUNCH_MAX_WAIT_S=6
 write_board "$BOARD_GMK" 7 gmk
@@ -1550,7 +1560,7 @@ fi
 # for the whole wait window, yet the factory server is asked for ONE listing per factory:
 # the first launcher refreshes the snapshot and the others read it, instead of each sending the
 # server a listing of its own on every poll (bd-ib-busjvz).
-echo "--- 14. queued launchers read one shared board snapshot"
+scenario "14. queued launchers read one shared board snapshot"
 new_case snapshot-shared
 export FLEET_LAUNCH_MAX_WAIT_S=4
 export FLEET_LAUNCH_BOARD_TTL_S=300
@@ -1585,7 +1595,7 @@ fi
 # but before it takes the now-free lock. Make that window deterministic: the
 # first age check says stale while writing the peer's fresh snapshot. The
 # post-lock age check must then read that snapshot without another listing.
-echo "--- 14a. a refresh handoff re-checks the shared board snapshot"
+scenario "14a. a refresh handoff re-checks the shared board snapshot"
 new_case snapshot-refresh-handoff
 export FLEET_LAUNCH_BOARD_TTL_S=300
 mkdir -p "$SNAPSHOT_DIR"
@@ -1610,7 +1620,7 @@ else
 fi
 
 # --- 15. an old snapshot is refreshed, a young one is not -------------------
-echo "--- 15. a snapshot older than the TTL is refreshed before the count"
+scenario "15. a snapshot older than the TTL is refreshed before the count"
 new_case snapshot-ttl
 export FLEET_LAUNCH_BOARD_TTL_S=300
 write_board "$BOARD_GMK" 3 gmk
@@ -1637,7 +1647,7 @@ else
 fi
 
 # --- 16. a refresh that cannot read the board is unknown, not zero ----------
-echo "--- 16. an unreadable refresh leaves the fleet count unknown"
+scenario "16. an unreadable refresh leaves the fleet count unknown"
 new_case snapshot-unreadable
 export FLEET_LAUNCH_BOARD_TTL_S=300
 write_board "$BOARD_GMK" 0 gmk
@@ -1658,7 +1668,7 @@ fi
 # The snapshot says one run is live, the factory has seven. The green check reads the snapshot and
 # passes; the binding count under the mutex must read the factory and refuse. Then the same
 # launcher, once the factory agrees with the snapshot, launches (the positive control).
-echo "--- 17. the binding count reads the board directly, not the snapshot"
+scenario "17. the binding count reads the board directly, not the snapshot"
 new_case snapshot-binding
 export FLEET_LAUNCH_BOARD_TTL_S=300
 export FLEET_LAUNCH_MAX_WAIT_S=6
@@ -1686,7 +1696,7 @@ else
 fi
 
 # --- 18. launcher lines carry a UTC date-time -------------------------------
-echo "--- 18. launcher log lines are stamped with an ISO-8601 UTC date-time"
+scenario "18. launcher log lines are stamped with an ISO-8601 UTC date-time"
 new_case iso-stamp
 write_board "$BOARD_GMK" 2 gmk
 write_board "$BOARD_HL" 1 hl
@@ -1721,7 +1731,7 @@ if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = scenario242 ]; then
 start_named_drive() {
     python3 -c 'import time; time.sleep(600)' drive.py --action "impl:$1" &
 }
-echo "--- 18a. releases a listed-and-finished drive's stale marker"
+scenario "18a. releases a listed-and-finished drive's stale marker"
 new_case listed-marker-left-board
 export FLEET_LAUNCH_MAX_WAIT_S=4
 write_board "$BOARD_GMK" 7 gmk
@@ -1778,7 +1788,7 @@ fi
 # after the impl launcher has reached the mutex, proving that the binding path
 # re-reads the hold before it can call drive.
 if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = scenario316 ]; then
-echo "--- 19. repository holds scope launch kinds and are re-read under the mutex"
+scenario "19. repository holds scope launch kinds and are re-read under the mutex"
 new_case repository-hold-dispatch
 export FLEET_LAUNCH_MAX_WAIT_S=120
 : > "$BOARD_GMK"
@@ -1934,7 +1944,7 @@ fi
 # waits must stop it before any run is submitted and keep the launcher's ticket;
 # a hold created once the item reads `active` must not.
 if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = scenario330 ]; then
-echo "--- 20. holds are re-read until admission"
+scenario "20. holds are re-read until admission"
 
 # prepare_330_case <name>: a fresh case with empty boards and a waiting drive.
 prepare_330_case() {
@@ -2290,7 +2300,7 @@ fi
 # and one ledger comment on the item when the item still reads ready. Each refusal is contrasted
 # with a launch that leaves neither.
 if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = scenario312 ]; then
-echo "--- 23. a launcher that exits without a run leaves a terminal line and a ledger comment"
+scenario "23. a launcher that exits without a run leaves a terminal line and a ledger comment"
 
 # make_rm_probe: a PATH directory whose `rm` records, for each queue ticket it removes, whether the
 # launcher's own log already carried a terminal line and a stall line at that moment.
@@ -2747,7 +2757,7 @@ as_legacy_launcher() {
 }
 ticket_pid() { grep -oE 'pid=[0-9]+' "$1" 2>/dev/null | sed -n 1p; }
 
-echo "--- 21. an impl launcher started before a hold check was added honours the hold"
+scenario "21. an impl launcher started before a hold check was added honours the hold"
 new_case launcher-reexec-dispatch
 export FLEET_LAUNCH_MAX_WAIT_S=120
 launchers="$CASE_DIR/launchers"
@@ -2792,7 +2802,7 @@ fi
 stop_launcher "$reexec_pid"
 wait "$reexec_pid" 2>/dev/null
 
-echo "--- 21a. an impl launcher bound at the mutex re-reads changed hold code before launching"
+scenario "21a. an impl launcher bound at the mutex re-reads changed hold code before launching"
 new_case launcher-reexec-launch-point
 export FLEET_LAUNCH_MAX_WAIT_S=120
 launchers="$CASE_DIR/launchers"
@@ -2830,7 +2840,7 @@ fi
 stop_launcher "$reexec_pid"
 wait "$reexec_pid" 2>/dev/null
 
-echo "--- 21b. a resume launcher started before a hold check was added honours the hold"
+scenario "21b. a resume launcher started before a hold check was added honours the hold"
 new_case launcher-reexec-resume
 export FLEET_LAUNCH_MAX_WAIT_S=120
 launchers="$CASE_DIR/launchers"
@@ -2895,7 +2905,7 @@ else
 fi
 stop_launcher "$reexec_pid"
 
-echo "--- 22. launcher-versions.sh marks the launcher running a stale script"
+scenario "22. launcher-versions.sh marks the launcher running a stale script"
 new_case launcher-versions
 export FLEET_LAUNCH_MAX_WAIT_S=120
 stale_dir="$CASE_DIR/stale-launchers"
@@ -2948,7 +2958,7 @@ fi
 if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = scenario307 ]; then
 
 
-echo "--- 23. a repository at its wip_cap yields the FIFO head without a preflight"
+scenario "23. a repository at its wip_cap yields the FIFO head without a preflight"
 new_case wip-at-cap
 export FLEET_LAUNCH_MAX_WAIT_S=120
 open_boards
@@ -2975,7 +2985,7 @@ else
     wait "$wip_pid" 2>/dev/null
 fi
 
-echo "--- 24. only a breakage-exception item passes the WIP gate one above the cap"
+scenario "24. only a breakage-exception item passes the WIP gate one above the cap"
 new_case wip-breakage-exception
 export FLEET_LAUNCH_MAX_WAIT_S=120
 open_boards
@@ -3009,7 +3019,7 @@ fi
 stop_launcher "$above_pid"
 wait "$above_pid" 2>/dev/null
 
-echo "--- 25. an unreadable counted-claims count does not hold the launch"
+scenario "25. an unreadable counted-claims count does not hold the launch"
 new_case wip-unreadable
 open_boards
 printf '9\n' > "$STUB_WIP_COUNT_FILE"
@@ -3023,7 +3033,7 @@ else
     tail -5 "$CASE_LOG" >&2
 fi
 
-echo "--- 26. a drive that exits before its run lists re-takes a ticket for the same item"
+scenario "26. a drive that exits before its run lists re-takes a ticket for the same item"
 new_case reticket
 open_boards
 export FLEET_LAUNCH_MAX_WAIT_S=120
@@ -3056,7 +3066,7 @@ else
     tail -6 "$CASE_LOG" >&2
 fi
 
-echo "--- 27. a failed goal template preflight is never re-ticketed"
+scenario "27. a failed goal template preflight is never re-ticketed"
 new_case reticket-goal-template
 open_boards
 export FLEET_LAUNCH_MAX_WAIT_S=120
@@ -3119,7 +3129,7 @@ else
     tail -6 "$CASE_LOG" >&2
 fi
 
-echo "--- 28. the gmktec hold path is assigned in each launcher and checked at the launch point"
+scenario "28. the gmktec hold path is assigned in each launcher and checked at the launch point"
 for launcher_file in "$LAUNCHER" "$RESUME_LAUNCHER"; do
     if grep -qE '^GMK_HOLD_FILE=\$FLEET_LAUNCH_HOLD_FILE$' "$launcher_file" \
         && grep -qF '[ -e "$GMK_HOLD_FILE" ]' "$launcher_file"; then
@@ -3161,7 +3171,7 @@ else
     wait "$gmk_lp_pid" 2>/dev/null
 fi
 
-echo "--- 29. the gmktec target setting names the instance a launch goes to"
+scenario "29. the gmktec target setting names the instance a launch goes to"
 new_case gmk-target-candidate
 export FLEET_LAUNCH_MAX_WAIT_S=120
 open_boards
@@ -3216,7 +3226,7 @@ for target_word in absent default; do
     fi
 done
 
-echo "--- 30. the checkout is fast-forwarded to origin's default branch before the preflight and the launch"
+scenario "30. the checkout is fast-forwarded to origin's default branch before the preflight and the launch"
 git -C "$WORK/seed" "${GIT_IDENTITY[@]}" commit --quiet --allow-empty --no-verify -m "origin advances"
 git -C "$WORK/seed" "${GIT_IDENTITY[@]}" push --quiet "$ORIGIN" master
 master_tip=$(git -C "$WORK/seed" rev-parse HEAD)
@@ -3279,7 +3289,7 @@ else
     tail -5 "$CASE_LOG" >&2
 fi
 
-echo "--- 31. a ready-set refusal lists as open blockers only dependencies that are neither closed nor done"
+scenario "31. a ready-set refusal lists as open blockers only dependencies that are neither closed nor done"
 STUB_PLUGIN="$WORK/ready-check-plugin"
 mkdir -p "$STUB_PLUGIN/scripts/bin" "$STUB_PLUGIN/scripts/livespec_orchestrator_beads_fabro/commands"
 cat > "$STUB_PLUGIN/scripts/bin/_bootstrap.py" <<'BOOTSTRAP_STUB'
@@ -3329,7 +3339,7 @@ fi
 # Each refusal carries its own positive control.
 if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = parity ]; then
 
-echo "--- 32. the fleet count sums the gmktec, candidate and mi-homelab lanes and leaves arm64 out"
+scenario "32. the fleet count sums the gmktec, candidate and mi-homelab lanes and leaves arm64 out"
 new_case fleet-sum-candidate
 export FLEET_LAUNCH_MAX_WAIT_S=120
 write_board "$BOARD_GMK" 1 gmk
@@ -3358,7 +3368,7 @@ else
     stop_launcher "$sum_pid"; wait "$sum_pid" 2>/dev/null
 fi
 
-echo "--- 33. the arm64 lane launches against its own cap only once enrolled"
+scenario "33. the arm64 lane launches against its own cap only once enrolled"
 new_case arm64-lane
 export FLEET_LAUNCH_MAX_WAIT_S=120
 write_board "$BOARD_GMK" 8 gmk
@@ -3399,7 +3409,7 @@ else
 fi
 stop_launcher "$arm_capped_pid"; wait "$arm_capped_pid" 2>/dev/null
 
-echo "--- 34. the freeze allowlist releases a listed item from the gmktec hold exactly once"
+scenario "34. the freeze allowlist releases a listed item from the gmktec hold exactly once"
 new_case allowlist-one-shot
 export FLEET_LAUNCH_MAX_WAIT_S=120
 open_boards
@@ -3432,7 +3442,7 @@ else
     stop_launcher "$second_pid"; wait "$second_pid" 2>/dev/null
 fi
 
-echo "--- 35. a priority-1 item launches through the gmktec hold without an allowlist line"
+scenario "35. a priority-1 item launches through the gmktec hold without an allowlist line"
 new_case priority-one-release
 open_boards
 : > "$HOLD_FILE"
@@ -3459,7 +3469,7 @@ else
 fi
 stop_launcher "$p2_pid"; wait "$p2_pid" 2>/dev/null
 
-echo "--- 36. a held queue head does not block a released ticket behind it"
+scenario "36. a held queue head does not block a released ticket behind it"
 new_case held-head-skipped
 export FLEET_LAUNCH_MAX_WAIT_S=120
 open_boards
@@ -3486,7 +3496,7 @@ else
     stop_launcher "$held_pid"; wait "$held_pid" 2>/dev/null
 fi
 
-echo "--- 37. a canary repository hold yields every launch except an exempt item"
+scenario "37. a canary repository hold yields every launch except an exempt item"
 new_case canary-hold
 export FLEET_LAUNCH_MAX_WAIT_S=120
 open_boards
@@ -3516,7 +3526,7 @@ else
     stop_launcher "$canary_pid"; wait "$canary_pid" 2>/dev/null
 fi
 
-echo "--- 38. launch-time commands run under the target repository's committed credential wrapper"
+scenario "38. launch-time commands run under the target repository's committed credential wrapper"
 TENANT_STUB_WRAPPER="$STUB/tenant-wrapper"
 cat > "$TENANT_STUB_WRAPPER" <<'TENANT_WRAPPER_STUB'
 #!/usr/bin/env bash
@@ -3598,7 +3608,7 @@ else
     tail -4 "$CASE_LOG" >&2
 fi
 
-echo "--- 39. the configured ACP overrides and judge-model environment reach every drive"
+scenario "39. the configured ACP overrides and judge-model environment reach every drive"
 new_case routing
 open_boards
 printf '# a comment\nNODE_A={"a": 1}\n\nNODE_B={"b": 2}\n' > "$FLEET_LAUNCH_ACP_OVERRIDES_FILE"
@@ -3619,7 +3629,7 @@ else
     fail "an absent overrides file still routed the drive: $(cat "$STUB_DRIVE_ENV_LOG")"
 fi
 
-echo "--- 40. a host-only item exits before the mutex and the preflight with one comment"
+scenario "40. a host-only item exits before the mutex and the preflight with one comment"
 new_case host-only
 open_boards
 export STUB_HOST_ONLY_JSON="$CASE_DIR/host-only.json"
@@ -3647,7 +3657,7 @@ else
     fail "an unanswerable host-only screen stopped the launch (rc=$RC)"
 fi
 
-echo "--- 41. a ticket marked wip-wait=1 by the interim launcher is skipped like a held= ticket"
+scenario "41. a ticket marked wip-wait=1 by the interim launcher is skipped like a held= ticket"
 new_case wip-wait-skipped
 open_boards
 mkdir -p "$FLEET_LAUNCH_GMK_QUEUE_DIR"
@@ -3663,7 +3673,7 @@ else
     tail -5 "$CASE_LOG" >&2
 fi
 
-echo "--- 42. the repository WIP count is read once per time-to-live and shared"
+scenario "42. the repository WIP count is read once per time-to-live and shared"
 new_case wip-shared-cache
 export FLEET_LAUNCH_MAX_WAIT_S=120
 export FLEET_LAUNCH_WIP_SHARED_TTL_S=600
@@ -3694,7 +3704,7 @@ else
     fail "a time-to-live of 0 still wrote the shared file or skipped the helper (rc=$RC)"
 fi
 
-echo "--- 43. a resume honours the gmktec hold with its allowlist release, consumed at RESUME, through the resume helper"
+scenario "43. a resume honours the gmktec hold with its allowlist release, consumed at RESUME, through the resume helper"
 new_case resume-allowlist
 export FLEET_LAUNCH_MAX_WAIT_S=120
 open_boards
@@ -3728,7 +3738,7 @@ else
     tail -4 "$CASE_LOG" >&2
 fi
 
-echo "--- 44. the size screen holds an item whose materialized workflow would exceed the cap"
+scenario "44. the size screen holds an item whose materialized workflow would exceed the cap"
 new_case size-screen-hold
 open_boards
 export FLEET_LAUNCH_SIZE_SCREEN=1
@@ -3756,7 +3766,7 @@ else
     fail "a LAUNCH size verdict did not launch (rc=$RC)"
 fi
 
-echo "--- 45. the slot-narrowing wrapper strips slots INSIDE the target's committed credential_wrapper chain"
+scenario "45. the slot-narrowing wrapper strips slots INSIDE the target's committed credential_wrapper chain"
 # The stub family wrapper projects what the host wrapper projects: a personal App pair, the org pair
 # and the slot tokens. Values are stubs; the probe prints which pair the child holds, whether the
 # unnumbered token is the judge slot's, and the NAMES of the numbered slots left, never a value.
@@ -3799,7 +3809,7 @@ else
     fail "an unreadable credential_wrapper did not make the slot-narrowing wrapper refuse (rc=$unreadable_rc): $unreadable_out"
 fi
 
-echo "--- 46. early exits are bounded per window, and a -refused stage is a permanent refusal"
+scenario "46. early exits are bounded per window, and a -refused stage is a permanent refusal"
 new_case reticket-bound
 open_boards
 export FLEET_LAUNCH_MAX_WAIT_S=120
@@ -3831,7 +3841,7 @@ else
     tail -6 "$CASE_LOG" >&2
 fi
 
-echo "--- 47. the homelab wrapper argv names the committed homelab credential wrapper, never a parameter value"
+scenario "47. the homelab wrapper argv names the committed homelab credential wrapper, never a parameter value"
 if [ "$(sed -n 1p "$LAUNCH_DIR/wrappers/homelab-wrapper.argv")" = "/home/ubuntu/workspace/homelab/with-homelab-credentials.sh" ] \
     && [ "$(sed -n 2p "$LAUNCH_DIR/wrappers/homelab-wrapper.argv")" = "--" ] && [ "$(grep -c . "$LAUNCH_DIR/wrappers/homelab-wrapper.argv")" = 2 ]; then
     pass "homelab-wrapper.argv is the homelab repository's committed credential wrapper followed by --"
@@ -3839,7 +3849,7 @@ else
     fail "homelab-wrapper.argv does not carry the homelab credential wrapper route"
 fi
 
-echo "--- 48. a committed family-wrapper argv reaches the command intact: the child holds the org App pair"
+scenario "48. a committed family-wrapper argv reaches the command intact: the child holds the org App pair"
 # Value-free: the stub family wrapper projects a personal App id and an org pair, exactly as the
 # host wrapper does, and the probe prints only WHICH pair the child holds, never a value. The
 # 2026-11-15 defect printed personal-app here, because the argv was dropped on argv[0]'s basename.
