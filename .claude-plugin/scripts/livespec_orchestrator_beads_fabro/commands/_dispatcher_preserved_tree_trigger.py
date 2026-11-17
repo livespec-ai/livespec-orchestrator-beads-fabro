@@ -117,18 +117,35 @@ def terminal_patch_digest(*, patch: str) -> tuple[int, str]:
 
 
 def preservation_trigger(
-    *, failure_text: str, records: tuple[dict[str, Any], ...] | None
+    *,
+    failure_text: str,
+    records: tuple[dict[str, Any], ...] | None,
+    failed_ending: bool = False,
+    needs_human_ref_on_origin: bool | None = None,
 ) -> PreservationTrigger:
-    """Decide whether this run's tree must be published to a preservation ref."""
+    """Decide whether this run's tree must be published to a preservation ref.
+
+    A run that ended on a failed engine checkpoint is decided as it always was.
+    A run that ended FAILED some other way (`failed_ending`) is decided the same
+    way once origin is known to carry no needs-human ref that holds its work
+    (`needs_human_ref_on_origin`, True only for a ref that HOLDS the run's work):
+    False and None both attempt, because a listing or comparison that could not
+    be taken is never evidence that a ref holds the work.
+    """
     node = _node(failure_text=failure_text, records=records)
     if node is _NO_CHECKPOINT_FAILURE:
-        return PreservationTrigger(
-            preserves=False,
-            reason="the run records no failed engine checkpoint, so no tree is unpreserved",
-            node=None,
-            terminal_patch_bytes=None,
-            terminal_patch_sha256=None,
-        )
+        if not failed_ending or needs_human_ref_on_origin is True:
+            return PreservationTrigger(
+                preserves=False,
+                reason=(
+                    "the run records no failed engine checkpoint and no failed ending"
+                    " without a needs-human ref holding its work, so no tree is unpreserved"
+                ),
+                node=None,
+                terminal_patch_bytes=None,
+                terminal_patch_sha256=None,
+            )
+        node = None
     # BEFORE any patch lookup. See the module docstring: an unreadable stream
     # that fell through to a patch search would report "no patch" and suppress
     # the one publication the clause makes mandatory.
