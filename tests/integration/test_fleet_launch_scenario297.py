@@ -96,6 +96,16 @@ def test_scenario297_queued_preflight_harness_runs_from_the_check_aggregate() ->
     assert "0 failed" in combined, combined
 
 
+def test_scenario297_stale_queued_preflight_accepts_extra_head_polls() -> None:
+    """A stale pass may be retried more than once before the FIFO head binds."""
+    harness = (_REPO_ROOT / "fleet-launch" / "test" / "run-tests.sh").read_text(encoding="utf-8")
+    stale_case = harness.split(
+        'scenario "7. re-runs a stale queued preflight at the FIFO head"', maxsplit=1
+    )[1].split('scenario "8. drops a ticket when its queued preflight fails"', maxsplit=1)[0]
+
+    assert '[ "$(preflight_count bd-ib-stale-younger)" -ge 2 ]' in stale_case
+
+
 def _run_wait_for_preflight(
     *, launcher_exits_during_first_read: bool
 ) -> subprocess.CompletedProcess[str]:
