@@ -71,6 +71,18 @@ seeded_open_red_declared() {
     grep -q '^##[[:space:]]\+seeded-open-red\([[:space:]]\|$\)' "$handoff"
 }
 
+seeded_red_passes_declared() {
+    local handoff=""
+    handoff="$(git rev-parse --git-path "$HANDOFF_NAME")"
+    grep -q '^##[[:space:]]\+seeded-red-passes\([[:space:]]\|$\)' "$handoff"
+}
+
+commit_red_nothing_to_commit_declared() {
+    local handoff=""
+    handoff="$(git rev-parse --git-path "$HANDOFF_NAME")"
+    grep -q '^Cause: LIVESPEC_COMMIT_RED_NOTHING_TO_COMMIT:' "$handoff"
+}
+
 current_engine_run_id() {
     local branch=""
     if [[ -n "${FABRO_RUN_ID:-}" ]]; then
@@ -135,6 +147,13 @@ fold_checkpoints() {
         ((depth += 1))
         ref="HEAD~${depth}"
     done
+    if seeded_red_passes_declared || commit_red_nothing_to_commit_declared; then
+        if (( depth > 0 )); then
+            git reset --soft "HEAD~${depth}"
+        fi
+        printf '%s\n' "LIVESPEC_COMMIT_GREEN_SEEDED_RED_PASSES: the Red test already passed in the carried seed, so no Red or Green commit was needed"
+        return
+    fi
     if ! seeded_open_red_declared || ! open_seed_red "$ref"; then
         printf '%s\n' "current run's own Red commit was not found beneath checkpoint commits ($(red_search_evidence "$depth"))"
         return 2
@@ -302,6 +321,19 @@ main() {
         append_verdict "$handoff" "$status" "$output" "$cause"
         append_reentry_class "$handoff" "$output" "$mechanical_targets" "$reentries"
         return "$status"
+    fi
+    if [[ "$cause" == LIVESPEC_COMMIT_GREEN_SEEDED_RED_PASSES:* ]]; then
+        if ! git diff --cached --quiet; then
+            cause="${cause}; Green left staged changes despite the already-complete seed"
+            : > "$output"
+            printf '%s\n' "commit_green: $cause" >&2
+            append_verdict "$handoff" 2 "$output" "$cause"
+            append_reentry_class "$handoff" "$output" "$mechanical_targets" "$reentries"
+            return 2
+        fi
+        printf '%s\n' "$cause" | tee "$output"
+        append_verdict "$handoff" 0 "$output" "$cause"
+        return 0
     fi
     set +e
     git commit --amend --no-edit >"$output" 2>&1

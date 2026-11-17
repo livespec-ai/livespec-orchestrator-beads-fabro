@@ -10,6 +10,14 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dot_graph import par
 _ROOT = Path(__file__).parents[2]
 _RED = _ROOT / "dev-tooling" / "commit-red.sh"
 _GREEN = _ROOT / "dev-tooling" / "commit-green.sh"
+_RED_PROGRAM = (
+    _ROOT
+    / ".claude-plugin/scripts/livespec_orchestrator_beads_fabro/commands/_dispatcher_commit_red_program.sh"
+)
+_GREEN_PROGRAM = (
+    _ROOT
+    / ".claude-plugin/scripts/livespec_orchestrator_beads_fabro/commands/_dispatcher_commit_green_program.sh"
+)
 _WORKFLOW = _ROOT / ".claude-plugin/.fabro/workflows/implement-work-item/workflow.fabro"
 _RED_PROMPT = _ROOT / ".claude-plugin/.fabro/workflows/implement-work-item/prompts/red.md"
 _GREEN_PROMPT = _ROOT / ".claude-plugin/.fabro/workflows/implement-work-item/prompts/green.md"
@@ -240,3 +248,83 @@ def test_seeded_routes_and_prompts_direct_the_open_red_path() -> None:
     assert "seeded-open-red" in green
     assert "never declare `already-satisfied` for such a seed" in " ".join(red.lower().split())
     assert "dispatch base" in red
+
+
+def test_seeded_tree_whose_red_test_already_passes_skips_commit_red() -> None:
+    """A complete seeded tree reaches Green without making an empty Red commit."""
+    graph = parse_dot_graph(text=_WORKFLOW.read_text(encoding="utf-8"))
+    assert not isinstance(graph, str), graph
+    edges = {
+        (edge.source, edge.destination, edge.attributes.get("condition")) for edge in graph.edges
+    }
+
+    assert ("red", "green_admission", "preferred_label=seeded-red-passes") in edges
+
+
+def test_seeded_red_passes_prompt_preserves_the_complete_seed() -> None:
+    """The agent-facing prompts name the no-empty-Red handoff and outcome."""
+    red = _RED_PROMPT.read_text(encoding="utf-8")
+    green = _GREEN_PROMPT.read_text(encoding="utf-8")
+    red_program = _RED_PROGRAM.read_text(encoding="utf-8")
+    green_program = _GREEN_PROGRAM.read_text(encoding="utf-8")
+
+    assert "## seeded-red-passes" in red
+    assert '{"preferred_next_label": "seeded-red-passes"}' in red
+    assert "never enters `commit_red`" in red
+    assert "seeded-red-passes" in green
+    assert "LIVESPEC_COMMIT_RED_NOTHING_TO_COMMIT" in red_program
+    assert "LIVESPEC_COMMIT_GREEN_SEEDED_RED_PASSES" in green_program
+
+
+def test_empty_commit_red_names_its_outcome_then_green_does_not_reenter_red(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A no-op Red command reaches Green once instead of spending the Red bound."""
+    monkeypatch.setenv("FABRO_RUN_ID", "current-run")
+    repo = _repository(tmp_path=tmp_path)
+    test_file = repo / "tests" / "test_feature.py"
+    test_file.parent.mkdir()
+    _ = test_file.write_text("def test_feature() -> None:\n    assert True\n", encoding="utf-8")
+    _git(repo=repo, argv=["add", "--all"])
+    _git(repo=repo, argv=["commit", "--quiet", "-m", "feat: carried test"])
+    carried = _git(repo=repo, argv=["rev-parse", "HEAD"])
+    _checkpoint(repo=repo, name="red", run_id="current-run")
+    handoff = _handoff(repo=repo, text="## red\nRed test file: tests/test_feature.py\n")
+
+    red = _run(repo=repo, argv=["bash", str(_RED_PROGRAM)], check=False)
+
+    assert red.returncode == 0, red.stderr
+    assert "LIVESPEC_COMMIT_RED_NOTHING_TO_COMMIT" in red.stdout
+    assert "LIVESPEC_COMMIT_RED_NOTHING_TO_COMMIT" in handoff.read_text(encoding="utf-8")
+    assert _git(repo=repo, argv=["rev-parse", "HEAD"]) == carried
+    _checkpoint(repo=repo, name="green", run_id="current-run")
+
+    green = _run(repo=repo, argv=["bash", str(_GREEN_PROGRAM)], check=False)
+
+    assert green.returncode == 0, green.stderr
+    assert "LIVESPEC_COMMIT_GREEN_SEEDED_RED_PASSES" in green.stdout
+    assert _git(repo=repo, argv=["rev-parse", "HEAD"]) == carried
+
+
+def test_seeded_red_that_already_passes_needs_no_command_commit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A complete seed bypasses Red and Green command commits without a refusal."""
+    monkeypatch.setenv("FABRO_RUN_ID", "current-run")
+    repo = _repository(tmp_path=tmp_path)
+    product = repo / "src" / "pkg" / "feature.py"
+    _ = product.write_text("VALUE = 2\n", encoding="utf-8")
+    test_file = repo / "tests" / "test_feature.py"
+    test_file.parent.mkdir()
+    _ = test_file.write_text("def test_feature() -> None:\n    assert True\n", encoding="utf-8")
+    _git(repo=repo, argv=["add", "--all"])
+    _git(repo=repo, argv=["commit", "--quiet", "-m", "feat: seeded implementation"])
+    seeded = _git(repo=repo, argv=["rev-parse", "HEAD"])
+    _checkpoint(repo=repo, name="green", run_id="current-run")
+    _handoff(repo=repo, text="## seeded-red-passes\nRed test file: tests/test_feature.py\n")
+
+    completed = _run(repo=repo, argv=["bash", str(_GREEN_PROGRAM)], check=False)
+
+    assert completed.returncode == 0, completed.stderr
+    assert _git(repo=repo, argv=["rev-parse", "HEAD"]) == seeded
+    assert "LIVESPEC_COMMIT_GREEN_SEEDED_RED_PASSES" in completed.stdout

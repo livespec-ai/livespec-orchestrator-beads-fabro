@@ -227,7 +227,7 @@ def test_an_unknown_red_label_is_refused_into_the_handoff_and_re_enters_red(
     handoff = (checkout / ".git" / "livespec-implement-handoff.md").read_text(encoding="utf-8")
     assert "## red-label-refused" in handoff
     assert "'publish_draft'" in handoff
-    assert "seeded-open-red, already-satisfied and needs-human" in handoff
+    assert "seeded-open-red, seeded-red-passes, already-satisfied and needs-human" in handoff
 
 
 def test_an_unknown_green_label_grades_a_stated_completion_and_refuses_the_rest(

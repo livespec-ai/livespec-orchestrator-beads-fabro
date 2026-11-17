@@ -563,7 +563,11 @@ def test_the_implement_graph_still_routes_the_red_and_green_labels() -> None:
 @pytest.mark.parametrize(
     ("node", "route", "known"),
     [
-        ("red", "red_unknown_label_route", {"seeded-open-red", "already-satisfied", "needs-human"}),
+        (
+            "red",
+            "red_unknown_label_route",
+            {"seeded-open-red", "seeded-red-passes", "already-satisfied", "needs-human"},
+        ),
         ("green", "green_unknown_label_route", {"test-wrong", "needs-human"}),
     ],
 )
@@ -590,6 +594,7 @@ def test_the_red_and_green_prompts_direct_each_routed_label() -> None:
     green = (_PROMPTS / "green.md").read_text(encoding="utf-8")
 
     assert '{"preferred_next_label": "seeded-open-red"}' in red
+    assert '{"preferred_next_label": "seeded-red-passes"}' in red
     assert '{"preferred_next_label": "already-satisfied"}' in red
     assert '{"preferred_next_label": "test-wrong"}' in green
     assert '{"preferred_next_label": "needs-human"}' in red

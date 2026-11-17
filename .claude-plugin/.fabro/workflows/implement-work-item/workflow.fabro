@@ -604,7 +604,7 @@ chmod 755 \"$runner\""
         shape=parallelogram
         timeout="1800s"
         stdin_source="context.response.red"
-        script="handoff=$(git rev-parse --git-path livespec-implement-handoff.md) || exit $?; response=$(cat); label=$(printf %s \"$response\" | grep -o '\"preferred_next_label\" *: *\"[^\"]*\"' | tail -n 1 | sed 's/.*: *\"//; s/\"$//'); message=\"LIVESPEC_RED_UNKNOWN_LABEL: the red turn ended with preferred_next_label '$label', which no edge of this graph routes; the Red stage routes only seeded-open-red, already-satisfied and needs-human, and an ordinary Red ends with its handoff section and no label; re-entering red\"; printf '\\n## red-label-refused\\n\\n%s\\n' \"$message\" >> \"$handoff\"; printf '%s\\n' \"$message\" >&2; exit 1"
+        script="handoff=$(git rev-parse --git-path livespec-implement-handoff.md) || exit $?; response=$(cat); label=$(printf %s \"$response\" | grep -o '\"preferred_next_label\" *: *\"[^\"]*\"' | tail -n 1 | sed 's/.*: *\"//; s/\"$//'); message=\"LIVESPEC_RED_UNKNOWN_LABEL: the red turn ended with preferred_next_label '$label', which no edge of this graph routes; the Red stage routes only seeded-open-red, seeded-red-passes, already-satisfied and needs-human, and an ordinary Red ends with its handoff section and no label; re-entering red\"; printf '\\n## red-label-refused\\n\\n%s\\n' \"$message\" >> \"$handoff\"; printf '%s\\n' \"$message\" >&2; exit 1"
     ]
 
     green_unknown_label_route [
@@ -2640,8 +2640,9 @@ script="cut_root=$(printenv LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT || true); if te
     red -> implement_amendment_route [label="Definition-of-Done amendment", condition="outcome=failed"]
     red -> already_satisfied_route [label="already satisfied", condition="preferred_label=already-satisfied"]
     red -> green_admission [label="seeded open Red", condition="preferred_label=seeded-open-red"]
+    red -> green_admission [label="seeded Red already passes", condition="preferred_label=seeded-red-passes"]
     red -> red_needs_human_route [label="needs-human label", condition="preferred_label=needs-human"]
-    red -> red_unknown_label_route [label="unrouted label", condition="preferred_label && preferred_label != seeded-open-red && preferred_label != already-satisfied && preferred_label != needs-human"]
+    red -> red_unknown_label_route [label="unrouted label", condition="preferred_label && preferred_label != seeded-open-red && preferred_label != seeded-red-passes && preferred_label != already-satisfied && preferred_label != needs-human"]
     red -> commit_red
     already_satisfied_route -> red_admission [label="carried changes", condition="preferred_label=carried"]
     already_satisfied_route -> already_satisfied

@@ -34,7 +34,7 @@ re-entry, and it states the mechanical re-entries remaining. A section that
 says `Refusal: ordinary.` spent the ordinary re-entry. Either way, fix the
 named targets and run the gate preview below before ending.
 
-1. Make the Red test pass by changing implementation files only. Never change the Red test file. When the handoff declares `seeded-open-red`, preserve the seed's changes and take that route through this Green turn even when no new Red test was written: `commit_green` folds the seed checkpoints into the existing replay-evidenced commit.
+1. Make the Red test pass by changing implementation files only. Never change the Red test file. When the handoff declares `seeded-open-red`, preserve the seed's changes and take that route through this Green turn even when no new Red test was written: `commit_green` folds the seed checkpoints into the existing replay-evidenced commit. When it declares `seeded-red-passes`, the placed seed already contains the complete Red/Green tree: run that named test, make no replacement Red commit, and leave the carried tree intact for `commit_green` to record as its named no-change outcome.
 2. Run only the tests your change touches. Do not make a commit.
 3. Before ending, run
 
