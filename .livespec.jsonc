@@ -1,10 +1,4 @@
 {
-  "livespec-orchestrator-beads-fabro": {
-    "dispatcher": {
-      "record_files": [
-        {"path": "record.json", "format": "json-array", "key": ["id"]},
-        {"path": "notes.md", "format": "markdown-insertions"}
-      ]
-    }
-  }
+  // a comment
+  "spec_root": "SPEC"
 }
