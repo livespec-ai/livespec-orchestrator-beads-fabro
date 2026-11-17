@@ -485,6 +485,25 @@ def test_a_warning_or_absent_seven_day_reading_skips_nothing(
     assert assessment["seven_day"] == expected_weekly
 
 
+def test_the_default_weekly_floor_skips_a_warning_slot_below_its_reserve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 99%-used weekly allowance leaves less than the default 10% reserve."""
+    repo, exit_code, launches, _ = _drive(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        weekly_status="allowed_warning",
+        weekly_utilization="0.99",
+    )
+
+    assert exit_code == 0
+    assert launches == ["bd-ib-weekly"]
+    selection = _headroom_record(repo=repo)["node_selections"][_NODE]
+    assert selection["selected_candidate_key"] == _FALLBACK_KEY
+    [skipped] = selection["headroom_skipped"]
+    assert skipped["headroom_skip_kind"] == "seven-day-floor"
+
+
 def test_a_floor_of_zero_disables_the_seven_day_skip_and_still_journals_the_reading(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

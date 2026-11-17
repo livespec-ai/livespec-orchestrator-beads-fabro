@@ -371,7 +371,11 @@ def _headroom_skip(
     for assessed in (*pooled, reading):
         if assessed not in assessments:
             assessments.append(assessed)
-    kind = headroom_skip_kind(reading=reading, floor_percent=policy.floor_percent)
+    kind = headroom_skip_kind(
+        reading=reading,
+        floor_percent=policy.floor_percent,
+        weekly_floor_percent=policy.weekly_floor_percent,
+    )
     if kind is None:
         return None
     return ephemeral_skip(
