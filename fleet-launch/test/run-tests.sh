@@ -2584,6 +2584,16 @@ if grep -Eq '^[[:space:]]*trap .+ TERM$' "$LAUNCHER" "$RESUME_LAUNCHER"; then
 else
     pass "the launchers use the default TERM exit rather than a parseable TERM trap action"
 
+    # INT and HUP have the same bash 5.2 trap-delivery parser hazard as TERM.
+    # An action registered with trap is parsed at signal delivery, including
+    # while the launcher is evaluating a command substitution, so neither
+    # launcher may retain an INT or HUP trap action.
+    if grep -Eq '^[[:space:]]*trap .+ (INT|HUP)$' "$LAUNCHER" "$RESUME_LAUNCHER"; then
+        fail "the launchers install an INT or HUP trap action bash must parse during command substitution"
+    else
+        pass "the launchers use default INT and HUP exits rather than parseable trap actions"
+    fi
+
     # This PATH-local sed pauses inside repository_hold_applies' $(sed ...) read.
     # The parent waits for its gate before delivering TERM, and adds a small
     # random jitter across 200 deliveries so the proof covers distinct parser

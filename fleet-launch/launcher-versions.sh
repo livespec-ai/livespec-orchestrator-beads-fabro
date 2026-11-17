@@ -28,8 +28,24 @@ for dir in /proc/[0-9]*; do
   pid=${dir#/proc/}
   argv=()
   mapfile -d '' -t argv < "$dir/cmdline" 2>/dev/null || continue
-  [ "${#argv[@]}" -ge 2 ] || continue
-  case ${argv[0]##*/} in bash|sh|dash) ;; *) continue ;; esac
+  script_dir=$dir
+  if tr '\0' '\n' < "$dir/environ" 2>/dev/null | grep -qx 'FLEET_LAUNCH_SIGNAL_SUPERVISOR=1'; then
+    worker=""
+    for child_dir in /proc/[0-9]*; do
+      child_pid=${child_dir#/proc/}
+      child_ppid=$(sed -n 's/^PPid:[[:space:]]*//p' "$child_dir/status" 2>/dev/null)
+      [ "$child_ppid" = "$pid" ] || continue
+      child_argv=()
+      mapfile -d '' -t child_argv < "$child_dir/cmdline" 2>/dev/null || continue
+      [ "${#child_argv[@]}" -ge 2 ] || continue
+      case ${child_argv[0]##*/} in bash|sh|dash) ;; *) continue ;; esac
+      case ${child_argv[1]##*/} in dispatch-dual*.sh|resume-capped*.sh) worker=$child_pid; argv=("${child_argv[@]}"); script_dir=$child_dir; break ;; esac
+    done
+    [ -n "$worker" ] || continue
+  else
+    [ "${#argv[@]}" -ge 2 ] || continue
+    case ${argv[0]##*/} in bash|sh|dash) ;; *) continue ;; esac
+  fi
   script=${argv[1]}
   case ${script##*/} in dispatch-dual*.sh|resume-capped*.sh) ;; *) continue ;; esac
   # A command substitution forks a copy of the launcher with the same argv; only the original counts.
@@ -37,11 +53,12 @@ for dir in /proc/[0-9]*; do
   parent_argv=()
   if [ -n "$ppid" ]; then mapfile -d '' -t parent_argv < "/proc/$ppid/cmdline" 2>/dev/null; fi
   [ "${parent_argv[1]:-}" = "$script" ] && continue
+  if [ -n "$ppid" ] && tr '\0' '\n' < "/proc/$ppid/environ" 2>/dev/null | grep -qx 'FLEET_LAUNCH_SIGNAL_SUPERVISOR=1'; then continue; fi
   case $script in
     /*) path=$script ;;
-    *) path="$(readlink "$dir/cwd" 2>/dev/null)/$script" ;;
+    *) path="$(readlink "$script_dir/cwd" 2>/dev/null)/$script" ;;
   esac
-  running=$(script_version "$dir/fd/255")
+  running=$(script_version "$script_dir/fd/255")
   on_disk=$(script_version "$path")
   if [ -z "$running" ] || [ -z "$on_disk" ]; then state=UNKNOWN
   elif [ "$running" = "$on_disk" ]; then state=current

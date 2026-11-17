@@ -44,6 +44,12 @@ LOCK=$FLEET_LAUNCH_GMK_LOCK_DIR
 . "$FLEET_LAUNCH_DIR/launch-lib.sh"
 # Under the gate runner's stall cap this detaches into its own session and exits; see launch-lib.sh.
 detach_if_under_gate_runner
+# A gate-runner launch detaches before supervision, so its new session keeps a
+# supervisor rather than leaving a worker the original launcher can no longer signal.
+if [ -z "${FLEET_LAUNCH_SIGNAL_SUPERVISOR_CHILD:-}" ]; then
+  signal_supervisor=${FLEET_LAUNCH_SIGNAL_SUPERVISOR:-"$FLEET_LAUNCH_DIR/signal-supervisor.sh"}
+  exec bash "$signal_supervisor" "$SELF" "${LAUNCHER_ARGS[@]}"
+fi
 # The queue scan and the allowlist consume in launch-lib.sh read these.
 # shellcheck disable=SC2034
 FIFO_CLASS=gmk
@@ -167,6 +173,9 @@ report_dropped_ticket() {
 cleanup() {
   local rc=$? cause=""
   trap - EXIT
+  if [ -n "${FLEET_LAUNCH_SIGNAL_CAUSE_FILE:-}" ] && [ -r "$FLEET_LAUNCH_SIGNAL_CAUSE_FILE" ]; then
+    IFS= read -r exit_cause < "$FLEET_LAUNCH_SIGNAL_CAUSE_FILE" || :
+  fi
   if [ "$resume_started" = 0 ] && [ "$terminal_written" = 0 ]; then
     case "$rc" in
       143) cause=${exit_cause:-"signal TERM (this exit was not a run ending)"} ;;
@@ -181,14 +190,9 @@ cleanup() {
   return 0
 }
 trap cleanup EXIT
-# INT and HUP keep their traps so the terminal line and the ledger comment name the signal that
-# ended the launcher: bash 5.2 reports a zero status to EXIT cleanup after a default signal exit, so
-# the status cannot tell them from TERM.  TERM alone takes bash's default exit, because a TERM trap
-# action can fail to parse while a command substitution is active (the wait loops preload TERM's
-# description instead).
-on_signal() { exit_cause="signal $1 (this exit was not a run ending)"; exit "$2"; }
-trap 'on_signal INT 130' INT
-trap 'on_signal HUP 129' HUP
+# signal-supervisor.sh records INT, HUP, and TERM before forwarding Bash's default action.  Bash 5.2
+# can fail to parse a string trap action while a command substitution is active, and its EXIT cleanup
+# otherwise observes a zero status for such a default-signal exit.
 
 # The tenant credential wrapper is resolved once: a target whose committed credential_wrapper
 # cannot be read starts no resume.
