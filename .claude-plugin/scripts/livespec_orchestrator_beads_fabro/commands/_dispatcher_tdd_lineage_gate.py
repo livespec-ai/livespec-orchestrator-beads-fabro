@@ -13,17 +13,31 @@ e = lambda x: sys.exit("LIVESPEC_TDD_LINEAGE_REFUSED: " + x)
 a = sys.argv[1:]
 if len(a) > 1:
     sys.exit("usage: livespec-tdd-lineage-gate.py [base]")
-v = ("rev-list", "--reverse", f"{a[0]}..HEAD") if a else (
-    "rev-list", "--reverse", "HEAD", "--not", "--remotes=origin"
-)
+
+
+def r(*x):
+    try:
+        return g(*x)
+    except s.CalledProcessError:
+        return ""
+
+
+d = r("rev-parse", "--verify", "--quiet", "refs/remotes/origin/HEAD^{commit}")
+for n in ("master", "main"):
+    d = d or r("rev-parse", "--verify", "--quiet", "refs/remotes/origin/" + n + "^{commit}")
+k = ("--not", d) if d else ()
+v = ("rev-list", "--reverse", f"{a[0]}..HEAD") if a else ("rev-list", "--reverse", "HEAD", *k)
 z = g(*v).split()
 if a and not z:
     z = [g("rev-parse", "HEAD")]
+o = set(g("rev-list", "--remotes=origin", *k).split())
+w = r("config", "livespec.factoryRunId")
 for c in z:
     m = dict(
         x.split(": ", 1)
         for x in g("show", "-s", "--format=%B", c).splitlines()
-        if x.startswith("TDD-") and ": " in x
+        if x.startswith("TDD-") or x.startswith("Factory-Run-Id: ")
+        if ": " in x
     )
     q = ("TDD-Red-Parent-Reflog", "TDD-Green-Parent-Reflog")
     u = m.get("TDD-Red-Test-File-Checksum")
@@ -37,6 +51,8 @@ for c in z:
         try:
             recorded_parent = g("rev-parse", m[k] + "^")
         except s.CalledProcessError:
+            if c in o:
+                continue
             e(c + " has " + k + " commit " + m[k] + " without a recorded parent")
         if recorded_parent != p:
             e(
@@ -48,6 +64,8 @@ for c in z:
                 + ", not published parent "
                 + p
             )
+    if u and t and not any(m.get(k) for k in q) and c not in o and m.get("Factory-Run-Id", w) != w:
+        e(c + " carries TDD Red evidence for " + t + " that this run never recorded on " + p)
     if u and t:
         try:
             h = hashlib.sha256(s.check_output(("git", "show", c + ":" + t))).hexdigest()
