@@ -1325,6 +1325,20 @@
   {
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
+    "heading": "## Scenario 379 — A failed run whose tree nothing else carries is published to a preservation ref even when it did not fail a checkpoint",
+    "work_item": "bd-ib-nckst7.1",
+    "first_seen": "2026-11-17"
+  },
+  {
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "heading": "## Scenario 380 — A sandbox commit's hook may delegate check-per-file-coverage to a cluster gate Job and records the check's own verdict",
+    "work_item": "bd-ib-22ckko",
+    "first_seen": "2026-11-17"
+  },
+  {
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
     "heading": "## Scenario 39 — Ratified lesson injects into dispatch briefs",
     "work_item": "bd-ib-heat",
     "first_seen": "2026-07-04"
@@ -1587,19 +1601,5 @@
     "heading": "## What this spec is not",
     "work_item": "bd-ib-heat",
     "first_seen": "2026-06-08"
-  },
-  {
-    "spec_root": "SPECIFICATION",
-    "spec_file": "scenarios.md",
-    "heading": "## Scenario 379 — A failed run whose tree nothing else carries is published to a preservation ref even when it did not fail a checkpoint",
-    "work_item": "bd-ib-nckst7.1",
-    "first_seen": "2026-11-17"
-  },
-  {
-    "spec_root": "SPECIFICATION",
-    "spec_file": "scenarios.md",
-    "heading": "## Scenario 380 — A sandbox commit's hook may delegate check-per-file-coverage to a cluster gate Job and records the check's own verdict",
-    "work_item": "bd-ib-22ckko",
-    "first_seen": "2026-11-17"
   }
 ]
