@@ -1,0 +1,70 @@
+# Label-sensitive factory-provenance gate (work-item bd-ib-35fvjp, maintainer
+# option A; follow-up bd-ib-hk3q3n removes the older ci.yml copy).
+#
+# ci.yml's check-factory-provenance job reads the `factory-override` label from
+# the pull_request event payload, and ci.yml triggers on a bare `pull_request:`
+# (opened, synchronize, reopened), so a label added or removed after CI started
+# never re-runs it. This separate workflow re-runs the SAME check
+# (`just check-factory-provenance`) on label events as well. Its job name is
+# distinct from ci.yml's `check-factory-provenance` job so it can later be made
+# a required status check on its own.
+#
+# merge_group: a required context that never reports would hang the merge
+# queue, so the job also runs on checks_requested, where it passes without
+# running the check (the pull request already passed it).
+#
+# Runner routing: a separate workflow cannot read merge-group-guard's output
+# from ci.yml, so a pull_request run uses the repository's CI_RUNNER_LABELS
+# variable exactly as ci.yml does for a pull request, and a merge_group run
+# stays on GitHub-hosted ubuntu-latest and uses no container.
+name: factory-provenance
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+env:
+  # Lane-selected uv fetch bounds, the form ci.yml carries and self_hosted_uv_lane
+  # requires of every workflow that routes through CI_RUNNER_LABELS.
+  UV_CONCURRENT_DOWNLOADS: ${{ contains(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]', 'ubuntu') && '50' || '4' }}
+  UV_HTTP_TIMEOUT: ${{ contains(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]', 'ubuntu') && '30' || '60' }}
+
+concurrency:
+  group: factory-provenance-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  factory-provenance:
+    name: factory-provenance
+    runs-on: ${{ github.event_name == 'pull_request' && fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') || 'ubuntu-latest' }}
+    container: ${{ github.event_name == 'pull_request' && fromJSON('{"image":"ghcr.io/livespec-ai/livespec-fabro-sandbox:python-v1.211.0"}') || null }}
+    env:
+      MISE_DATA_DIR: /root/.local/share/mise
+      MISE_NOT_FOUND_AUTO_INSTALL: "0"
+    steps:
+      - name: Merge group passes without running the check
+        if: ${{ github.event_name == 'merge_group' }}
+        run: echo "factory-provenance already ran on the pull request; nothing to check in a merge group."
+
+      - name: Checkout (full history; the check diffs base..head itself)
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare workspace (git trust, mise trust + install, uv sync)
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          git config --global --add safe.directory '*'
+          mise trust
+          mise install
+          uv sync --all-groups
+
+      - name: just check-factory-provenance
+        if: ${{ github.event_name == 'pull_request' }}
+        run: just check-factory-provenance
