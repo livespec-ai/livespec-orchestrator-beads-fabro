@@ -40,6 +40,8 @@ FAILED_TARGET_LINE = re.compile(r"^\s+-\s+(\S+)\s*$")
 SKIP_VARIABLE = re.compile(r"^LIVESPEC_.*(?:_SKIP|_RELAX|_DISABLE)(?:_|$)")
 CHECKPOINT_SUBJECT = re.compile(r"^fabro\([^)]*\): ")
 NO_MATCHING_STAGED_FILES = re.compile(r"\(skip\) no matching staged files")
+HOOK_STEP_RAN = re.compile(r"(?:┃\s+\S+\s+\u276f|(?:✔️|🥊)\s+\S+\s+\(\d+(?:\.\d+)? seconds\))")
+CHECKPOINT_RUN_TRAILER = re.compile(r"^Fabro-Run: ", re.MULTILINE)
 CHECKPOINT_LIMIT = 500
 
 
@@ -67,7 +69,9 @@ def checkpoint_commit(ref, root):
         return False
     subject = subject_result.stdout.strip()
     message = message_result.stdout
-    return bool(CHECKPOINT_SUBJECT.match(subject)) and "Fabro-Run: " in message
+    return bool(CHECKPOINT_SUBJECT.match(subject)) and bool(
+        CHECKPOINT_RUN_TRAILER.search(message)
+    )
 
 
 def dispatch_base(root):
@@ -155,7 +159,9 @@ def preview(stage, test_file):
         result = command(str(hook), cwd=preview_root, env=environment, check=False)
         output = result.stdout + result.stderr
         sys.stdout.write(output)
-        preview_ran = not NO_MATCHING_STAGED_FILES.search(output)
+        preview_ran = bool(HOOK_STEP_RAN.search(output)) or not bool(
+            NO_MATCHING_STAGED_FILES.search(output)
+        )
         return result.returncode, failed_targets(output), unset, preview_ran
     except (OSError, RuntimeError) as error:
         print(error, file=sys.stderr)
