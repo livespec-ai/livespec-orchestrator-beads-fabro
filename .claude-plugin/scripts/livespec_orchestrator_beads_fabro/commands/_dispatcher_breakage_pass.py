@@ -36,6 +36,7 @@ __all__: list[str] = [
 
 _CACHE_DURATION = "1h"
 _TIMEOUT_SECONDS = 30.0
+_JOBS_PAGE_SIZE = 100
 _PLUGIN_BLOCK = "livespec-orchestrator-beads-fabro"
 _FAILURE_LINE = re.compile(r"^(?:FAILED|ERROR)\s+([^\s]+)", re.MULTILINE)
 
@@ -186,10 +187,31 @@ def _failed_jobs(
 ) -> list[dict[str, object]] | None:
     if not run_id:
         return None
+    failed: list[dict[str, object]] = []
+    page = 1
+    while True:
+        jobs = _jobs_page(repo=repo, runner=runner, run_id=run_id, page=page)
+        if jobs is None:
+            return None
+        failed.extend(
+            cast("dict[str, object]", job)
+            for job in jobs
+            if isinstance(job, dict)
+            and cast("Mapping[str, object]", job).get("conclusion") == "failure"
+        )
+        if len(jobs) < _JOBS_PAGE_SIZE:
+            return failed
+        page += 1
+
+
+def _jobs_page(*, repo: Path, runner: CommandRunner, run_id: str, page: int) -> list[object] | None:
     result = _api(
         repo=repo,
         runner=runner,
-        endpoint=f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/jobs?filter=latest",
+        endpoint=(
+            f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/jobs"
+            f"?filter=latest&per_page={_JOBS_PAGE_SIZE}&page={page}"
+        ),
     )
     if result.exit_code != 0:
         return None
@@ -199,15 +221,7 @@ def _failed_jobs(
         return None
     document = cast("dict[str, object]", payload) if isinstance(payload, dict) else {}
     jobs = document.get("jobs")
-    if not isinstance(jobs, list):
-        return None
-    raw_jobs = cast("list[object]", jobs)
-    return [
-        cast("dict[str, object]", job)
-        for job in raw_jobs
-        if isinstance(job, dict)
-        and cast("Mapping[str, object]", job).get("conclusion") == "failure"
-    ]
+    return cast("list[object]", jobs) if isinstance(jobs, list) else None
 
 
 def _job_log(*, repo: Path, runner: CommandRunner, job_id: str) -> str | None:
