@@ -171,13 +171,13 @@ def _stamp() -> ClaimStamp:
     )
 
 
-def _view(*, state: str = "OPEN", armed: bool = True) -> str:
+def _view(*, state: str = "OPEN", armed: bool = True, merge_state: str = "BLOCKED") -> str:
     return json.dumps(
         {
             "number": _PR,
             "state": state,
             "autoMergeRequest": {"enabledAt": "now"} if armed else None,
-            "mergeStateStatus": "BLOCKED",
+            "mergeStateStatus": merge_state,
             "mergeCommit": {"oid": "cafe05"} if state == "MERGED" else None,
             "headRefOid": "head1111",
             "baseRefOid": "base2222",
@@ -440,3 +440,33 @@ def test_the_default_reconcile_drives_the_valves_own_command_function(
 
     assert recovery.reconcile_merged_for_claim(args=args) == 7
     assert seen == [args]
+
+
+def _behind_forge() -> _Forge:
+    return _Forge(view=_ok(stdout=_view(merge_state="BEHIND")), graphql=_ok(stdout=_NO_REQUIRED))
+
+
+def test_a_refresh_release_whose_comment_cannot_be_established_holds_the_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(recovery, "establish_comment", lambda **_: None)
+    repo = _repo(tmp_path=tmp_path)
+
+    recovered, held = _survey(repo=repo, journal=_journal(repo=repo), forge=_behind_forge())
+
+    assert recovered == ()
+    assert [h.hold_reason for h in held] == ["effect-unobservable"]
+    assert _stored().status == "active"
+
+
+def test_a_refresh_release_the_ledger_refused_holds_the_claim_with_its_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(recovery, "release_claim_to_ready", lambda **_: "claim-changed")
+    repo = _repo(tmp_path=tmp_path)
+
+    recovered, held = _survey(repo=repo, journal=_journal(repo=repo), forge=_behind_forge())
+
+    assert recovered == ()
+    assert [h.hold_reason for h in held] == ["claim-changed"]
+    assert _stored().status == "active"

@@ -44,6 +44,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_rework_admission imp
     REWORK_ADMIT_STAGE,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_grade import (
+    HANDOFF_BEHIND,
     HANDOFF_ENDED,
     HANDOFF_MERGED,
     HANDOFF_PENDING,
@@ -68,6 +69,8 @@ _STAGE_KEY = "stage"
 _WORK_ITEM_KEY = "work_item_id"
 _RUN_ID_KEY = "run_id"
 _PR_NUMBER_KEY = "pr_number"
+# The forge's word for a pull request whose base has moved past its head.
+_BEHIND = "BEHIND"
 # The row that opens each dispatch's segment of the journal.
 _DISPATCH_OPENING_STAGE = "dispatch-id"
 
@@ -202,8 +205,14 @@ def observe_handoff(
             kind=HANDOFF_UNOBSERVABLE, plan=plan, pr_number=number, pr_head=view.head
         )
     failed = tuple(name for name in view.terminal_check_failures if name in required)
+    if failed:
+        kind = HANDOFF_REQUIRED_CHECK_FAILED
+    elif view.merge_state_status == _BEHIND:
+        kind = HANDOFF_BEHIND
+    else:
+        kind = HANDOFF_PENDING
     return HandoffReading(
-        kind=HANDOFF_REQUIRED_CHECK_FAILED if failed else HANDOFF_PENDING,
+        kind=kind,
         plan=plan,
         pr_number=number,
         pr_head=view.head,
