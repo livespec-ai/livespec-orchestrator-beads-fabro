@@ -30,6 +30,7 @@ from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 __all__: list[str] = ["FilingContext", "FilingRecord", "context", "file_job", "key"]
 
 _BREAKAGE_KEY = "breakage_key"
+_BREAKAGE_KEY_LINE = "Breakage key: "
 _CHECKLIST = DefinitionOfReadyChecklist(
     single_coherent_done=True,
     autonomously_verifiable=True,
@@ -179,22 +180,29 @@ def _description(*, record: FilingRecord, job_name: str) -> str:
         " per failed job\n\n"
         f"- The failure in scheduled workflow {workflow}, job {job_name}, is corrected and the job"
         " passes.\n\n"
-        f"Run URL: {url}\nHead commit: {head_sha}\nFailed job: {job_name}\n{lines}\n"
+        f"Run URL: {url}\nHead commit: {head_sha}\nFailed job: {job_name}\n"
+        f"{_BREAKAGE_KEY_LINE}{record.breakage_key}\n{lines}\n"
     )
 
 
 def _existing(*, client: BeadsClient) -> dict[str, str]:
+    """Index keys from metadata and from the description capture persisted with the item."""
     found: dict[str, str] = {}
     for record in client.list_issues():
         record = cast("dict[str, object]", record)
         metadata, item_id = record.get("metadata"), record.get("id")
+        if not isinstance(item_id, str):
+            continue
         value = (
             cast("dict[str, object]", metadata).get(_BREAKAGE_KEY)
             if isinstance(metadata, dict)
             else None
         )
-        if isinstance(value, str) and isinstance(item_id, str):
+        if isinstance(value, str):
             found[value] = item_id
+        for line in _string(value=record.get("description")).splitlines():
+            if line.startswith(_BREAKAGE_KEY_LINE):
+                found[line.removeprefix(_BREAKAGE_KEY_LINE)] = item_id
     return found
 
 
