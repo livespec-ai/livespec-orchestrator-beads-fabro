@@ -128,3 +128,41 @@ def test_red_preview_stages_exactly_the_named_test_ignoring_handoff_and_other_ch
     assert _git(repo=repo, env=env, argv=["log", "--format=%H"]) == before_history
     assert _git(repo=repo, env=env, argv=["diff", "--cached", "--name-only"]) == ""
     assert os.access(runner, os.X_OK)
+
+
+def test_red_preview_uses_the_dispatch_base_when_a_checkpoint_already_carries_the_test(
+    tmp_path: Path,
+) -> None:
+    """A Red checkpoint cannot make its prospective hook preview vacuous."""
+    repo, runner, env = _red_preview_repository(tmp_path=tmp_path)
+    _git(repo=repo, env=env, argv=["add", "tests/test_red.py"])
+    checkpoint_env = env.copy()
+    _ = checkpoint_env.pop("LIVESPEC_CHECK_SKIP")
+    _git(
+        repo=repo,
+        env=checkpoint_env,
+        argv=[
+            "commit",
+            "--quiet",
+            "--no-verify",
+            "-m",
+            "fabro(run): red (success)",
+            "-m",
+            "Fabro-Run: run",
+        ],
+    )
+
+    completed = _run(
+        repo=repo,
+        env={**env, "FABRO_RUN_ID": "run"},
+        argv=[sys.executable, str(runner), "red", "tests/test_red.py"],
+        check=False,
+    )
+
+    assert completed.returncode == 1, completed.stderr
+    assert cast("dict[str, Any]", json.loads(completed.stdout.splitlines()[-1])) == {
+        "failed_targets": [_FAILED_TARGET],
+        "preview_ran": True,
+        "status": 1,
+        "unset_variables": ["LIVESPEC_CHECK_SKIP"],
+    }

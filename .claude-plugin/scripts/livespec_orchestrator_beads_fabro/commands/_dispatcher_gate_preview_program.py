@@ -38,6 +38,11 @@ from pathlib import Path
 FAILED_TARGETS_HEADER = re.compile(r"^Failed targets \(\d+\):\s*$", re.MULTILINE)
 FAILED_TARGET_LINE = re.compile(r"^\s+-\s+(\S+)\s*$")
 SKIP_VARIABLE = re.compile(r"^LIVESPEC_.*(?:_SKIP|_RELAX|_DISABLE)(?:_|$)")
+CHECKPOINT_SUBJECT = re.compile(r"^fabro\([^)]*\): ")
+NO_MATCHING_STAGED_FILES = re.compile(r"\(skip\) no matching staged files")
+HOOK_STEP_RAN = re.compile(r"(?:┃\s+\S+\s+\u276f|(?:✔️|🥊)\s+\S+\s+\(\d+(?:\.\d+)? seconds\))")
+CHECKPOINT_RUN_TRAILER = re.compile(r"^Fabro-Run: ", re.MULTILINE)
+CHECKPOINT_LIMIT = 500
 
 
 def command(*argv, cwd, env=None, check=True):
@@ -51,16 +56,43 @@ def git(*argv, cwd):
     return command("git", *argv, cwd=cwd)
 
 
-def changed_paths(root):
-    tracked = git("diff", "--name-only", "--no-renames", "HEAD", cwd=root).stdout.splitlines()
+def checkpoint_commit(ref, root):
+    subject_result = command(
+        "git", "log", "-1", "--format=%s", ref, cwd=root, check=False
+    )
+    if subject_result.returncode:
+        return False
+    message_result = command(
+        "git", "log", "-1", "--format=%B", ref, cwd=root, check=False
+    )
+    if message_result.returncode:
+        return False
+    subject = subject_result.stdout.strip()
+    message = message_result.stdout
+    return bool(CHECKPOINT_SUBJECT.match(subject)) and bool(
+        CHECKPOINT_RUN_TRAILER.search(message)
+    )
+
+
+def dispatch_base(root):
+    ref = "HEAD"
+    for _ in range(CHECKPOINT_LIMIT):
+        if not checkpoint_commit(ref, root):
+            return ref
+        ref = f"{ref}~1"
+    raise RuntimeError("gate preview found too many consecutive Fabro checkpoint commits")
+
+
+def changed_paths(root, base):
+    tracked = git("diff", "--name-only", "--no-renames", base, cwd=root).stdout.splitlines()
     untracked = git("ls-files", "--others", "--exclude-standard", cwd=root).stdout.splitlines()
     return sorted(set(tracked + untracked))
 
 
-def selected_paths(stage, root, test_file):
+def selected_paths(stage, root, test_file, base):
     if stage == "red":
         return [test_file]
-    return changed_paths(root)
+    return changed_paths(root, base)
 
 
 def copy_path(path, root, preview):
@@ -101,13 +133,14 @@ def skipped_environment():
 
 def preview(stage, test_file):
     root = Path(git("rev-parse", "--show-toplevel", cwd=Path.cwd()).stdout.strip())
-    paths = selected_paths(stage, root, test_file)
+    base = dispatch_base(root)
+    paths = selected_paths(stage, root, test_file, base)
     if not paths:
         return 2, [], [], False
     preview_root = Path(tempfile.mkdtemp(prefix="livespec-gate-preview-"))
     unset = []
     try:
-        git("worktree", "add", "--detach", "--quiet", str(preview_root), "HEAD", cwd=root)
+        git("worktree", "add", "--detach", "--quiet", str(preview_root), base, cwd=root)
         for path in paths:
             copy_path(path, root, preview_root)
         git("add", "--all", "--", *paths, cwd=preview_root)
@@ -126,7 +159,10 @@ def preview(stage, test_file):
         result = command(str(hook), cwd=preview_root, env=environment, check=False)
         output = result.stdout + result.stderr
         sys.stdout.write(output)
-        return result.returncode, failed_targets(output), unset, True
+        preview_ran = bool(HOOK_STEP_RAN.search(output)) or not bool(
+            NO_MATCHING_STAGED_FILES.search(output)
+        )
+        return result.returncode, failed_targets(output), unset, preview_ran
     except (OSError, RuntimeError) as error:
         print(error, file=sys.stderr)
         return 2, [], unset, False
