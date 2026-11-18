@@ -727,6 +727,58 @@ def test_a_clean_rebase_regenerates_a_generated_record_before_the_declared_gate(
     assert box.state(name=REFRESH_COUNT_STATE_FILENAME) is None
 
 
+def test_a_nonconvergent_regenerated_record_names_its_file_and_generator(tmp_path: Path) -> None:
+    """One regeneration is retried exactly once for verification, then fails closed.
+
+    The generator writes a different record for each invocation.  The refresh's
+    first reading finds a stale record, its one permitted regeneration commits
+    the next output, and its verification sees a different output again.  That
+    is not a repairable rebase failure: the stage must retain the exact record
+    path and generator argv in its failure rather than spend a repair round.
+    """
+    declaration = json.dumps(
+        {
+            "livespec-orchestrator-beads-fabro": {
+                "dispatcher": {
+                    "record_files": [{"path": _RECORD_JSON, "generator": ["sh", "generate.sh"]}]
+                }
+            }
+        }
+    )
+    box = _build(
+        root=tmp_path,
+        declaration=declaration,
+        record_json="generation: 0\n",
+        extra_files={
+            "generate.sh": (
+                "#!/bin/sh\n"
+                "next=$(( $(cat ../generation) + 1 ))\n"
+                "printf '%s\\n' \"$next\" > ../generation\n"
+                "printf 'generation: %s\\n' \"$next\" > record.json\n"
+            ),
+        },
+    )
+    _ = (tmp_path / "generation").write_text("0\n", encoding="utf-8")
+    _ = subprocess.run(
+        ["sh", "generate.sh"], cwd=box.clone, check=True, capture_output=True, text=True
+    )
+    _ = _git("add", _RECORD_JSON, cwd=box.clone)
+    _ = _git("commit", "--quiet", "-m", "chore: refresh generated record", cwd=box.clone)
+    _ = _git("push", "--quiet", "--force", "origin", f"HEAD:refs/heads/{_BRANCH}", cwd=box.clone)
+    _ = (box.state_dir() / PUBLISH_HEAD_STATE_FILENAME).write_text(
+        box.local_head(), encoding="utf-8"
+    )
+    _ = _advance_default(box=box)
+
+    result = _run(box=box)
+
+    assert result.returncode != 0
+    assert "LIVESPEC_PR_REFRESH_GENERATED_RECORD_FILE_REGENERATION_FAILED" in result.stderr
+    assert "generated-record-file:record.json" in result.stderr
+    assert "regenerate: record.json via sh generate.sh" in result.stderr
+    assert "LIVESPEC_REFRESH_REPAIR" not in result.stderr
+
+
 def test_an_armed_pull_request_is_disarmed_before_the_rebase(tmp_path: Path) -> None:
     """The v145 disarm: nothing armed survives into a rewritten head.
 
