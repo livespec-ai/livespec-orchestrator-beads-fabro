@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.343.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.342.0...v0.343.0) (2026-11-18)
+
+
+### Features
+
+* red — workflows resolve the gh-refresh bundle from the one default root (bd-ib-2x6orj) ([743aee8](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/743aee86b7fa801e70e476791ae69054ce745b53))
+
 ## [0.342.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.341.1...v0.342.0) (2026-11-18)
 
 
