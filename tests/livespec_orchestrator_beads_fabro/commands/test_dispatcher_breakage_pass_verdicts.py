@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
+from returns.io import IOSuccess
 
 
 @dataclass
@@ -103,6 +104,55 @@ def test_failed_workflow_dry_run_reports_one_line_per_failed_job(tmp_path: Path,
     assert "failing-tests=tests/test_api.py::test_value" in line
     assert len(runner.calls) == 4
     assert all(call[:4] == ["gh", "api", "--cache", "1h"] for call in runner.calls[1:])
+
+
+def test_failed_workflow_files_one_captured_item_per_failed_job(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """A failed run creates owned work for every failed job, not just a verdict."""
+    module = _module()
+    filed: list[object] = []
+    monkeypatch.setattr(module, "resolve_store_config", lambda **_: object(), raising=False)
+    monkeypatch.setattr(
+        module,
+        "file_captured_work_item",
+        lambda **kwargs: filed.append(kwargs["item"]) or IOSuccess("ready"),
+        raising=False,
+    )
+    runner = _Runner(
+        results=[
+            _ok("origin/master"),
+            _ok(
+                {
+                    "workflow_runs": [
+                        {
+                            "id": 8,
+                            "conclusion": "failure",
+                            "html_url": "https://run",
+                            "head_sha": "abc",
+                        }
+                    ]
+                }
+            ),
+            _ok(
+                {
+                    "jobs": [
+                        {"id": 3, "name": "check-coverage", "conclusion": "failure"},
+                        {"id": 4, "name": "check-types", "conclusion": "failure"},
+                    ]
+                }
+            ),
+            _ok("FAILED tests/test_coverage.py::test_covered - AssertionError"),
+            _ok("FAILED tests/test_types.py::test_typed - AssertionError"),
+        ]
+    )
+
+    assert module.breakage_pass(repo=_repo(tmp_path, ["ci-root-uid.yml"]), runner=runner) == 0
+    assert [item.title for item in filed] == [
+        "ci-root-uid.yml: check-coverage",
+        "ci-root-uid.yml: check-types",
+    ]
+    assert "filed" in capsys.readouterr().out
 
 
 def test_missing_or_empty_declaration_does_not_read_the_forge(tmp_path: Path) -> None:
