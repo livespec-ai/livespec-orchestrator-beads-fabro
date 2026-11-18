@@ -12,6 +12,13 @@ from whatever the forge now reports. The reading is
 - A REQUIRED CHECK FAILED: record exactly the outcome the merge wait's terminal
   required-check failure records, through the SAME builder, and apply it through
   the terminal-completion route's own disposition.
+- BEHIND A STRICT DEFAULT BRANCH (armed, every required check passing or still
+  running, and the forge reports it BEHIND): release the item to `ready` under a
+  ledger comment, so the resumed run's `pr_refresh` rebases the branch, takes the
+  carry-forward decision and re-arms once a verified or carried_forward record
+  names the refreshed head. THE HOST DOES NOT REFRESH THE BRANCH ITSELF: a head it
+  rewrote would reach that stage as the head the run already owns, which finds
+  nothing to rebase and arms without the decision.
 - THE PULL REQUEST WILL NOT MERGE (closed unmerged, or auto-merge no longer
   armed): rest the item at `blocked / needs-human` with the cause
   `merge-poll-budget-exhausted`, exactly as the merge wait's own rest does.
@@ -54,12 +61,14 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_required_checks impo
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_effects import (
     claim_row,
     claim_unchanged,
+    release_claim_to_ready,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_fence import (
     claim_recovery_fence,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_grade import (
     ACTION_HANDOFF_RECONCILE_MERGED,
+    ACTION_HANDOFF_REFRESH_RELEASE,
     ACTION_HANDOFF_REQUIRED_CHECK_FAILED,
     HOLD_CLAIM_CHANGED,
     HOLD_EFFECT_UNOBSERVABLE,
@@ -75,6 +84,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_recor
     RecoveredClaim,
     recovery_journal_record,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_replay import (
+    establish_comment,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_terminal import (
     RefusedDisposition,
     TerminalObservation,
@@ -83,6 +95,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_termi
 from livespec_orchestrator_beads_fabro.types import WorkItem
 
 __all__: list[str] = [
+    "REFRESH_RELEASE_COMMENT_MARKER",
     "HandoffRecoveryRequest",
     "reconcile_merged_for_claim",
     "recover_handed_off_claim",
@@ -92,6 +105,8 @@ _ACTIVE_STATUS = "active"
 _REASON_RECONCILED = "merged"
 _REASON_REQUIRED_CHECK_FAILED = "required-check-failed"
 _REASON_NOT_MERGEABLE = "pull-request-will-not-merge"
+_REASON_BEHIND = "pull-request-behind-default-branch"
+REFRESH_RELEASE_COMMENT_MARKER = "livespec-merge-wait-handoff-refresh-release"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -143,6 +158,8 @@ def recover_handed_off_claim(
         )
         if request.action == ACTION_HANDOFF_RECONCILE_MERGED:
             return _reconcile(repo=repo, journal=journal, request=request)
+        if request.action == ACTION_HANDOFF_REFRESH_RELEASE:
+            return _release_for_refresh(repo=repo, request=request)
         return _rest(repo=repo, journal=journal, request=request, now_iso=now_iso)
 
 
@@ -178,6 +195,39 @@ def _reconcile(
         request=request,
         status=_ACTIVE_STATUS if row is None else row.status or _ACTIVE_STATUS,
         effects=("reconcile-merged",),
+    )
+
+
+def _release_for_refresh(
+    *, repo: Path, request: HandoffRecoveryRequest
+) -> RecoveredClaim | HeldClaim:
+    """Comment, then return the item to `ready` so a resumed run refreshes its branch."""
+    commented = establish_comment(
+        repo=repo,
+        work_item_id=request.item.id,
+        body=_refresh_release_comment(request=request),
+    )
+    if commented is None:
+        return _held(request=request, reason=HOLD_EFFECT_UNOBSERVABLE)
+    hold = release_claim_to_ready(repo=repo, work_item_id=request.item.id, run_id=request.run_id)
+    if hold is not None:
+        return _held(request=request, reason=hold)
+    return _recovered(request=request, status="ready", effects=("comment", "transition"))
+
+
+def _refresh_release_comment(*, request: HandoffRecoveryRequest) -> str:
+    return "\n".join(
+        (
+            REFRESH_RELEASE_COMMENT_MARKER,
+            "",
+            f"Work-item {request.item.id} returned to `ready`, `fabro` assignee cleared.",
+            f"Pull request #{request.reading.pr_number} is armed with its required checks",
+            "passing or running, and the forge reports it BEHIND the default branch, which",
+            "requires up-to-date branches, so auto-merge can never land it unaided.",
+            "A resumed run refreshes it through `pr_refresh`, takes the carry-forward",
+            "decision, and re-arms once a verified or carried_forward record names the",
+            "refreshed head.",
+        )
     )
 
 
@@ -237,6 +287,7 @@ def _recovered(
         reason={
             ACTION_HANDOFF_RECONCILE_MERGED: _REASON_RECONCILED,
             ACTION_HANDOFF_REQUIRED_CHECK_FAILED: _REASON_REQUIRED_CHECK_FAILED,
+            ACTION_HANDOFF_REFRESH_RELEASE: _REASON_BEHIND,
         }.get(request.action, _REASON_NOT_MERGEABLE),
         route=request.action,
         status=status,

@@ -151,13 +151,14 @@ def _view(
     state: str = "OPEN",
     armed: bool = True,
     rollup: list[dict[str, object]] | None = None,
+    merge_state: str = "BLOCKED",
 ) -> str:
     return json.dumps(
         {
             "number": _PR,
             "state": state,
             "autoMergeRequest": {"enabledAt": "now"} if armed else None,
-            "mergeStateStatus": "BLOCKED",
+            "mergeStateStatus": merge_state,
             "mergeCommit": {"oid": "cafe05"} if state == "MERGED" else None,
             "headRefOid": "head1111",
             "baseRefOid": "base2222",
@@ -192,6 +193,7 @@ _REQUIRED = json.dumps(
     }
 )
 
+_PASSING = [{"name": "check-coverage", "status": "COMPLETED", "conclusion": "success"}]
 _RUNNING = [{"name": "check-coverage", "status": "IN_PROGRESS", "conclusion": None}]
 _FAILED = [{"name": "check-coverage", "status": "COMPLETED", "conclusion": "failure"}]
 
@@ -372,6 +374,54 @@ def test_an_armed_open_pull_request_with_running_checks_stays_held_naming_the_ha
     assert [h.hold_reason for h in held] == ["run-succeeded"]
     assert "merge-wait-handed-off" in (held[0].detail or "")
     assert (_stored().status, _stored().assignee) == ("active", "fabro")
+
+
+@pytest.mark.parametrize("rollup", [_PASSING, _RUNNING], ids=["passing", "running"])
+def test_a_handed_off_pull_request_behind_the_default_branch_is_released_for_a_refreshing_resume(
+    tmp_path: Path, rollup: list[dict[str, object]]
+) -> None:
+    """A strict default branch never lands an armed BEHIND pull request, so the run refreshes it.
+
+    The host does NOT refresh the branch itself: a head it rewrote would reach the
+    resumed run's `pr_refresh` as the head that run already owns, which then finds
+    nothing to rebase and arms without the carry-forward decision. Releasing the item
+    lets that stage rebase the branch, take the decision, and re-arm only once a
+    verified or carried_forward record names the refreshed head.
+    """
+    repo = _repo(tmp_path=tmp_path)
+    journal = _journal(repo=repo, rows=[_LAUNCH, _handoff_row()])
+    forge = _Forge(view=_ok(stdout=_view(rollup=rollup, merge_state="BEHIND")))
+
+    recovered, held = _pass(repo=repo, journal=journal, forge=forge)
+
+    assert held == ()
+    assert [(r.work_item_id, r.route, r.status) for r in recovered] == [
+        (_ITEM_ID, "merge-wait-handoff-refresh-release", "ready")
+    ]
+    stored = _stored()
+    assert (stored.status, stored.assignee) == ("ready", None)
+    markers = [
+        c.text.splitlines()[0]
+        for c in read_work_item_comments(path=_config(), work_item_id=_ITEM_ID)
+    ]
+    assert markers == ["livespec-merge-wait-handoff-refresh-release"]
+    assert not any(
+        argv[:3] in (["gh", "pr", "update-branch"], ["gh", "pr", "merge"]) for argv in forge.argvs
+    )
+
+
+def test_a_behind_pull_request_with_a_failed_required_check_is_still_a_failed_check(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path=tmp_path)
+    journal = _journal(repo=repo, rows=[_LAUNCH, _handoff_row()])
+    forge = _Forge(view=_ok(stdout=_view(rollup=_FAILED, merge_state="BEHIND")))
+
+    recovered, held = _pass(repo=repo, journal=journal, forge=forge)
+
+    assert held == ()
+    assert [r.route for r in recovered] == ["merge-wait-handoff-required-check-failed"]
+    assert (_stored().status, _stored().blocked_reason) == ("blocked", "needs-human")
 
 
 def test_an_unreadable_pull_request_leaves_a_handed_off_claim_held(tmp_path: Path) -> None:

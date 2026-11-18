@@ -316,7 +316,11 @@ main() {
             git log -1 --format=%B | sed '1d'
         } > "$message"
         set +e
-        git commit --amend -F "$message" >"$output" 2>&1
+        # The command node follows the Green authoring turn rather than running
+        # inside it.  Name that turn to the target repository's hook so it can
+        # select its affected-tests gate; an unscopable change still falls back
+        # to the hook's full aggregate.
+        LIVESPEC_AUTHORING_TURN=implement git commit --amend -F "$message" >"$output" 2>&1
         status=$?
         set -e
         rm -f "$message"
@@ -325,7 +329,7 @@ main() {
         # work item have no rendered title.  Publication independently refuses
         # a remaining bare Red subject before it can reach a pull request.
         set +e
-        git commit --amend --no-edit >"$output" 2>&1
+        LIVESPEC_AUTHORING_TURN=implement git commit --amend --no-edit >"$output" 2>&1
         status=$?
         set -e
     fi
