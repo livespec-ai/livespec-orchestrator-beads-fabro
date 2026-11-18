@@ -61,7 +61,7 @@ PY
 SOCK_PID=$!
 for _ in $(seq 1 100); do [ -S "${WORK}/ctl.sock" ] && break; sleep 0.05; done
 
-printf 'CONTROL_SOCKET=%s\nSSH_TARGET=vps-ctl\n' "${WORK}/ctl.sock" >"${WORK}/remote.conf"
+printf 'CONTROL_SOCKET=%s\nSSH_TARGET=vps-ctl\nREMOTE_TENANTS="demo-repo"\n' "${WORK}/ctl.sock" >"${WORK}/remote.conf"
 
 export PATH="${WORK}/bin:${PATH}"
 export LIVESPEC_BD_REAL="${WORK}/real-bd"
@@ -142,11 +142,11 @@ if ran_local && ! ran_remote; then pass "local: git root without .beads"; else f
 # 7. no config / socket absent / not a socket = today's behaviour (guard calls bd-real directly).
 LIVESPEC_BD_REMOTE_CONF="${WORK}/absent.conf" run "$REPO" list
 if ran_local && ! ran_remote && [ "$OUT" = "local-ran" ]; then pass "no config file: local, as today"; else fail "no config"; fi
-printf 'CONTROL_SOCKET=%s\nSSH_TARGET=vps-ctl\n' "${WORK}/missing.sock" >"${WORK}/c2.conf"
+printf 'CONTROL_SOCKET=%s\nSSH_TARGET=vps-ctl\nREMOTE_TENANTS=demo-repo\n' "${WORK}/missing.sock" >"${WORK}/c2.conf"
 LIVESPEC_BD_REMOTE_CONF="${WORK}/c2.conf" run "$REPO" list
 if ran_local && ! ran_remote; then pass "socket absent: local, as today"; else fail "socket absent"; fi
 : >"${WORK}/regular"
-printf 'CONTROL_SOCKET=%s\nSSH_TARGET=vps-ctl\n' "${WORK}/regular" >"${WORK}/c3.conf"
+printf 'CONTROL_SOCKET=%s\nSSH_TARGET=vps-ctl\nREMOTE_TENANTS=demo-repo\n' "${WORK}/regular" >"${WORK}/c3.conf"
 LIVESPEC_BD_REMOTE_CONF="${WORK}/c3.conf" run "$REPO" list
 if ran_local && ! ran_remote; then pass "control path is not a socket: local, as today"; else fail "not a socket"; fi
 
@@ -296,6 +296,60 @@ if ran_remote && [ "$OUT" = "remote-ran" ] && [ "$RC" -eq 0 ]; then
 else
     fail "create over remote (out=$OUT rc=$RC)"
 fi
+
+# 12. REMOTE_TENANTS allowlist (bd-ib-3km22i): only listed repositories go remote.
+tconf() { # tconf NAME LINE... -> conf file with the socket, target and the given extra lines
+    local f="${WORK}/$1.conf"; shift
+    printf 'CONTROL_SOCKET=%s\nSSH_TARGET=vps-ctl\n' "${WORK}/ctl.sock" >"$f"
+    [ "$#" -gt 0 ] && printf '%s\n' "$@" >>"$f"
+    echo "$f"
+}
+no_ssh_contact() { ! ran_remote && [ ! -f "$STUB_SSH_CHECKLOG" ]; }
+rm -f "$LIVESPEC_BD_REMOTE_LOG"
+LIVESPEC_BD_REMOTE_CONF="$(tconf t-other 'REMOTE_TENANTS="some-other-repo"')" run "$REPO" show demo-1
+if ran_local && no_ssh_contact && [ "$OUT" = "local-ran" ] && [ ! -e "$LIVESPEC_BD_REMOTE_LOG" ] && [ -z "$ERR" ]; then
+    pass "tenant not listed: real bd runs, ssh never invoked (no check, no send), no log line"
+else
+    fail "not listed (out=$OUT err=$ERR)"
+fi
+LIVESPEC_BD_REMOTE_CONF="$(tconf t-listed 'REMOTE_TENANTS="other demo-repo"')" run "$REPO" show demo-1
+if ran_remote && ! ran_local && grep -q '^in demo-repo bd ' "$STUB_SSH_ARGS"; then
+    pass "tenant listed: sent as 'in demo-repo bd <b64>'"
+else
+    fail "listed"
+fi
+LIVESPEC_BD_REMOTE_CONF="$(tconf t-absent)" run "$REPO" show demo-1
+if ran_local && no_ssh_contact; then pass "REMOTE_TENANTS absent: every call local (fail-safe)"; else fail "absent"; fi
+LIVESPEC_BD_REMOTE_CONF="$(tconf t-empty 'REMOTE_TENANTS=""')" run "$REPO" show demo-1
+if ran_local && no_ssh_contact; then pass "REMOTE_TENANTS empty: every call local"; else fail "empty"; fi
+LIVESPEC_BD_REMOTE_CONF="$(tconf t-blank 'REMOTE_TENANTS="  , ,"')" run "$REPO" show demo-1
+if ran_local && no_ssh_contact; then pass "REMOTE_TENANTS only separators: every call local"; else fail "blank"; fi
+# prefix / suffix / substring / glob never match.
+for pair in "demo-repo-x:demo-repo" "emo-repo:demo-repo" "demo:demo-repo" "demo-repo:demo-repo-x" "demo-repo:emo-repo" "demo-repo:demo" \
+            "demo-repo:demo-*" "demo-repo:*" "demo-repo:demo-repo?" "demo-repo:[d]emo-repo"; do
+    callrepo=${pair%%:*}; listed=${pair#*:}
+    d="${WORK}/repos/${callrepo}"
+    if [ ! -d "$d" ]; then
+        mkdir -p "$d/.beads"; git -C "$d" init -q
+    fi
+    LIVESPEC_BD_REMOTE_CONF="$(tconf t-sub "REMOTE_TENANTS=\"${listed}\"")" run "$d" show x
+    if ran_local && no_ssh_contact; then :; else fail "repo '$callrepo' wrongly matched listed '$listed'"; fi
+done
+pass "whole names only: prefix, suffix, substring and glob characters never match"
+for list in 'REMOTE_TENANTS="a,demo-repo,b"' 'REMOTE_TENANTS="a, demo-repo , b"' 'REMOTE_TENANTS=" a  demo-repo b "' \
+            'REMOTE_TENANTS="demo-repo,"' 'REMOTE_TENANTS=",demo-repo"' 'REMOTE_TENANTS=demo-repo'; do
+    LIVESPEC_BD_REMOTE_CONF="$(tconf t-sep "$list")" run "$REPO" show demo-1
+    if ran_remote && ! ran_local; then :; else fail "list '$list' did not go remote"; fi
+done
+pass "comma, space and mixed separated lists (with surrounding whitespace) all go remote"
+LIVESPEC_BD_REMOTE_CONF="$(tconf t-wt 'REMOTE_TENANTS="demo-repo"')" run "${WORK}/wt-branch" show demo-1
+if ran_remote && grep -q '^in demo-repo bd ' "$STUB_SSH_ARGS"; then pass "listed: a worktree call goes remote under the repository name"; else fail "worktree listed"; fi
+LIVESPEC_BD_REMOTE_CONF="$(tconf t-wtb 'REMOTE_TENANTS="wt-branch"')" run "${WORK}/wt-branch" show demo-1
+if ran_local && no_ssh_contact; then pass "a worktree's branch directory name does not match"; else fail "worktree dir matched"; fi
+# the value is never evaluated (single-quoted in the conf, so sourcing keeps it literal).
+rm -f "${WORK}/pwned"
+LIVESPEC_BD_REMOTE_CONF="$(tconf t-eval "REMOTE_TENANTS='\$(touch ${WORK}/pwned)'")" run "$REPO" show demo-1
+if [ ! -e "${WORK}/pwned" ] && ran_local; then pass "the value is never eval'd (command substitution text is just a name)"; else fail "eval"; fi
 
 echo ""
 echo "bd-remote tests: ${PASS} passed, ${FAIL} failed"
