@@ -2,6 +2,10 @@
 # ticket.sh <item> <repo-dir> <20-digit key>: one guarded gmktec ticket (seat 50a20bc8, post-reboot; coordinator load guard).
 # Guard: GO -> launch. HOLD on procs_running alone -> re-read after 60 s (max 30 tries). Memory HOLD -> exit 3 (holds the wave).
 set -u; ITEM=$1; REPO=$2; KEY=$3; SEAT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd); . "$SEAT_DIR/../config.sh"; L=$FLEET_LAUNCH_STATE_DIR; ORCH=$FLEET_LAUNCH_ORCH_REPO; GUARD=${SEAT_LOAD_GUARD:-$SEAT_DIR/load-guard.sh}
+# Rule G: a plain ticket for an item with an open factory PR or a preserved-publish ref routes FRESH and the reclaim
+# destroys that work. Refused here, before any wait; `ticket.sh <item> <repo> <key> --fresh <reason>` is the only bypass.
+RG=(); [ "${4:-}" = --fresh ] && RG=(--fresh "${5:-}")
+bash "$SEAT_DIR/restore-guard.sh" "$ITEM" "$REPO" ${RG[@]+"${RG[@]}"} || exit $?
 for _ in $(seq 1 30); do
   g=$($GUARD); echo "GUARD $ITEM $g"
   # coordinator 16:5xZ: Mem < 40G holds ALL launches; procs_running_median5 >= 50 = no new launch (wait and re-read)

@@ -17,4 +17,4 @@ st=$($W -- bd show "$IT" --json 2>/dev/null | python3 -c "import json,sys;d=json
 case "$st" in blocked*) $W -- python3 $P/drive.py --action "resolve-blocked:$IT:ready" --repo "$REPO" --json 2>&1 | grep -E '"summary"' | cut -c1-160;; esac
 $W -- python3 $P/drive.py --action "move:$IT:ready" --repo "$REPO" --json 2>&1 | grep -E '"summary"' | cut -c1-160
 $W -- python3 $P/drive.py --action "set-admission:$IT:auto" --repo "$REPO" --json 2>&1 | grep -E '"summary"' | cut -c1-160
-cd "$ORCH" && bash "$SEAT_DIR/ticket.sh" "$IT" "$REPO" "$KEY" 2>&1 | tail -1
+cd "$ORCH" && SEAT_SEEDED_RULING=1 bash "$SEAT_DIR/ticket.sh" "$IT" "$REPO" "$KEY" 2>&1 | tail -1
