@@ -201,6 +201,40 @@ def test_an_unstated_feature_is_classified_once_and_reused_on_the_next_pass(
     assert len(_comments(repo=repo)) == 1
 
 
+def test_a_definition_of_done_references_edit_reuses_the_recorded_tier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path=tmp_path)
+    ledger = _install_judge(
+        tmp_path=tmp_path, monkeypatch=monkeypatch, replies=("feature", _UNSTATED)
+    )
+    description = (
+        "## Definition of Done\n\n"
+        "References: ## Dispatcher classify-tier invocation surface\n\n"
+        "- The recorded tier is reused while the asked-for behaviour is unchanged.\n"
+    )
+    item = _item(description=description)
+    config = _config(repo=repo)
+    append_work_item(path=config, item=item)
+
+    _ = classify_item_spec_change_tier(item=item, repo=repo, path=config, stage=STAGE_FILING)
+
+    reference_only_edit = _item(
+        description=description.replace(
+            "References: ## Dispatcher classify-tier invocation surface",
+            "References: ## Dispatcher classify-tier invocation surface, "
+            "## Self-contained plugin dispatch",
+        )
+    )
+    reused = classify_item_spec_change_tier(
+        item=reference_only_edit, repo=repo, path=config, stage=STAGE_DISPATCH
+    )
+
+    assert reused.reused is True
+    assert _calls(ledger=ledger) == 2
+    assert len(_comments(repo=repo)) == 1
+
+
 def test_a_taken_tier_record_carries_its_selected_and_named_clause_bodies(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

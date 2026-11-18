@@ -8,10 +8,10 @@ proved. So the digest the reuse condition compares, and the statement the judge
 reads, must not move when only the partition moves — and must move when
 anything the judge reads does.
 
-The cases are each other's controls: the three partition-only edits must leave
-the digest unchanged, while a changed word, title, references line or
-description prose outside the bullets must change it. A digest that ignored the
-whole description would pass the first three and fail the rest.
+The cases are each other's controls: the proof-mode and reference-only edits
+must leave the digest unchanged, while a changed word, title or description
+prose outside the bullets must change it. A digest that ignored the whole
+description would pass the first cases and fail the rest.
 """
 
 from __future__ import annotations
@@ -118,12 +118,16 @@ def test_a_bullet_changed_while_moved_changes_the_digest() -> None:
     assert _digest(description=reworded) != _digest(description=_PARTITIONED)
 
 
-def test_a_changed_title_references_line_or_outside_prose_changes_the_digest() -> None:
+def test_a_changed_title_or_outside_prose_changes_the_digest() -> None:
     base = _digest()
     assert _digest(title="Another title") != base
-    assert _digest(description=_FLAT.replace("Scenario 206", "Scenario 207")) != base
     assert _digest(description=_FLAT.replace("before the section", "ahead of it")) != base
     assert _digest(description=_FLAT.replace("after the section", "behind it")) != base
+
+
+def test_a_changed_or_removed_references_line_keeps_the_digest() -> None:
+    assert _digest(description=_FLAT.replace("Scenario 206", "Scenario 207")) == _digest()
+    assert _digest(description=_FLAT.replace(f"{_REFERENCES}\n\n", "")) == _digest()
 
 
 def test_the_statement_carries_each_bullet_once_without_the_partition() -> None:
