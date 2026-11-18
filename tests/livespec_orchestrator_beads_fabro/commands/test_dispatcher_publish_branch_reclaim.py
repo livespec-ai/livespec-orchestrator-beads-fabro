@@ -631,6 +631,53 @@ def test_a_publish_branch_whose_run_is_still_live_is_not_reclaimed(tmp_path: Pat
     assert "refresh_repair -> needs_human" in graph
 
 
+def _open_pull_request_answers(
+    *,
+    declared_head: str,
+    pr_list: CommandResult | None = None,
+    pr_view: CommandResult | None = None,
+) -> dict[str, CommandResult]:
+    """The forge answers for a released item whose open pull request carries a verified record.
+
+    The record declares `declared_head` on its `Publish-branch head:` line, which is
+    how a real factory record names the head it proved. `pr_list` and `pr_view`
+    replace the two forge reads one at a time, so a case degrades exactly one.
+    """
+    listing = [{"number": _PR_NUMBER, "state": "OPEN", "headRefOid": _DEAD_HEAD, "mergedAt": None}]
+    comments = {
+        "comments": [
+            {
+                "url": "https://example.test/proof",
+                "body": (
+                    f"Proof of Done — verified — run {_RUN_ID} — 2026-11-18T14:11:00Z\n"
+                    f"Publish-branch head: {declared_head}\n"
+                ),
+            }
+        ]
+    }
+    return {
+        "ls-remote": _ls_remote(),
+        "gh pr list": pr_list or CommandResult(exit_code=0, stdout=json.dumps(listing), stderr=""),
+        f"gh pr view {_PR_NUMBER} --json comments": pr_view
+        or CommandResult(exit_code=0, stdout=json.dumps(comments), stderr=""),
+        " ps ": _ps(runs=()),
+    }
+
+
+def _reclaim_once(*, tmp_path: Path, runner: _Runner) -> tuple[Any, ...]:
+    module = _reclaim()
+    journal = _journal_after_a_previous_dispatch(tmp_path=tmp_path, item_ids=(_ITEM_ID,))
+    module.reclaim_stale_publish_branch(
+        args=_args(),
+        repo=tmp_path,
+        work_item_id=_ITEM_ID,
+        journal=journal,
+        journal_path=journal.path,
+        runner=runner,
+    )
+    return _records(journal=journal)
+
+
 def test_a_verified_proof_on_the_open_publish_branch_prevents_its_reclaim(
     tmp_path: Path,
 ) -> None:
@@ -642,57 +689,55 @@ def test_a_verified_proof_on_the_open_publish_branch_prevents_its_reclaim(
     head.  Reclaiming it would close the proved pull request before recovery can
     resume or seed from its published work.
     """
-    module = _reclaim()
-    runner = _Runner(
-        answers={
-            "ls-remote": _ls_remote(),
-            "gh pr list": CommandResult(
-                exit_code=0,
-                stdout=json.dumps(
-                    [
-                        {
-                            "number": _PR_NUMBER,
-                            "state": "OPEN",
-                            "headRefOid": _DEAD_HEAD,
-                            "mergedAt": None,
-                        }
-                    ]
-                ),
-                stderr="",
-            ),
-            f"gh pr view {_PR_NUMBER} --json comments": CommandResult(
-                exit_code=0,
-                stdout=json.dumps(
-                    {
-                        "comments": [
-                            {
-                                "url": "https://example.test/proof",
-                                "body": (
-                                    f"Proof of Done — verified — run {_RUN_ID} — "
-                                    "2026-11-18T14:11:00Z\n"
-                                    f"Published head: {_DEAD_HEAD}\n"
-                                ),
-                            }
-                        ]
-                    }
-                ),
-                stderr="",
-            ),
-            " ps ": _ps(runs=()),
-        }
-    )
-    journal = _journal_after_a_previous_dispatch(tmp_path=tmp_path, item_ids=(_ITEM_ID,))
+    runner = _Runner(answers=_open_pull_request_answers(declared_head=_DEAD_HEAD))
 
-    module.reclaim_stale_publish_branch(
-        args=_args(),
-        repo=tmp_path,
-        work_item_id=_ITEM_ID,
-        journal=journal,
-        journal_path=journal.path,
-        runner=runner,
-    )
+    records = _reclaim_once(tmp_path=tmp_path, runner=runner)
 
     assert _issued(runner=runner, needle="gh api") == []
+    assert [record["reason"] for record in records] == ["verified-proof-on-open-pull-request"]
+
+
+def test_a_verified_record_for_an_older_head_does_not_protect_later_work(
+    tmp_path: Path,
+) -> None:
+    """A record anchored to a head other than the surviving one proves nothing of it.
+
+    The pull request is open and carries a verified record, but the record's own
+    `Publish-branch head:` names an earlier commit, so the branch's current head is
+    unproved work and the ordinary reclaim runs.
+    """
+    older = "1" * 40
+    runner = _Runner(answers=_open_pull_request_answers(declared_head=older))
+
+    records = _reclaim_once(tmp_path=tmp_path, runner=runner)
+
+    assert _issued(runner=runner, needle="gh api") != []
+    assert [record["stage"] for record in records] == ["publish-branch-reclaim"]
+
+
+@pytest.mark.parametrize("failing", ["pr_list", "pr_view"])
+def test_an_unreadable_forge_holds_the_reclaim_rather_than_assuming_no_proof(
+    tmp_path: Path, failing: str
+) -> None:
+    """A forge read that fails establishes nothing, so it cannot license the deletion.
+
+    This is the measured transient token failure: neither the pull request listing
+    nor its comments could be read, which says nothing about whether a verified
+    record exists. The branch is left exactly as it stands and the hold says which
+    measurement stopped the reclaim.
+    """
+    failed = CommandResult(exit_code=1, stdout="", stderr="502")
+    answers = _open_pull_request_answers(
+        declared_head=_DEAD_HEAD,
+        pr_list=failed if failing == "pr_list" else None,
+        pr_view=failed if failing == "pr_view" else None,
+    )
+    runner = _Runner(answers=answers)
+
+    records = _reclaim_once(tmp_path=tmp_path, runner=runner)
+
+    assert _issued(runner=runner, needle="gh api") == []
+    assert [record["reason"] for record in records] == ["proof-unobservable"]
 
 
 def test_an_unaskable_factory_holds_the_reclaim_rather_than_assuming_death(
