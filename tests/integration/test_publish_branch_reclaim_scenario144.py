@@ -167,6 +167,8 @@ class _OriginRunner:
             )
         if argv[1:4] == ["ps", "-a", "--json"]:
             return CommandResult(exit_code=0, stdout="[]", stderr="")
+        if argv[:3] == ["gh", "pr", "list"]:
+            return CommandResult(exit_code=0, stdout="[]", stderr="")
         if argv[:4] == ["gh", "api", "--method", "POST"]:
             fields = [value for value in argv if value.startswith(("ref=", "sha="))]
             ref = next(value.removeprefix("ref=") for value in fields if value.startswith("ref="))

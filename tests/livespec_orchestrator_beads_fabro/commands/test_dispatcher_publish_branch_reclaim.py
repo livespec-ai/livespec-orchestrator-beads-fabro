@@ -100,6 +100,8 @@ _ITEM_ID = "bd-ib-qm4luz"
 _BRANCH = f"feat/{_ITEM_ID}"
 # The head the dead run published, and the one the preserved ref must carry.
 _DEAD_HEAD = "9f1c2d3e4f506172839a0b1c2d3e4f5061728394"
+_RUN_ID = f"01M44{_ITEM_ID}"
+_PR_NUMBER = 5527
 # Another item's branch, present in the same `ls-remote` answer: `feat/bd-ib-qm4`
 # is a PREFIX of this item's branch, so a suffix or prefix match would attribute
 # one item's branch to the other.
@@ -627,6 +629,70 @@ def test_a_publish_branch_whose_run_is_still_live_is_not_reclaimed(tmp_path: Pat
     assert "LIVESPEC_PUBLISH_DRAFT_PUSH_FAILED" in graph
     assert 'publish_draft -> refresh_repair [label="Blocked", condition="outcome=failed"]' in graph
     assert "refresh_repair -> needs_human" in graph
+
+
+def test_a_verified_proof_on_the_open_publish_branch_prevents_its_reclaim(
+    tmp_path: Path,
+) -> None:
+    """A released `pr_refresh` failure keeps its verified pull request open.
+
+    The factory has confirmed the earlier run is terminal, so liveness alone
+    permits the ordinary preserve-and-delete path.  But the branch's open pull
+    request carries that run's verified Proof of Done at exactly the branch
+    head.  Reclaiming it would close the proved pull request before recovery can
+    resume or seed from its published work.
+    """
+    module = _reclaim()
+    runner = _Runner(
+        answers={
+            "ls-remote": _ls_remote(),
+            "gh pr list": CommandResult(
+                exit_code=0,
+                stdout=json.dumps(
+                    [
+                        {
+                            "number": _PR_NUMBER,
+                            "state": "OPEN",
+                            "headRefOid": _DEAD_HEAD,
+                            "mergedAt": None,
+                        }
+                    ]
+                ),
+                stderr="",
+            ),
+            f"gh pr view {_PR_NUMBER} --json comments": CommandResult(
+                exit_code=0,
+                stdout=json.dumps(
+                    {
+                        "comments": [
+                            {
+                                "url": "https://example.test/proof",
+                                "body": (
+                                    f"Proof of Done — verified — run {_RUN_ID} — "
+                                    "2026-11-18T14:11:00Z\n"
+                                    f"Published head: {_DEAD_HEAD}\n"
+                                ),
+                            }
+                        ]
+                    }
+                ),
+                stderr="",
+            ),
+            " ps ": _ps(runs=()),
+        }
+    )
+    journal = _journal_after_a_previous_dispatch(tmp_path=tmp_path, item_ids=(_ITEM_ID,))
+
+    module.reclaim_stale_publish_branch(
+        args=_args(),
+        repo=tmp_path,
+        work_item_id=_ITEM_ID,
+        journal=journal,
+        journal_path=journal.path,
+        runner=runner,
+    )
+
+    assert _issued(runner=runner, needle="gh api") == []
 
 
 def test_an_unaskable_factory_holds_the_reclaim_rather_than_assuming_death(
