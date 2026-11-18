@@ -1121,8 +1121,10 @@ while :; do
   build=$(installed_build)
   plugin="$FLEET_LAUNCH_PLUGIN_CACHE/$build"
   build_version=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['version'])" "$plugin/plugin.json" 2>/dev/null)
-  cred=$(cd "$REPO" && wrap -- timeout 120 python3 "$plugin/scripts/bin/dispatcher.py" claude-cred-status 2>/dev/null)
-  printf '%s\n' "$cred" | grep -q "is usable" || { echo "$(date -u +%FT%TZ) credential probe NOT usable: hold, no launch"; printf '%s\n' "$cred" | tail -3; rm -f "$marker"; marker=""; release_lock; exit_cause="credential probe not usable"; exit 75; }
+  cred=$(cd "$REPO" && wrap -- timeout 120 python3 "$plugin/scripts/bin/dispatcher.py" claude-cred-status 2>&1); cred_rc=$?
+  # stderr is kept: a credential_wrapper refusal ("required credential env absent", naming the missing
+  # variables) is the only record of WHY the probe failed, and discarding it printed an empty probe output.
+  printf '%s\n' "$cred" | grep -q "is usable" || { echo "$(date -u +%FT%TZ) credential probe NOT usable (rc=$cred_rc): hold, no launch"; printf '%s\n' "$cred" | tail -12 | cut -c1-600; rm -f "$marker"; marker=""; release_lock; exit_cause="credential probe not usable"; exit 75; }
   echo "$(date -u +%FT%TZ) credential probe usable (HTTP 200)"
   if [ -n "${RELEASE_BLOCKED:-}" ]; then
     rel=$(cd "$REPO" && wrap -- python3 "$plugin/scripts/bin/drive.py" --repo "$REPO" --action "resolve-blocked:${ITEM}:ready" --invoker "claude:$SEAT" --json 2>&1); rrc=$?
