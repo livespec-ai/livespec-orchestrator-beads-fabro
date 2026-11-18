@@ -41,6 +41,13 @@ from pathlib import Path
 from livespec_orchestrator_beads_fabro.commands._dispatcher_claim_writes import (
     LEDGER_WRITE_ERRORS,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_default_branch import (
+    resolve_default_branch,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_diff_apply_reseed import (
+    ReseedRefusal,
+    diff_apply_reseed,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandRunner
 from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import store_config
 from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_precondition import (
@@ -51,6 +58,8 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_publish_branch_prese
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_measurements import (
     MEASUREMENT_PRESERVED_WORK,
+    MEASUREMENT_SEED_RESEED,
+    MEASUREMENT_SEED_RESEED_CONFLICT,
     MEASUREMENT_SEED_RULING_COMMENTS,
     MEASUREMENT_SEED_RULING_REF,
 )
@@ -90,6 +99,8 @@ __all__: list[str] = [
 ]
 
 _GIT_TIMEOUT_SECONDS = 120.0
+# `git merge-base --is-ancestor` answers 1 for "not an ancestor"; any other nonzero is a fault.
+_NOT_AN_ANCESTOR_EXIT = 1
 
 # The faults that say the ledger could not be ASKED, as against the ones that say there
 # is no ledger row to ask about.
@@ -170,6 +181,15 @@ def ruled_seed(
             name=MEASUREMENT_SEED_RULING_REF,
             detail=ruled_ref_mismatch_detail(ruling=ruling, observed=observed),
         )
+    reseeded = _reseed_when_stale(
+        runner=runner,
+        repo=repo,
+        work_item_id=work_item_id,
+        ruling=ruling,
+        earlier_run_ids=earlier_run_ids,
+    )
+    if reseeded is not None:
+        return reseeded
     own_branch = f"refs/heads/{publish_branch_for(work_item_id=work_item_id)}"
     return RecoverySeed(
         source_run_id=leading_identifier(identifiers=earlier_run_ids),
@@ -180,6 +200,99 @@ def ruled_seed(
             if ruling.preservation_ref == own_branch
             else ruling.preservation_ref
         ),
+    )
+
+
+def _reseed_when_stale(
+    *,
+    runner: CommandRunner,
+    repo: Path,
+    work_item_id: str,
+    ruling: SeedRuling,
+    earlier_run_ids: tuple[str, ...],
+) -> RecoverySeed | RecoveryHold | None:
+    """The reseed that replaces a ruled seed behind the default branch, else `None`.
+
+    A seed behind the default branch is never laid over it: the run's base is the
+    default branch tip, so the seed's whole tree would revert every change the branch
+    took after the seed's merge base (bd-ib-nlofrn). Its merge-base diff is applied onto
+    the tip as one published commit (`diff_apply_reseed`), and the run starts from that.
+    A seed that already contains the tip is `None`, taken as ruled. Every fact that cannot
+    be read holds and names itself: it is never read as "not stale".
+    """
+    branch = resolve_default_branch(repo=repo, runner=runner)
+    if branch is None:
+        return _hold(
+            name=MEASUREMENT_SEED_RESEED,
+            detail=(
+                "the default branch could not be resolved, so whether the ruled seed "
+                f"{ruling.preservation_ref} is behind it could not be established and no seed "
+                "was taken"
+            ),
+        )
+    tip_ref = f"refs/heads/{branch}"
+    listing = runner.run(
+        argv=["git", "ls-remote", SEED_REMOTE, tip_ref],
+        cwd=repo,
+        timeout_seconds=_GIT_TIMEOUT_SECONDS,
+    )
+    tip = (
+        observed_ref_commit(stdout=listing.stdout, ref=tip_ref) if listing.exit_code == 0 else None
+    )
+    if tip is None:
+        return _hold(
+            name=MEASUREMENT_SEED_RESEED,
+            detail=(
+                f"the tip of {tip_ref} could not be read from {SEED_REMOTE} (git ls-remote exited "
+                f"{listing.exit_code}), so whether the ruled seed is behind it could not be "
+                "established and no seed was taken"
+            ),
+        )
+    fetched = runner.run(
+        argv=["git", "fetch", "--no-tags", SEED_REMOTE, tip, ruling.commit_sha],
+        cwd=repo,
+        timeout_seconds=_GIT_TIMEOUT_SECONDS,
+    )
+    ancestry = runner.run(
+        argv=["git", "merge-base", "--is-ancestor", tip, ruling.commit_sha],
+        cwd=repo,
+        timeout_seconds=_GIT_TIMEOUT_SECONDS,
+    )
+    if fetched.exit_code == 0 and ancestry.exit_code == 0:
+        return None
+    if fetched.exit_code != 0 or ancestry.exit_code != _NOT_AN_ANCESTOR_EXIT:
+        return _hold(
+            name=MEASUREMENT_SEED_RESEED,
+            detail=(
+                f"whether the ruled seed {ruling.preservation_ref} at {ruling.commit_sha} is "
+                f"behind {tip_ref} at {tip} could not be established (fetch exit "
+                f"{fetched.exit_code}, ancestry exit {ancestry.exit_code}) and no seed was taken"
+            ),
+        )
+    reseeded = diff_apply_reseed(
+        runner=runner,
+        repo=repo,
+        work_item_id=work_item_id,
+        seed_ref=ruling.preservation_ref,
+        default_branch=branch,
+    )
+    if isinstance(reseeded, ReseedRefusal):
+        return _hold(
+            name=(
+                MEASUREMENT_SEED_RESEED_CONFLICT
+                if reseeded.conflicting_paths
+                else MEASUREMENT_SEED_RESEED
+            ),
+            detail=(
+                f"{reseeded.detail} (seed ref {ruling.preservation_ref}, seed commit "
+                f"{ruling.commit_sha}, tip {tip_ref} at {tip})"
+            ),
+        )
+    return RecoverySeed(
+        source_run_id=leading_identifier(identifiers=earlier_run_ids),
+        remote=SEED_REMOTE,
+        commit_sha=reseeded.commit,
+        preservation_ref=reseeded.ref,
     )
 
 

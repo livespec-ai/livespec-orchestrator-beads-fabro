@@ -272,7 +272,8 @@ def _applied_tree(
             f"the diff of seed ref {revision.seed_ref} at {revision.seed} does not apply "
             f"cleanly onto {revision.tip}; "
             f"conflicting paths: {', '.join(paths)}; nothing was published"
-        )
+        ),
+        conflicting_paths=tuple(paths),
     )
 
 

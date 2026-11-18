@@ -92,6 +92,20 @@ class _World:
     failing_ls_remote: str | None = None
 
 
+_DEFAULT_TIP = "f0" * 20
+
+
+def _seed_staleness_answer(*, argv: list[str]) -> CommandResult | None:
+    """The staleness read of the ruled seed (bd-ib-nlofrn): master, and the seed holds its tip."""
+    if argv[:3] == ["git", "symbolic-ref", "--short"]:
+        return CommandResult(exit_code=0, stdout="origin/master\n", stderr="")
+    if argv[:4] == ["git", "fetch", "--no-tags", "origin"]:
+        return CommandResult(exit_code=0, stdout="", stderr="")
+    if argv[:3] == ["git", "merge-base", "--is-ancestor"]:
+        return CommandResult(exit_code=0, stdout="", stderr="")
+    return None
+
+
 class _Origin:
     """A scripted origin, forge and factory board; an unscripted argv FAILS."""
 
@@ -108,7 +122,12 @@ class _Origin:
                 for ref, commit in sorted(self.world.refs.items())
                 if any(fnmatch.fnmatchcase(ref, pattern) for pattern in argv[3:])
             ]
+            if argv[3:] == ["refs/heads/master"] and not lines:
+                lines = [f"{_DEFAULT_TIP}\trefs/heads/master"]
             return CommandResult(exit_code=0, stdout="\n".join(lines), stderr="")
+        staleness = _seed_staleness_answer(argv=argv)
+        if staleness is not None:
+            return staleness
         if joined.startswith(f"gh pr list --head {_BRANCH}"):
             state = self.world.pull_request_state
             listed = (
