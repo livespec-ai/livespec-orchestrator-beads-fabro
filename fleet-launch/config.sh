@@ -9,8 +9,31 @@
 # Each value can be overridden from the environment, which is how the hermetic
 # harness points the scripts at stub boards and throwaway directories.
 
-# Repository and seat identity.
-: "${FLEET_LAUNCH_ORCH_REPO:=$HOME/workspace/livespec-orchestrator-beads-fabro}"
+# The orchestrator plugin registry and cache, used to resolve the installed build.
+: "${FLEET_LAUNCH_PLUGIN_REGISTRY:=/home/ubuntu/.claude/plugins/installed_plugins.json}"
+: "${FLEET_LAUNCH_PLUGIN_CACHE:=/home/ubuntu/.claude/plugins/cache/livespec-orchestrator-beads-fabro/livespec-orchestrator-beads-fabro}"
+: "${FLEET_LAUNCH_PLUGIN_KEY:=livespec-orchestrator-beads-fabro@livespec-orchestrator-beads-fabro}"
+
+# Repository and seat identity. A launcher invoked without an explicit
+# repository follows its install record rather than assuming that $HOME/workspace
+# names the checkout. If the record cannot be read, use this launcher's checkout.
+if [ -z "${FLEET_LAUNCH_ORCH_REPO:-}" ]; then
+  FLEET_LAUNCH_ORCH_REPO=$(python3 - "$FLEET_LAUNCH_PLUGIN_REGISTRY" "$FLEET_LAUNCH_PLUGIN_KEY" <<'PY' 2>/dev/null
+import json
+import sys
+
+try:
+    entries = json.load(open(sys.argv[1], encoding="utf-8"))["plugins"][sys.argv[2]]
+    paths = [entry.get("projectPath") for entry in entries if isinstance(entry.get("projectPath"), str)]
+except (OSError, ValueError, KeyError, TypeError):
+    paths = []
+print(paths[0] if paths else "")
+PY
+)
+  if [ -z "$FLEET_LAUNCH_ORCH_REPO" ]; then
+    FLEET_LAUNCH_ORCH_REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+  fi
+fi
 : "${FLEET_LAUNCH_SEAT:=petri-factory-on-gmktec}"
 
 # Seat load guard (fleet-launch/seat/load-guard.sh): the percentage of the mounted /tmp tmpfs used at or
@@ -125,11 +148,6 @@ export LDSEAT_TMP_HOLD_PCT
 # it runs in the tenant repository under its credential wrapper.
 : "${FLEET_LAUNCH_PRIORITIES_RECORD:=$FLEET_LAUNCH_STATE_DIR/priorities-record}"
 : "${FLEET_LAUNCH_PARENT_CHAIN_COMMAND:=${FLEET_LAUNCH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/parent-of.sh}"
-
-# The orchestrator plugin registry and cache, used to resolve the installed build.
-: "${FLEET_LAUNCH_PLUGIN_REGISTRY:=/home/ubuntu/.claude/plugins/installed_plugins.json}"
-: "${FLEET_LAUNCH_PLUGIN_CACHE:=/home/ubuntu/.claude/plugins/cache/livespec-orchestrator-beads-fabro/livespec-orchestrator-beads-fabro}"
-: "${FLEET_LAUNCH_PLUGIN_KEY:=livespec-orchestrator-beads-fabro@livespec-orchestrator-beads-fabro}"
 
 # Credential wrappers. The default is the family wrapper; independent tenants
 # pass WRAPPER=<fleet-launch/wrappers/...> per launch.

@@ -25,9 +25,8 @@ if ! resolve_tenant_wrapper; then
   echo "resume-repo: the credential wrapper of $REPO cannot be read; refusing" >&2
   exit 2
 fi
-build=$(installed_build)
-[ -n "$build" ] || { echo "resume-repo: no plugin build resolved for $REPO (installed registry, or FLEET_LAUNCH_BUILD_OVERRIDE not materialized); refusing" >&2; exit 2; }
-plugin="$FLEET_LAUNCH_PLUGIN_CACHE/$build"
+plugin=$(installed_plugin_dir) || exit 2
+build=${plugin##*/}
 token=$(ssh -o BatchMode=yes "$FLEET_LAUNCH_GMK_SSH" cat "$FLEET_LAUNCH_GMK_SERVER_ENV" 2>/dev/null | sed -n 's/^FABRO_DEV_TOKEN=//p' | tail -n 1)
 if [ -n "$token" ]; then export "FABRO_DEV_TOKEN__${FACTORY}=$token"; fi
 echo "=== $(date -u +%FT%TZ) RESUME start: dispatcher.py resume --repo $REPO --item $ITEM --factory $FACTORY (build $build from $(build_source), wrapper: $(wrapper_description))"

@@ -93,6 +93,11 @@ FIFO_CLASS=gmk; [ -n "${ONLY_HL:-}${ONLY_ARM:-}" ] && FIFO_CLASS=hl
 deadline=$(( $(date +%s) + FLEET_LAUNCH_MAX_WAIT_S ))
 wait_deadline=$(( SECONDS + FLEET_LAUNCH_MAX_WAIT_S ))
 ticket=""; ticket_number=""; item_claim=""; lock=""; marker=""; FLEET_CAP=0; plugin=""; build=""
+# Resolve before any gate can pass the directory to a helper or credential
+# probe. A registry failure is therefore reported as itself, never as a bad
+# credential against an empty cache path.
+plugin=$(installed_plugin_dir) || exit 70
+build=${plugin##*/}
 # Non-run exit accounting: a launcher that exits before its run lists writes one terminal line and,
 # when its item still reads ready, one ledger comment naming the dropped ticket (Scenario 312).
 run_listed=0; terminal_written=0; exit_cause=""; exit_comment=if-ready; ready_refusals=0
@@ -335,14 +340,14 @@ write_terminal() {
 }
 # ledger_comment <body>: one ledger comment on the item, through the installed build's store seam.
 ledger_comment() {
-  [ -n "$plugin" ] || plugin="$FLEET_LAUNCH_PLUGIN_CACHE/$(installed_build)"
+  [ -n "$plugin" ] || plugin=$(installed_plugin_dir) || return 1
   (cd "$REPO" && wrap -- python3 "$FLEET_LAUNCH_DIR/ledger-item.py" comment "$plugin" "$REPO" "$ITEM" "$1") >/dev/null 2>&1
 }
 # report_dropped_ticket <cause>: one ledger comment naming the dropped ticket and the cause, when the item
 # still reads ready (or exit_comment=always). The ticket is not re-taken: this launcher is exiting.
 report_dropped_ticket() {
   local status body
-  [ -n "$plugin" ] || plugin="$FLEET_LAUNCH_PLUGIN_CACHE/$(installed_build)"
+  [ -n "$plugin" ] || plugin=$(installed_plugin_dir) || return 1
   status=$(item_status) || status=unreadable
   [ "$exit_comment" = always ] || [ "$status" = ready ] || return 0
   body="Fleet launcher $SEAT exited for $ITEM before its run listed: ticket ${ticket_number:-none} was dropped and not re-taken (cause: $1). This exit was not a run ending, and the item read $status. Remedy: launch it again, passing TICKET_NS=${ticket_number:-<none>} to keep its queue place."
@@ -615,7 +620,7 @@ PY
 now_s() { printf -v NOW '%(%s)T' -1; }
 wip_helper() {
   local build_dir
-  build_dir="$FLEET_LAUNCH_PLUGIN_CACHE/$(installed_build)"
+  build_dir=$(installed_plugin_dir) || return 1
   (cd "$REPO" && wrap -- python3 "$FLEET_LAUNCH_DIR/wip-claimed-count.py" "$build_dir" "$REPO" "$INFLIGHT" "$ITEM" --cache-dir "$FLEET_LAUNCH_WIP_CACHE_DIR" --ttl "$FLEET_LAUNCH_WIP_CACHE_TTL_S" 2>/dev/null)
 }
 wip_json_field() { python3 -c 'import json,sys; print(int(json.load(sys.stdin)[sys.argv[1]]))' "$1" 2>/dev/null; }
@@ -735,7 +740,7 @@ size_screen() {
 echo "=== fleet-launch dispatch $ITEM at $(date -u +%FT%TZ) (wrapper: $(wrapper_description))"
 ready_check() {
   local p pick
-  p="$FLEET_LAUNCH_PLUGIN_CACHE/$(installed_build)"
+  p=$(installed_plugin_dir) || return 1
   if [ -n "${REWORK:-}" ]; then
     # A rework:pending row is `active`, so it is never in ready_items(); ask the Dispatcher's own loop
     # selection (the path drive impl:<id> runs) whether it would pick this item.
@@ -764,7 +769,7 @@ ready_refused() {
 # cannot answer is not read as host_only: false, and the next gate (the Dispatcher's own refusal) applies.
 host_only_screen() {
   local p verdict reason
-  p="$FLEET_LAUNCH_PLUGIN_CACHE/$(installed_build)"
+  p=$(installed_plugin_dir) || return 1
   verdict=$(cd "$REPO" && wrap -- python3 "$p/scripts/bin/dispatcher.py" host-only --repo "$REPO" --item "$ITEM" --json 2>/dev/null) || { echo "$(date -u +%FT%TZ) host-only screen could not answer: proceeding, the Dispatcher's own refusal still applies"; return 0; }
   reason=$(printf '%s' "$verdict" | python3 -c 'import json,sys
 try:
@@ -1153,9 +1158,8 @@ while :; do
     export LIVESPEC_FABRO_FACTORY=$target
   fi
   checkout_at_origin_tip
-  build=$(installed_build)
-  [ -n "$build" ] || { echo "$(date -u +%FT%TZ) build unresolved: $(if [ -n "${FLEET_LAUNCH_BUILD_OVERRIDE:-}" ]; then echo "override '$FLEET_LAUNCH_BUILD_OVERRIDE' is not materialized in $FLEET_LAUNCH_PLUGIN_CACHE"; else echo "no installed build registered for $REPO"; fi): refuse, no launch"; rm -f "$marker"; marker=""; release_lock; exit_cause="build unresolved"; exit 70; }
-  plugin="$FLEET_LAUNCH_PLUGIN_CACHE/$build"
+  plugin=$(installed_plugin_dir) || { rm -f "$marker"; marker=""; release_lock; exit_cause="build unresolved"; exit 70; }
+  build=${plugin##*/}
   build_version=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['version'])" "$plugin/plugin.json" 2>/dev/null)
   cred=$(cd "$REPO" && wrap -- timeout 120 python3 "$plugin/scripts/bin/dispatcher.py" claude-cred-status 2>&1); cred_rc=$?
   # stderr is kept: a credential_wrapper refusal ("required credential env absent", naming the missing
