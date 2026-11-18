@@ -54,6 +54,8 @@ _PARTIAL_VERDICT_REPLY = (
     + '", "quote": "The checks consult the judgement."}]}'
 )
 
+_FENCED_PARTIAL_VERDICT_REPLY = f"```json\n{_PARTIAL_VERDICT_REPLY}\n```"
+
 
 def _item(*, description: str | None = None) -> WorkItem:
     return WorkItem(
@@ -329,3 +331,22 @@ def test_a_partial_host_verdict_stops_at_the_primary_candidate(tmp_path: Path) -
     assert runner.calls == 1
     assert verdict is not None
     assert verdict.kind == "partial"
+
+
+def test_a_fenced_host_verdict_is_unwrapped_before_the_chain_and_shared_parser(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One fenced verdict is accepted without spending the configured fallback."""
+    runner = _Runner(stdout=_FENCED_PARTIAL_VERDICT_REPLY)
+
+    verdict = host_governing_heading_reader(runner=runner)(
+        item=_item(), repo=_repo(tmp_path=tmp_path, fallback=True)
+    )
+
+    assert runner.calls == 1
+    assert verdict is not None
+    assert verdict.kind == "partial"
+    assert verdict.stated_by == (_GOVERNING,)
+    reports = capsys.readouterr().err
+    assert reports.count("dod-gate: candidate ran:") == 1
+    assert "outcome=verdict" in reports
