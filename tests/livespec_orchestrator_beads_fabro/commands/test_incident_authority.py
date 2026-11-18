@@ -111,6 +111,64 @@ def test_refusal_has_named_code_nonzero_exit_and_no_normal_fallback(
     assert response["normal_factory_proof"] is False
 
 
+def test_read_head_reports_a_drill_closed_item_without_authorizing_effects(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    attempt = IncidentAttempt(
+        repository="owner/repo",
+        item_id="item-1",
+        attempt_id="attempt-1",
+        phase="drill-closed",
+        operation_id="close-drill-1",
+        generation=4,
+        owner="operator:alice",
+        base="a" * 40,
+        head="b" * 40,
+        pr_number=7,
+        landed_commits=("b" * 40,),
+        landed_trees=("c" * 40,),
+        original_paths=("app.py",),
+        deferred_work=(),
+        repayment_required=False,
+    )
+    captured: dict[str, Any] = {}
+
+    def read_head(**kwargs: Any) -> IncidentReading:
+        captured.update(kwargs)
+        return IncidentReading(
+            attempt=attempt,
+            committed_token_id=attempt.item_id,
+            current_token_id=attempt.attempt_id,
+            is_current=True,
+        )
+
+    monkeypatch.setattr(command, "store_config", lambda **_kwargs: None)
+    monkeypatch.setattr(command, "make_beads_client", lambda **_kwargs: "client")
+    monkeypatch.setattr(command, "read_incident_head", read_head, raising=False)
+    try:
+        exit_code = command.main(
+            argv=[
+                "read-head",
+                "--repo",
+                str(tmp_path),
+                "--repository",
+                attempt.repository,
+                "--item",
+                attempt.item_id,
+            ]
+        )
+    except SystemExit as error:
+        exit_code = error.code
+
+    assert exit_code == 0
+    response = json.loads(capsys.readouterr().out)
+    assert response["status"] == "verified"
+    assert response["result"]["attempt"]["phase"] == "drill-closed"
+    assert response["result"]["attempt"]["generation"] == 4
+    assert response["authorizes_current_effects"] is False
+    assert captured == {"client": "client", "repository": "owner/repo", "item_id": "item-1"}
+
+
 @pytest.mark.parametrize("action", ["read-current", "read-history"])
 def test_read_commands_reject_transition_payloads(action: str, tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match="2"):
