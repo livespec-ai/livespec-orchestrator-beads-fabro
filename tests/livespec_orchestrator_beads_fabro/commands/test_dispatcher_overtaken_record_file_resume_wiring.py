@@ -18,6 +18,7 @@ from livespec_orchestrator_beads_fabro.commands import _dispatcher_overtaken_res
 from livespec_orchestrator_beads_fabro.commands import _dispatcher_resume_command as resume_module
 from livespec_orchestrator_beads_fabro.commands._dispatcher_base_advance import (
     MERGE_POLL_BUDGET_EXHAUSTED,
+    MERGE_QUEUE_REMOVED_AFTER_ARMING,
     BaseAdvancedAfterArming,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_base_advance_record_file_resume import (
@@ -112,6 +113,67 @@ def test_an_undeclared_repository_leaves_every_conflict_to_rest() -> None:
     )
 
     assert result is None
+    never.assert_not_called()
+
+
+def test_a_queue_removal_conflict_resumes_without_a_record_file_declaration() -> None:
+    journal = _Journal()
+    events: list[str] = []
+    resumed = _outcome(base_advanced=None)
+
+    result = resume_overtaken_record_files(
+        outcome=_outcome(
+            base_advanced=_advanced(
+                paths=None,
+                cause=MERGE_QUEUE_REMOVED_AFTER_ARMING,
+            )
+        ),
+        config_text="{}",
+        journal=journal,
+        resolve_ready=lambda *, work_item_id: events.append(f"ready:{work_item_id}"),
+        resume=lambda *, work_item_id: events.append(f"resume:{work_item_id}") or resumed,
+    )
+
+    assert result is resumed
+    assert events == [f"ready:{_ITEM_ID}", f"resume:{_ITEM_ID}"]
+    assert journal.records == [
+        {
+            "stage": "merge-queue-removed-resume",
+            "work_item_id": _ITEM_ID,
+            "run_id": "01M6W31BSSE1P8Z43EGGY9XVNF",
+            "pr_number": 184,
+            "pr_head": "head1111",
+            "default_branch_tip": "base2222",
+        }
+    ]
+
+
+@pytest.mark.parametrize("field", ["head", "tip"])
+def test_a_queue_removal_without_a_measured_head_or_tip_is_left_to_rest(
+    field: str,
+) -> None:
+    values: dict[str, str | None] = {"head": "head1111", "tip": "base2222"}
+    values[field] = None
+    journal = _Journal()
+    never = Mock()
+
+    result = resume_overtaken_record_files(
+        outcome=_outcome(
+            base_advanced=_advanced(
+                paths=None,
+                head=values["head"],
+                tip=values["tip"],
+                cause=MERGE_QUEUE_REMOVED_AFTER_ARMING,
+            )
+        ),
+        config_text="{}",
+        journal=journal,
+        resolve_ready=lambda **_: None,
+        resume=never,
+    )
+
+    assert result is None
+    assert journal.records == []
     never.assert_not_called()
 
 

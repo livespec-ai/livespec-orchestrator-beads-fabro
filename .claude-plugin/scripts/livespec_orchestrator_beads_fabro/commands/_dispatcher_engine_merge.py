@@ -19,6 +19,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_exhaustion im
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_janitor import post_merge
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_journal import journal_stage
+from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_merge_queue import (
+    MergeQueueObservation,
+    queue_removal_result,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_merge_pr_association import (
     pr_view_for_merge_sha,
 )
@@ -65,6 +69,7 @@ def await_merge(
     # `_dispatcher_base_advance`'s own rule that an absent reading is not a
     # report in either direction.
     conflicting_reports = 0
+    merge_queue = MergeQueueObservation()
     rerun_state = RerunPollState(attempts_before_rerun={})
     required_check_context = RequiredCheckFailureContext(
         outcome_type=outcome_type,
@@ -79,24 +84,34 @@ def await_merge(
             journal=journal,
         )
         view = reading.view if reading.error is None else None
-        if view is not None and view.state == "MERGED":
-            journal_rerun_merged(context=required_check_context, rerun_state=rerun_state)
-            return view
-        if _is_integration_access_denied(error=reading.error):
-            # Polling an OPEN PR must keep its rollup: terminal required-check
-            # failures are a fast failure, not a poll timeout. A credential may
-            # nevertheless be unable to read that rollup AFTER GitHub merged the
-            # PR, so use the confirmation-shaped read only to establish MERGED.
-            merged_reading = view_pr(
-                plan=plan,
-                runner=runner,
-                journal=journal,
-                include_status_checks=False,
-            )
-            merged_view = merged_reading.view
-            if merged_view is not None and merged_view.state == "MERGED":
-                journal_rerun_merged(context=required_check_context, rerun_state=rerun_state)
-                return merged_view
+        merged_view = _merged_view(
+            view=view,
+            context=required_check_context,
+            rerun_state=rerun_state,
+        )
+        if merged_view is not None:
+            return merged_view
+        queue_result = queue_removal_result(
+            outcome_type=outcome_type,
+            plan=plan,
+            runner=runner,
+            journal=journal,
+            observation=merge_queue,
+            view=view,
+        )
+        if queue_result is not None and not isinstance(queue_result, PrView):
+            return queue_result
+        view = queue_result
+        denied_merge = _merged_after_integration_denial(
+            error=reading.error,
+            plan=plan,
+            runner=runner,
+            journal=journal,
+            context=required_check_context,
+            rerun_state=rerun_state,
+        )
+        if denied_merge is not None:
+            return denied_merge
         if view is not None and _reports_overtaken_arming(view=view):
             conflicting_reports += 1
             if conflicting_reports >= CONSECUTIVE_CONFLICTING_REPORTS:
@@ -244,3 +259,37 @@ def _reports_overtaken_arming(*, view: PrView) -> bool:
 def _is_integration_access_denied(*, error: str | None) -> bool:
     """Recognize GitHub App authorization denial without retrying transient reads."""
     return error is not None and "resource not accessible by integration" in error.lower()
+
+
+def _merged_view(
+    *,
+    view: PrView | None,
+    context: RequiredCheckFailureContext,
+    rerun_state: RerunPollState,
+) -> PrView | None:
+    """Record a merged observation, or leave the poll's ordinary path alone."""
+    if view is None or view.state != "MERGED":
+        return None
+    journal_rerun_merged(context=context, rerun_state=rerun_state)
+    return view
+
+
+def _merged_after_integration_denial(
+    *,
+    error: str | None,
+    plan: DispatchPlan,
+    runner: CommandRunner,
+    journal: JournalWriter,
+    context: RequiredCheckFailureContext,
+    rerun_state: RerunPollState,
+) -> PrView | None:
+    """Use a rollup-free read only to establish a merge hidden by app scope."""
+    if not _is_integration_access_denied(error=error):
+        return None
+    merged_reading = view_pr(
+        plan=plan,
+        runner=runner,
+        journal=journal,
+        include_status_checks=False,
+    )
+    return _merged_view(view=merged_reading.view, context=context, rerun_state=rerun_state)

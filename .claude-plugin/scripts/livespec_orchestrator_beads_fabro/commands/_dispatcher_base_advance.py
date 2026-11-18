@@ -48,6 +48,7 @@ __all__: list[str] = [
     "BASE_ADVANCED_AFTER_ARMING",
     "CONSECUTIVE_CONFLICTING_REPORTS",
     "MERGE_POLL_BUDGET_EXHAUSTED",
+    "MERGE_QUEUE_REMOVED_AFTER_ARMING",
     "BaseAdvancedAfterArming",
     "base_advanced_detail",
     "merge_poll_budget_exhausted_detail",
@@ -55,6 +56,13 @@ __all__: list[str] = [
 ]
 
 BASE_ADVANCED_AFTER_ARMING = "base-advanced-after-arming"
+
+# A merge queue can remove an otherwise unchanged factory pull request and
+# clear its auto-merge request before the next ordinary poll.  That observation
+# earns the same bounded resume path as the existing overtaken-arming outcome,
+# but names a distinct cause so its automatic repair is not confused with the
+# two-poll protection against a transient mergeability computation.
+MERGE_QUEUE_REMOVED_AFTER_ARMING = "merge-queue-removed-after-arming"
 
 # The sibling ending the same paragraph names: the poll budget ran out while the
 # forge still reported the pull request OPEN and not in conflict. It rests the
