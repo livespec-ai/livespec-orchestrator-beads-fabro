@@ -888,6 +888,72 @@ def test_admission_refuses_both_legs_on_one_shared_verdict(
     assert refusals[0]["success_critical"] == ["implement"]
 
 
+def test_an_empty_preflight_prints_each_dropped_candidate_and_its_skip_reason() -> None:
+    """The r267 outcome and launcher early-exit line share this refusal detail.
+
+    `drive.py` preserves the dispatch outcome in r267's ``stdout_json``, and
+    the launcher renders each outcome's ``detail`` into its ``early-exit
+    detail`` line. Keep the candidate and reason in that common text as well
+    as in the preflight journal record: otherwise both operator-facing
+    surfaces name only the exhausted node and diagnosing the refusal requires
+    reconstructing the candidate filter from separate evidence.
+    """
+    modules = _modules()
+    preflight = modules["_acp_candidate_preflight"]
+    verdict = modules["_acp_preflight_verdict"].AcpPreflightVerdict(
+        fallback_enabled=True,
+        nodes=(
+            preflight.NodePreflight(
+                node="implement",
+                enabled=True,
+                candidates=(),
+                skipped=(
+                    preflight.SkippedCandidate(
+                        availability_key="claude-acp",
+                        candidate_key="claude-sonnet-5-5",
+                        reason=preflight.TYPED_HOLD_SKIP,
+                        cause="availability-hold",
+                    ),
+                    preflight.SkippedCandidate(
+                        availability_key="codex-acp",
+                        candidate_key="gpt-5-5",
+                        reason=preflight.HEADROOM_SKIP,
+                    ),
+                ),
+            ),
+        ),
+        success_critical=("implement",),
+        admission_required=("implement",),
+        exhausted=("implement",),
+    )
+    journal = _MemoryJournal()
+    refusal = modules["_dispatcher_acp_preflight"].acp_preflight_refusal(
+        work_item_id="bd-ib-pzzt6g", verdict=verdict, journal=journal
+    )
+
+    assert refusal is not None
+    for candidate, reason in (
+        ("claude-acp/claude-sonnet-5-5", preflight.TYPED_HOLD_SKIP),
+        ("codex-acp/gpt-5-5", preflight.HEADROOM_SKIP),
+    ):
+        assert candidate in refusal.detail
+        assert reason in refusal.detail
+    assert journal.records[0]["candidate_skips"] == [
+        {
+            "node": "implement",
+            "availability_key": "claude-acp",
+            "candidate_key": "claude-sonnet-5-5",
+            "reason": preflight.TYPED_HOLD_SKIP,
+        },
+        {
+            "node": "implement",
+            "availability_key": "codex-acp",
+            "candidate_key": "gpt-5-5",
+            "reason": preflight.HEADROOM_SKIP,
+        },
+    ]
+
+
 def _journal_records(*, path: Path) -> list[dict[str, Any]]:
     return [
         json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()

@@ -85,6 +85,8 @@ __all__: list[str] = [
     "build_acp_preflight_verdict",
     "chain_source_refusal_verdict",
     "no_fallback_verdict",
+    "preflight_refusal_fields",
+    "preflight_refusal_journal_fields",
 ]
 
 # The stage a Claude credential policy refusal is journaled and reported under,
@@ -155,6 +157,42 @@ class AcpPreflightVerdict:
             if preflight.node == node:
                 return preflight
         return None
+
+
+def preflight_refusal_fields(
+    *, verdict: AcpPreflightVerdict
+) -> tuple[list[dict[str, str | None]], str]:
+    """Project skipped candidates and the shared r267/launcher refusal detail."""
+    exhausted = frozenset(verdict.exhausted)
+    candidate_skips = [
+        {
+            "node": node.node,
+            "availability_key": skip.availability_key,
+            "candidate_key": skip.candidate_key,
+            "reason": skip.reason,
+        }
+        for node in verdict.nodes
+        if node.node in exhausted
+        for skip in node.skipped
+    ]
+    detail = f"acp preflight refusal: {verdict.detail}"
+    if not candidate_skips:
+        return candidate_skips, detail
+    rendered = ", ".join(
+        f"{skip['node']}:{skip['availability_key']}/{skip['candidate_key']} ({skip['reason']})"
+        for skip in candidate_skips
+    )
+    return candidate_skips, f"{detail}; skipped candidates: {rendered}"
+
+
+def preflight_refusal_journal_fields(
+    *, candidate_skips: list[dict[str, str | None]], verdict: AcpPreflightVerdict
+) -> dict[str, list[dict[str, str | None]] | int]:
+    """Project the supplementary fields persisted in the ACP refusal journal."""
+    return {
+        "candidate_skips": candidate_skips,
+        "unobservable_observations": len(verdict.unobservable),
+    }
 
 
 def no_fallback_verdict() -> AcpPreflightVerdict:

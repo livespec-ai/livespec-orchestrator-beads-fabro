@@ -119,6 +119,8 @@ from livespec_orchestrator_beads_fabro.commands._acp_preflight_verdict import (
     build_acp_preflight_verdict,
     chain_source_refusal_verdict,
     no_fallback_verdict,
+    preflight_refusal_fields,
+    preflight_refusal_journal_fields,
 )
 from livespec_orchestrator_beads_fabro.commands._acp_session_headroom import SessionHeadroomPolicy
 from livespec_orchestrator_beads_fabro.commands._acp_session_headroom_records import (
@@ -396,8 +398,11 @@ def acp_preflight_refusal(
 
     Returns `None` for a viable verdict, which is every verdict a repository
     with no fallback configuration can produce. The refusal names the verdict's
-    own deterministic explanation rather than re-deriving one, so the journal
-    line and the operator-visible detail cannot disagree.
+    own deterministic explanation together with every candidate that left an
+    exhausted node without a selection. The shared detail reaches both r267's
+    ``stdout_json`` and the launcher's early-exit line, so those two operator
+    surfaces cannot disagree about either the exhausted node or why each of
+    its candidates was dropped.
 
     The session-headroom block is MERGED IN rather than branched on here, and it
     is empty unless headroom actually emptied an exhausted node -- see
@@ -418,13 +423,14 @@ def acp_preflight_refusal(
     if verdict.viable:
         return None
     stage = verdict.refusal_stage(default=ACP_PREFLIGHT_REFUSAL_STAGE)
+    candidate_skips, detail = preflight_refusal_fields(verdict=verdict)
     outcome = DispatchOutcome(
         work_item_id=work_item_id,
         status="failed",
         stage=stage,
         pr_number=None,
         merge_sha=None,
-        detail=f"acp preflight refusal: {verdict.detail}",
+        detail=detail,
     )
     journal.append(
         record={
@@ -433,7 +439,7 @@ def acp_preflight_refusal(
             "detail": verdict.detail,
             "success_critical": list(verdict.success_critical),
             "exhausted": list(verdict.exhausted),
-            "unobservable_observations": len(verdict.unobservable),
+            **preflight_refusal_journal_fields(candidate_skips=candidate_skips, verdict=verdict),
             **headroom_refusal_fields(verdict=verdict),
             **availability_wait_refusal_fields(wait=wait),
         }
