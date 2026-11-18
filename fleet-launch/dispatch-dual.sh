@@ -112,6 +112,7 @@ JUDGE_ENV=()
 [ -n "$FLEET_LAUNCH_DRIFT_JUDGE_MODEL" ] && JUDGE_ENV+=("LIVESPEC_DRIFT_JUDGE_MODEL=$FLEET_LAUNCH_DRIFT_JUDGE_MODEL")
 [ -n "$FLEET_LAUNCH_REFLECTOR_MODEL" ] && JUDGE_ENV+=("LIVESPEC_REFLECTOR_MODEL=$FLEET_LAUNCH_REFLECTOR_MODEL")
 mkdir -p "$OUT"
+ready_check_stderr="$OUT/$ITEM-ready-set-check.$$.stderr"
 
 # A bash launcher keeps executing the script content it started with, so code added to this file
 # after a launcher started never reached it (bd-ib-5ycmsm). The wait loop therefore compares this
@@ -740,22 +741,30 @@ size_screen() {
 echo "=== fleet-launch dispatch $ITEM at $(date -u +%FT%TZ) (wrapper: $(wrapper_description))"
 ready_check() {
   local p pick
+  : > "$ready_check_stderr"
   p=$(installed_plugin_dir) || return 1
   if [ -n "${REWORK:-}" ]; then
     # A rework:pending row is `active`, so it is never in ready_items(); ask the Dispatcher's own loop
     # selection (the path drive impl:<id> runs) whether it would pick this item.
-    pick=$(cd "$REPO" && wrap -- python3 "$p/scripts/bin/dispatcher.py" loop --repo "$REPO" --budget 1 --item "$ITEM" --dry-run --json --invoker "claude:$SEAT" 2>/dev/null)
+    pick=$(cd "$REPO" && wrap -- python3 "$p/scripts/bin/dispatcher.py" loop --repo "$REPO" --budget 1 --item "$ITEM" --dry-run --json --invoker "claude:$SEAT" 2>"$ready_check_stderr")
     if printf '%s' "$pick" | python3 -c 'import json,sys; rows=json.loads(sys.stdin.read() or "[]"); sys.exit(0 if any(r.get("stage")=="loop-pick" and r.get("status")=="dry-run" and r.get("work_item_id")==sys.argv[1] for r in rows) else 3)' "$ITEM"; then
       echo "READY-CHECK $ITEM: REWORK, the Dispatcher's loop dry-run picks it"; return 0
     fi
     echo "READY-CHECK $ITEM: REWORK, the Dispatcher's loop dry-run does NOT pick it"; return 3
   fi
-  (cd "$REPO" && wrap -- python3 "$FLEET_LAUNCH_DIR/ready-set-check.py" "$p" "$REPO" "$ITEM" 2>/dev/null)
+  (cd "$REPO" && wrap -- python3 "$FLEET_LAUNCH_DIR/ready-set-check.py" "$p" "$REPO" "$ITEM" 2>"$ready_check_stderr")
 }
 # ready_refused: one refused ready-set check. The refusal is retried on the next poll until
 # FLEET_LAUNCH_READY_RETRY_POLLS polls have been tried; then the launcher gives up, naming the last reason
 # and the polls tried in its terminal line and, unconditionally, in a ledger comment on the item.
 ready_refused() {
+  if [ "$rcrc" != 3 ]; then
+    local stderr_tail
+    stderr_tail=$(tail -n 12 "$ready_check_stderr" 2>/dev/null | tr '\n' ' ' | cut -c1-600)
+    exit_cause="ready-set check crashed (rc=$rcrc, stderr tail=\"${stderr_tail:-no output}\")"
+    exit_comment=always
+    exit 70
+  fi
   local reason=${rcout:-no output, rc=$rcrc}
   ready_refusals=$((ready_refusals + 1))
   echo "$(date -u +%FT%TZ) ready-set check refused (rc=$rcrc, poll $ready_refusals of $FLEET_LAUNCH_READY_RETRY_POLLS): $1"
