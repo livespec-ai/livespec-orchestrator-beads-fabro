@@ -18,6 +18,7 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dot_graph import (
     DotGraph,
     parse_dot_graph,
@@ -148,6 +149,22 @@ def test_an_empty_subject_commit_is_not_pushed_either(tmp_path: Path) -> None:
     assert publish.returncode != 0
     assert _pushed(work=work) == ""
     assert emptied in publish.stderr
+
+
+@pytest.mark.parametrize("placeholder", ["feat: red", "fix: red"])
+def test_a_bare_red_subject_head_is_not_pushed_and_names_its_commit_and_subject(
+    tmp_path: Path, placeholder: str
+) -> None:
+    """The publish boundary prevents a Red placeholder from reaching a pull request."""
+    work = _sandbox(tmp_path=tmp_path, message=placeholder)
+    bare_red = _git(work, "rev-parse", "HEAD")
+
+    publish = _publish(work=work, env=_env(tmp_path=tmp_path))
+
+    assert publish.returncode != 0
+    assert _pushed(work=work) == ""
+    assert f"{bare_red} {placeholder}" in publish.stderr
+    assert "LIVESPEC_PUBLISH_DRAFT_BARE_RED_SUBJECT" in publish.stderr
 
 
 def test_a_branch_with_authored_subjects_is_pushed_as_before(tmp_path: Path) -> None:
