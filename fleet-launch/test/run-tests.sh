@@ -982,6 +982,11 @@ if bash "$HARNESS_DIR/test-scenario-watchdog.sh" >/dev/null; then
 else
     fail "the per-scenario watchdog regressed"
 fi
+if bash "$HARNESS_DIR/test-restore-guard.sh" >/dev/null; then
+    pass "the seat restore guard refuses a plain ticket for an item with an open factory PR or a preserved-publish ref, and passes a seeded ruling or an explicit --fresh reason"
+else
+    fail "the seat restore guard regressed"
+fi
 if bash "$HARNESS_DIR/test-load-guard-tmp-share.sh" >/dev/null; then
     pass "the seat load guard holds /tmp at a share of the mounted tmpfs, the same verdict on a 24G and a 48G tmpfs"
 else
