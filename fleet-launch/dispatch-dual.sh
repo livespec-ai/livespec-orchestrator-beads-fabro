@@ -785,6 +785,38 @@ sys.exit(3)' 2>/dev/null); local rc=$?
   [ "$rc" = 3 ] || echo "$(date -u +%FT%TZ) host-only screen could not answer: proceeding, the Dispatcher's own refusal still applies"
   return 0
 }
+# tier_hold_screen: the Dispatcher's own spec-change tier hold predicate (the drain's admission filter),
+# obtained from the Dispatcher, never re-implemented here, and answered BEFORE any launch ticket is taken so a
+# held item costs no ticket, mutex turn or launcher pass. A hold is a non-run exit with one terminal line naming
+# the hold reason and the linked proposed-change topic; a command that cannot answer (an installed build that
+# predates it) is not read as unheld-by-proof, and the next gate (the Dispatcher's own refusal) applies.
+tier_hold_screen() {
+  local p verdict held
+  p="$FLEET_LAUNCH_PLUGIN_CACHE/$(installed_build)"
+  verdict=$(cd "$REPO" && wrap -- python3 "$p/scripts/bin/dispatcher.py" tier-hold --repo "$REPO" --item "$ITEM" --json 2>/dev/null) || { echo "$(date -u +%FT%TZ) tier-hold screen could not answer: proceeding, the Dispatcher's own refusal still applies"; return 0; }
+  held=$(printf '%s' "$verdict" | python3 -c 'import json,sys
+try:
+    d = json.loads(sys.stdin.read() or "{}")
+except ValueError:
+    sys.exit(1)
+if d.get("spec_change_hold") is True:
+    print("%s %s" % (d.get("reason") or "held", d.get("topic") or "(none linked)"))
+    sys.exit(0)
+sys.exit(3)' 2>/dev/null); local rc=$?
+  if [ "$rc" = 0 ]; then
+    write_terminal tier-hold
+    echo "$(date -u +%FT%TZ) tier-hold screen: $ITEM is held at the spec-change tier (reason and topic: $held): no ticket, no mutex, no preflight, no launch"
+    exit_comment=always
+    [ -n "$plugin" ] || plugin="$p"
+    ledger_comment "Fleet launcher $SEAT exited for $ITEM before taking a launch ticket: the Dispatcher's spec-change tier hold predicate reports it held (reason and linked proposed-change topic: $held). This exit was not a run ending and the item's status is unchanged." \
+      || echo "$(date -u +%FT%TZ) ledger comment for $ITEM failed: the tier-hold exit was not recorded"
+    terminal_written=1; exit_cause=""
+    exit 5
+  fi
+  [ "$rc" = 3 ] || echo "$(date -u +%FT%TZ) tier-hold screen could not answer: proceeding, the Dispatcher's own refusal still applies"
+  return 0
+}
+tier_hold_screen
 # A gmktec-only launch takes its FIFO ticket NOW and holds it while it polls, so a launcher queued
 # later cannot win the next freed slot ahead of it, and a refusal retried below keeps its place.
 if [ -n "${ONLY_GMK:-}" ] || [ -n "${ONLY_HL:-}" ] || [ -n "${ONLY_ARM:-}" ]; then

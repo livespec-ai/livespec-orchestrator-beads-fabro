@@ -17,6 +17,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_item_ledger_reads im
     read_dispatch_labels,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_ledger_close import load_items
+from livespec_orchestrator_beads_fabro.commands._dispatcher_tier_hold_command import (
+    add_tier_hold_subcommand,
+)
 from livespec_orchestrator_beads_fabro.io import write_stdout
 
 __all__: list[str] = [
@@ -44,9 +47,14 @@ def add_host_only_subcommand(
     subparsers: _SubcommandParsers,
     handlers: dict[str, Callable[..., int]],
 ) -> None:
-    """Register the read-only host-only command with the Dispatcher router."""
+    """Register the read-only host-only command, and its tier-hold sibling, with the router.
+
+    The two are the launcher's pre-ticket screens, and dispatcher.py sits at its
+    file-size ceiling, so the second registers here rather than there.
+    """
     add_host_only_arguments(parser=subparsers.add_parser(name="host-only"))
     handlers["host-only"] = run_host_only_command
+    add_tier_hold_subcommand(subparsers=subparsers, handlers=handlers)
 
 
 def run_host_only_command(*, args: argparse.Namespace) -> int:

@@ -316,6 +316,13 @@ for argument in "$@"; do
                     if [ -s "${STUB_HOST_ONLY_JSON:-/nonexistent}" ]; then cat "$STUB_HOST_ONLY_JSON"; else printf '{"work_item_id": "stub", "host_only": false}\n'; fi
                     exit 0
                     ;;
+                tier-hold)
+                    # The Dispatcher's spec-change tier hold predicate: a case supplies the verdict
+                    # JSON, or the command cannot answer, or the item is not held.
+                    [ ! -e "${STUB_TIER_HOLD_UNANSWERABLE_FILE:-/nonexistent}" ] || exit 1
+                    if [ -s "${STUB_TIER_HOLD_JSON:-/nonexistent}" ]; then cat "$STUB_TIER_HOLD_JSON"; else printf '{"work_item_id": "stub", "spec_change_hold": false}\n'; fi
+                    exit 0
+                    ;;
                 resume)
                     item=""
                     repo=""
@@ -3917,6 +3924,44 @@ if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-unanswered ] && log_has "$CAS
 else
     fail "an unanswerable host-only screen stopped the launch (rc=$RC)"
 fi
+
+scenario "40b. a spec-change-tier-held item exits before any launch ticket is taken"
+new_case tier-hold
+open_boards
+export STUB_TIER_HOLD_JSON="$CASE_DIR/tier-hold.json"
+printf '{"work_item_id": "bd-ib-tierheld", "spec_change_hold": true, "reason": "unratified-topic", "topic": "a-fleet-launcher-screens-an"}\n' > "$STUB_TIER_HOLD_JSON"
+ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-tierheld > "$CASE_LOG" 2>&1
+tier_hold_rc=$?
+if [ "$tier_hold_rc" = 5 ] && [ ! -s "$DRIVE_LOG" ] && [ ! -s "$PREFLIGHT_LOG" ] && [ ! -d "$FLEET_LAUNCH_GMK_LOCK_DIR" ] \
+    && grep -qF 'terminal: item=bd-ib-tierheld ticket=none cause=tier-hold' "$CASE_LOG" \
+    && grep -qF 'unratified-topic a-fleet-launcher-screens-an' "$CASE_LOG" \
+    && [ "$(grep -c . "$STUB_LEDGER_COMMENTS")" = 1 ] && grep -q 'a-fleet-launcher-screens-an' "$STUB_LEDGER_COMMENTS" \
+    && [ -z "$(find "$FLEET_LAUNCH_GMK_QUEUE_DIR" -type f -print -quit)" ]; then
+    pass "a tier-held item is a non-run exit with one terminal line naming the hold reason and topic, and no FIFO ticket was taken"
+else
+    fail "the tier-hold screen did not stop the launcher before a ticket (rc=$tier_hold_rc)"
+    tail -5 "$CASE_LOG" >&2
+fi
+new_case tier-hold-unheld
+open_boards
+unset STUB_TIER_HOLD_JSON
+run_launcher bd-ib-tierfree
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-tierfree ]; then
+    pass "control: an item the tier hold does not stand on takes its ticket and launches exactly as before"
+else
+    fail "an unheld item did not launch (rc=$RC)"
+fi
+new_case tier-hold-unanswerable
+open_boards
+export STUB_TIER_HOLD_UNANSWERABLE_FILE="$CASE_DIR/tier-unanswerable"
+: > "$STUB_TIER_HOLD_UNANSWERABLE_FILE"
+run_launcher bd-ib-tierunanswered
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-tierunanswered ] && log_has "$CASE_LOG" "tier-hold screen could not answer"; then
+    pass "control: a tier-hold command that cannot answer lets the launch proceed to the Dispatcher's own refusal"
+else
+    fail "an unanswerable tier-hold screen stopped the launch (rc=$RC)"
+fi
+unset STUB_TIER_HOLD_UNANSWERABLE_FILE
 
 scenario "41. a ticket marked wip-wait=1 by the interim launcher is skipped like a held= ticket"
 new_case wip-wait-skipped

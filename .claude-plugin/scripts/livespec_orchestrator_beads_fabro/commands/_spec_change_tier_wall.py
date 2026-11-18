@@ -95,6 +95,7 @@ __all__: list[str] = [
     "spec_change_tier_refusal",
     "spec_change_unrefused_candidates",
     "standing_hold",
+    "standing_hold_the_drain_drops",
 ]
 
 
@@ -219,6 +220,29 @@ def spec_change_unrefused_candidates(
         if _exempt(repo=repo, item=item, workflow_name=workflow_name)
         or not _drain_drops(item=item, config=config, ratified_topics=ratified, current=current)
     ]
+
+
+def standing_hold_the_drain_drops(*, repo: Path, item: WorkItem) -> SpecChangeHold | None:
+    """The hold the drain's admission filter drops this item for, or `None`.
+
+    The SAME predicate `spec_change_unrefused_candidates` applies, answered for
+    one item and returning the hold itself so a caller can name its reason and
+    linked topic. It takes no judgement and reaches no provider, and a
+    repository whose connection cannot be resolved holds nothing. A fleet
+    launcher screens an item with it BEFORE taking a launch ticket, so the
+    launcher and the Dispatcher never disagree about whether an item is held.
+    """
+    config = _connection(repo=repo)
+    if config is None:
+        return None
+    ratified = ratified_proposal_topics(spec_root=repo / SPEC_DIRNAME)
+    if not _drain_drops(
+        item=item, config=config, ratified_topics=ratified, current=_current_version(repo=repo)
+    ):
+        return None
+    return standing_hold(
+        item=item, config=config, spec_root=repo / SPEC_DIRNAME, ratified_topics=ratified
+    )
 
 
 def _exempt(*, repo: Path, item: WorkItem, workflow_name: str | None) -> bool:
