@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.341.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.341.0...v0.341.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* a split-graph commit_green amend takes the affected-tests gate by naming the implement turn to the commit hook (bd-ib-cthvom) ([06cd7c0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/06cd7c0d5150fe576aac6d1048324e533413d60a))
+* refresh a handed-off BEHIND pull request through a resumed run (bd-ib-us5l3f) ([85da48b](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/85da48bb79eeaa097585792da3dfe6794b3e995e))
+
 ## [0.341.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.340.0...v0.341.0) (2026-11-18)
 
 
