@@ -3317,5 +3317,13 @@
     "test": "TODO",
     "work_item": "bd-ib-22ckko",
     "reason": "A real test at the integration tier or above is owed for this heading: a commit run whose hook delegates check-per-file-coverage to a cluster gate Job, asserting the pass, failure-naming, no-verdict and no-relaxation arms. bd-ib-22ckko owns it."
+  },
+  {
+    "heading": "## Scenario 381 — A factory sandbox receives the factory's declared gate credential, and an absent or missing one never refuses the dispatch",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-nr53me",
+    "reason": "A real test at the integration tier or above is owed for this heading: the dispatch sandbox configuration driven with a factory declaring gates_kubeconfig for an existing file, a missing file and an invalid value, asserting the read-only mount, the journaled warning that never refuses, the before-claim refusal naming the key, and that no record carries the file contents. The code sibling filed under bd-ib-nr53me owns it."
   }
 ]

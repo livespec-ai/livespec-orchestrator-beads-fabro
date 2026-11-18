@@ -1023,6 +1023,43 @@ else
     fail "a tenant-wrapped drive did not receive the host default factory-read wrapper"
 fi
 
+# Per-dispatch build override (bd-ib-inzpxt): one launch runs on a candidate build while the
+# band stays on the installed build; a build that is not materialized refuses.
+CANDIDATE_BUILD="candbuild111"
+mkdir -p "$PLUGIN_CACHE/$CANDIDATE_BUILD"
+cp -R "$PLUGIN_CACHE/$PLUGIN_BUILD/." "$PLUGIN_CACHE/$CANDIDATE_BUILD/"
+printf '{"version": "0.0.1-candidate"}\n' > "$PLUGIN_CACHE/$CANDIDATE_BUILD/plugin.json"
+new_case build-override
+write_board "$BOARD_GMK" 0 gmk
+write_board "$BOARD_HL" 0 hl
+printf '5\n' > "$CAP_FILE"
+FLEET_LAUNCH_BUILD_OVERRIDE="$CANDIDATE_BUILD" run_launcher bd-ib-candidate "$CASE_DIR/candidate.log"
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = "bd-ib-candidate" ] \
+    && log_has "$CASE_DIR/candidate.log" "build=$CANDIDATE_BUILD build-source=override version=0.0.1-candidate"; then
+    pass "a launch given a candidate build runs on it, and its LAUNCH line names the build and the override source"
+else
+    fail "a launch given a candidate build did not run on it (rc=$RC, dispatches: $(drive_log_items))"
+    tail -8 "$CASE_DIR/candidate.log" >&2
+fi
+: > "$DRIVE_LOG"
+run_launcher bd-ib-band "$CASE_DIR/band.log"
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = "bd-ib-band" ] \
+    && log_has "$CASE_DIR/band.log" "build=$PLUGIN_BUILD build-source=installed registry version=0.0.0-stub"; then
+    pass "a launch from the same clone given no override still runs on the installed build"
+else
+    fail "a launch given no override did not stay on the installed build (rc=$RC, dispatches: $(drive_log_items))"
+    tail -8 "$CASE_DIR/band.log" >&2
+fi
+: > "$DRIVE_LOG"
+FLEET_LAUNCH_BUILD_OVERRIDE="missingbuild999" run_launcher bd-ib-missing "$CASE_DIR/missing.log"
+if [ "$RC" != 0 ] && [ ! -s "$DRIVE_LOG" ] && log_has "$CASE_DIR/missing.log" "missingbuild999" \
+    && ! log_has "$CASE_DIR/missing.log" "build=$PLUGIN_BUILD"; then
+    pass "a launch given a build that is not in the plugin cache refuses naming it, with no silent fallback to the installed build"
+else
+    fail "an unmaterialized build override did not refuse cleanly (rc=$RC, dispatches: $(drive_log_items))"
+    tail -8 "$CASE_DIR/missing.log" >&2
+fi
+
 # --- 3. two queued tickets launch in FIFO order -----------------------------
 # The FIFO order is the TICKET order, not the start order, so the launcher
 # started FIRST here holds the LATER ticket and must lose. The hold file is the

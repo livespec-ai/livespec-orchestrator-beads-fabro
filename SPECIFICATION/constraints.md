@@ -298,8 +298,22 @@ from which BUILD that server runs.
   GitHub App installation, a new factory host MUST reuse that
   installation's credential rather than registering a separate App,
   unless an operator explicitly decides otherwise for that host.
+- **Per-factory gate credential.** A factory entry MAY declare
+  `dispatcher.factories.<name>.gates_kubeconfig`, a non-empty string naming a
+  kubeconfig file on the dispatching host. When it is declared and the file
+  exists, the per-run sandbox configuration MUST mount that file read-only at
+  the path the gate-delegation client reads (the `GATES_KUBECONFIG`
+  environment variable, defaulting to `/etc/ci-runner/gates.kubeconfig`), so
+  the sandbox can delegate gate Jobs to the cluster. When the key is absent
+  the run proceeds unchanged and the commit hook falls back to the local
+  aggregate. A declared key whose file is missing MUST be recorded as a
+  warning in the dispatch journal and MUST NOT refuse the dispatch. The
+  file's contents MUST NOT be logged, journaled, or copied into any record;
+  only its presence and its path MAY appear. A value that is not a non-empty
+  string MUST refuse before claim with a diagnostic naming
+  `dispatcher.factories.<name>.gates_kubeconfig`.
 
-Neither bullet MAY name a specific hostname, tailnet, or domain; per-host
+No bullet above MAY name a specific hostname, tailnet, or domain; per-host
 values are operational data recorded in the project's own work-item
 tracker, never in this specification.
 

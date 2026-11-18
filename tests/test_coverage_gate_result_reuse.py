@@ -136,3 +136,50 @@ exit 99
 
     assert standalone.returncode == 1
     assert not (repo / ".coverage-gates").exists()
+
+
+def test_ci_coverage_gate_refuses_a_missing_canonical_verdict_without_pytest(
+    tmp_path: Path,
+) -> None:
+    """A CI consumer must fail closed rather than recreate its missing artifact."""
+    repo = tmp_path / "repo"
+    tooling = repo / "dev-tooling"
+    tooling.mkdir(parents=True)
+    for source in (
+        _PER_FILE_RECIPE,
+        _COVERAGE_RECIPE,
+        _ROOT / "dev-tooling" / "just-test-nprocs.sh",
+    ):
+        _ = shutil.copy2(source, tooling / source.name)
+
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    pytest_started = tmp_path / "pytest-started"
+    fake_uv = fake_bin / "uv"
+    _ = fake_uv.write_text(
+        f"""#!/usr/bin/env bash
+if [[ \"$2\" == pytest ]]; then
+    touch {pytest_started}
+fi
+exit 0
+""",
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+
+    consumer = subprocess.run(
+        ["bash", str(tooling / _COVERAGE_RECIPE.name)],
+        cwd=repo,
+        env={
+            **os.environ,
+            "GITHUB_ACTIONS": "true",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert consumer.returncode != 0
+    assert "missing canonical per-file verdict" in consumer.stderr
+    assert not pytest_started.exists()
