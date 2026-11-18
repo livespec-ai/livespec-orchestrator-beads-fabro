@@ -140,6 +140,9 @@ def test_a_removal_between_polls_is_recovered_when_the_first_view_is_already_deq
             if argv[:3] == ["gh", "pr", "merge"]:
                 self.calls.append(argv)
                 return CommandResult(exit_code=0, stdout="", stderr="")
+            if argv[:2] == ["gh", "api"]:
+                self.calls.append(argv)
+                return CommandResult(exit_code=0, stdout='[{"number": 5522}]', stderr="")
             return super().run(
                 argv=argv, cwd=cwd, timeout_seconds=timeout_seconds, env=env, stdin=stdin
             )
