@@ -26,6 +26,7 @@ _WORKFLOW_DIR = _ROOT / ".claude-plugin" / ".fabro" / "workflows" / "implement-w
 _GRAPH = _WORKFLOW_DIR / "workflow.fabro"
 _PROMPT = _WORKFLOW_DIR / "prompts" / "review-fix.md"
 _BRIEF_GIT_PATH = "livespec-review-fix-open-red-brief"
+_LIVE_COMMIT_GIT_PATH = "livespec-review-fix-live-commit"
 _CAUSE_GIT_PATH = "livespec-stage-cause"
 _COUNTER_GIT_PATH = "livespec-review-fix-turn-count"
 _RED_TRAILER = "TDD-Red-Test-File-Checksum: abc123"
@@ -147,6 +148,29 @@ def test_a_last_commit_with_no_tdd_trailers_routes_to_janitor_admission_as_befor
     _checkpoint(repo=repo)
 
     assert _label(_run(repo=repo)) == "continue"
+
+
+def test_a_failed_review_fix_commit_reenters_with_its_hook_refusal_and_unstages_its_work(
+    tmp_path: Path,
+) -> None:
+    """A refused review-fix commit must return to its author before a checkpoint takes it."""
+    repo = _repo(tmp_path=tmp_path)
+    _ = (repo / "module.py").write_text("VALUE = 2\n", encoding="utf-8")
+    _git("add", "module.py", repo=repo)
+    _git_file(repo=repo, name=_LIVE_COMMIT_GIT_PATH).write_text(
+        "failed\n"
+        "Commit run commit-refused-review-fix ended FAILED with exit status 1.\n"
+        "failed targets: check-commit-pairs-source-and-test\n",
+        encoding="utf-8",
+    )
+
+    assert _label(_run(repo=repo)) == _STAGE
+
+    brief = _git_file(repo=repo, name=_BRIEF_GIT_PATH).read_text(encoding="utf-8")
+    assert "commit-refused-review-fix" in brief
+    assert "check-commit-pairs-source-and-test" in brief
+    assert _git("diff", "--cached", "--name-only", repo=repo) == ""
+    assert _git("diff", "--name-only", repo=repo) == "module.py"
 
 
 def test_a_brief_from_an_earlier_visit_is_cleared_once_the_red_is_completed(
