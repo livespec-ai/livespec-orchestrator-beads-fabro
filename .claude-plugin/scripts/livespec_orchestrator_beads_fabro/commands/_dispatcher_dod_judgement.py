@@ -102,6 +102,9 @@ _REMEDY_SEPARATOR = "; "
 _UNVERIFIED_CHECK = re.compile(
     r"(?im)\b(check\s+\d+\s+could\s+not\s+be\s+verified\b[^.\n]*(?:\.)?)"
 )
+_UNREAD_CHECK_LINE = re.compile(
+    r"(?im)^\s*check\s+\d+\b[^\n]*?\b(i\s+could\s+not\s+(?:read|verify|access|confirm)\b[^.\n]*\.?)"
+)
 _UNRESOLVED_HEADING_BODY = "(this heading does not resolve in the governed spec tree)"
 _ABSENT_CRITERIA_BODY = "(this item carries no effective acceptance criteria)"
 # The description is the item's own text, so it can carry any heading; the end
@@ -353,7 +356,8 @@ def _unverified_check_findings(*, reply: str) -> tuple[str, ...]:
     Keeping that reply fail-closed prevents an installed build from admitting an
     incomplete judgement while the explicit ``unverified`` verdict rolls out.
     """
-    return tuple(match.group(1).strip() for match in _UNVERIFIED_CHECK.finditer(reply))
+    matches = (*_UNVERIFIED_CHECK.finditer(reply), *_UNREAD_CHECK_LINE.finditer(reply))
+    return tuple(match.group(1).strip() for match in matches)
 
 
 def _last_non_empty_line(*, reply: str) -> str | None:
