@@ -35,6 +35,14 @@ case "$out" in *'2. the stuck one'*) ;; *) echo "FAIL: the stuck scenario was no
 case "$out" in *reached-the-end*) echo "FAIL: the stuck scenario ran to its end" >&2; fail=1 ;; esac
 if [ "$elapsed" -gt 20 ]; then echo "FAIL: the watchdog took ${elapsed}s to fire" >&2; fail=1; fi
 
+# A watchdog timeout during a repeated scenario names the attempt that was in
+# progress, so a killed Scenario 10b run can be diagnosed without its log.
+mini_harness 'scenario "10b. a queued launcher counts a held direct release as in flight"; scenario_attempt 17; sleep 120'
+out=$(HARNESS_SCENARIO_TIMEOUT_S=2 HARNESS_WATCHDOG_TICK_S=1 timeout 60 bash "$WORK/mini.sh" 2>&1)
+rc=$?
+if [ "$rc" -eq 0 ]; then echo "FAIL: an attempted scenario timeout exited 0" >&2; fail=1; fi
+case "$out" in *'attempt 17'*) ;; *) echo "FAIL: the watchdog timeout did not name the active attempt: $out" >&2; fail=1 ;; esac
+
 # Control: scenarios that each finish inside the limit pass untouched, even when the whole
 # run is longer than one limit.
 mini_harness 'scenario "1. a"; sleep 1; scenario "2. b"; sleep 1; scenario "3. c"; sleep 1; echo reached-the-end'
