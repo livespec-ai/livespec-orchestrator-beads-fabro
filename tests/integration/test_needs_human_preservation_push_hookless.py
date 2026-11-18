@@ -40,6 +40,10 @@ import stat
 import subprocess
 from pathlib import Path
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_publication_push import (
+    PUBLICATION_PUSH_PROGRAM_FILENAME,
+    publication_push_program_source,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_record_file_regeneration import (
     RECORD_FILE_PROGRAM_FILENAME,
     record_file_program_source,
@@ -394,6 +398,9 @@ def _run_publish_draft(*, work: Path) -> subprocess.CompletedProcess[str]:
     _ = (plugins / RECORD_FILE_PROGRAM_FILENAME).write_text(
         record_file_program_source(), encoding="utf-8"
     )
+    publication_push = plugins / PUBLICATION_PUSH_PROGRAM_FILENAME
+    _ = publication_push.write_text(publication_push_program_source(), encoding="utf-8")
+    publication_push.chmod(publication_push.stat().st_mode | stat.S_IXUSR)
     env[SANDBOX_CLAUDE_PLUGINS_ROOT_ENV_VAR] = str(plugins)
     return subprocess.run(
         ["sh", "-c", _node_script(node="publish_draft")],

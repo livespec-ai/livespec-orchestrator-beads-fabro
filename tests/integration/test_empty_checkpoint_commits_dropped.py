@@ -292,6 +292,9 @@ def _run_publish_draft(
     _ = (plugins_root / RECORD_FILE_PROGRAM_FILENAME).write_text(
         record_file_program_source(), encoding="utf-8"
     )
+    publication_push = plugins_root / PUBLICATION_PUSH_PROGRAM_FILENAME
+    _ = publication_push.write_text(publication_push_program_source(), encoding="utf-8")
+    publication_push.chmod(0o700)
     env = {
         "PATH": f"{world.forge_bin}:/usr/local/bin:/usr/bin:/bin",
         "HOME": str(world.clone.parent / "home"),
