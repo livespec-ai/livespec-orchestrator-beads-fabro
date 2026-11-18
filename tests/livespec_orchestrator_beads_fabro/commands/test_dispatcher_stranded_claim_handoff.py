@@ -201,8 +201,9 @@ _FAILED = [{"name": "check-coverage", "status": "COMPLETED", "conclusion": "fail
 class _Forge:
     """A fake subprocess seam answering by argv, and remembering every call."""
 
-    def __init__(self, *, view: CommandResult) -> None:
+    def __init__(self, *, view: CommandResult, listed: CommandResult | None = None) -> None:
         self.view = view
+        self.listed = listed or CommandResult(exit_code=0, stdout="[]", stderr="")
         self.argvs: list[list[str]] = []
 
     def run(
@@ -218,9 +219,11 @@ class _Forge:
         self.argvs.append(argv)
         if argv[:3] == ["gh", "pr", "view"]:
             return self.view
+        if argv[:3] == ["gh", "pr", "list"]:
+            return self.listed
         if argv[:3] == ["gh", "api", "graphql"]:
             return CommandResult(exit_code=0, stdout=_REQUIRED, stderr="")
-        return CommandResult(exit_code=0, stdout="[]", stderr="")
+        return CommandResult(exit_code=0, stdout="", stderr="")
 
 
 def _ok(*, stdout: str) -> CommandResult:
@@ -460,3 +463,24 @@ def test_a_succeeded_claim_without_a_handoff_of_its_own_dispatch_is_held_as_befo
     assert held[0].detail is None
     assert not any(argv[:3] == ["gh", "pr", "view"] for argv in forge.argvs)
     assert _stored().status == "active"
+
+
+def test_a_succeeded_claim_whose_published_pull_request_merged_is_reconciled_without_a_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _stub_reconcile(monkeypatch=monkeypatch, exit_code=0)
+    repo = _repo(tmp_path=tmp_path)
+    journal = _journal(repo=repo, rows=[_LAUNCH])
+    forge = _Forge(
+        view=_ok(stdout=_view(state="MERGED", armed=False)),
+        listed=_ok(stdout=json.dumps([{"number": _PR, "state": "MERGED", "title": _ITEM_ID}])),
+    )
+
+    recovered, held = _pass(repo=repo, journal=journal, forge=forge)
+
+    assert held == ()
+    assert [(row.work_item_id, row.route) for row in recovered] == [
+        (_ITEM_ID, "succeeded-run-reconcile-merged")
+    ]
+    assert [(call.item, call.regrade) for call in calls] == [(_ITEM_ID, False)]
+    assert calls[0].repo == str(repo)

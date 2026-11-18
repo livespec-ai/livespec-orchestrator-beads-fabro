@@ -58,6 +58,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_stale_assignee_surve
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_grade import (
     ACTION_ABSENT_RUN_REPEATED,
+    ACTION_SUCCEEDED_RUN_RECONCILE_MERGED,
     ACTION_TERMINAL_COMPLETION,
     ATTRIBUTION_PENDING_REMEDY,
     FORGE_CLOSED_UNMERGED_PR,
@@ -76,7 +77,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_hando
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_handoff_recovery import (
     HandoffRecoveryRequest,
+    SucceededRunRecoveryRequest,
     recover_handed_off_claim,
+    recover_succeeded_merged_claim,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_measure import (
     ClaimReadInputs,
@@ -251,6 +254,18 @@ def _measure_and_act(
                 factory_server_url=inventory.server_url,
                 action=graded.action,
                 reading=measured.handoff,
+            ),
+            now_iso=inputs.now_iso,
+        )
+    if graded.action == ACTION_SUCCEEDED_RUN_RECONCILE_MERGED:
+        return recover_succeeded_merged_claim(
+            repo=inputs.repo,
+            journal=inputs.journal,
+            request=SucceededRunRecoveryRequest(
+                item=item,
+                run_id=attributed.run_id,
+                factory_name=inventory.name,
+                factory_server_url=inventory.server_url,
             ),
             now_iso=inputs.now_iso,
         )

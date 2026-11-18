@@ -54,6 +54,7 @@ __all__: list[str] = [
     "ACTION_HANDOFF_REFRESH_RELEASE",
     "ACTION_HANDOFF_REQUIRED_CHECK_FAILED",
     "ACTION_HANDOFF_REST",
+    "ACTION_SUCCEEDED_RUN_RECONCILE_MERGED",
     "ACTION_TERMINAL_COMPLETION",
     "ATTRIBUTION_PENDING_REMEDY",
     "FORGE_CLOSED_UNMERGED_PR",
@@ -220,6 +221,12 @@ ACTION_HANDOFF_REST = "merge-wait-handoff-rest"
 # released for a resumed run to refresh it through its own `pr_refresh` stage.
 ACTION_HANDOFF_REFRESH_RELEASE = "merge-wait-handoff-refresh-release"
 
+# A succeeded run that did not hand its merge wait off can still have published
+# a pull request which merged after the worker ended.  That merge belongs to
+# the same acceptance valve as a handed-off one; otherwise the claim remains
+# active until somebody runs the valve by hand.
+ACTION_SUCCEEDED_RUN_RECONCILE_MERGED = "succeeded-run-reconcile-merged"
+
 # What the forge said about the pull request a handed-off merge wait named. A
 # CLOSED vocabulary like the others, with `none` for a claim that was never handed
 # off and `unobservable` for the reading that could not be taken. `ended` is the
@@ -365,7 +372,9 @@ def grade_claim(*, measurements: ClaimMeasurements) -> ClaimRoute | ClaimHold:
     if measurements.run_state == RUN_ABSENT:
         return _absent_run_grade(measurements=measurements)
     if measurements.run_state == RUN_SUCCEEDED:
-        return ClaimRoute(action=_HANDOFF_ROUTES[measurements.handoff])
+        if measurements.handoff in _HANDOFF_ROUTES:
+            return ClaimRoute(action=_HANDOFF_ROUTES[measurements.handoff])
+        return ClaimRoute(action=ACTION_SUCCEEDED_RUN_RECONCILE_MERGED)
     if not measurements.terminal_evidence_readable:
         return ClaimHold(reason=HOLD_TERMINAL_EVIDENCE_UNAVAILABLE)
     return ClaimRoute(action=ACTION_TERMINAL_COMPLETION)
@@ -381,7 +390,20 @@ def _observation_hold(*, measurements: ClaimMeasurements) -> str | None:
         return HOLD_LIVENESS_UNOBSERVABLE
     if measurements.owner_liveness == OWNER_LIVE:
         return HOLD_DISPATCH_LIVE
-    if measurements.run_state == RUN_SUCCEEDED and measurements.handoff not in _HANDOFF_ROUTES:
+    if measurements.run_state == RUN_SUCCEEDED:
+        return _succeeded_run_hold(measurements=measurements)
+    return None
+
+
+def _succeeded_run_hold(*, measurements: ClaimMeasurements) -> str | None:
+    """Hold every succeeded run except a handoff or independently proven merge."""
+    if measurements.handoff in _HANDOFF_ROUTES:
+        return None
+    if measurements.handoff != HANDOFF_NONE:
+        return HOLD_RUN_SUCCEEDED
+    if measurements.forge == FORGE_UNOBSERVABLE:
+        return HOLD_FORGE_UNOBSERVABLE
+    if measurements.forge != FORGE_MERGED_PR:
         return HOLD_RUN_SUCCEEDED
     return None
 
