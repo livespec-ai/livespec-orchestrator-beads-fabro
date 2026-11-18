@@ -9,7 +9,7 @@ STUB=$(mktemp -d); trap 'rm -rf "$STUB"' EXIT
 verdict() { # used_gb size_gb -> GO|HOLD on the /tmp rule alone
     printf '#!/bin/bash\nprintf "Used Size\\n %sG %sG\\n" %s %s\n' "$1" "$2" "$1" "$2" > "$STUB/df"
     chmod +x "$STUB/df"
-    PATH="$STUB:$PATH" LDSEAT_TMP_HOLD_PCT= bash "$GUARD" | awk '{print $2}'
+    env PATH="$STUB:$PATH" LDSEAT_TMP_HOLD_PCT='' bash "$GUARD" | awk '{print $2}'
 }
 fail=0
 check() { # used size expected
