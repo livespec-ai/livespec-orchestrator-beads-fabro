@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.340.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.339.0...v0.340.0) (2026-11-18)
+
+
+### Features
+
+* red ([1f766db](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/1f766dbae4f115c618ec3ce69796798d6f08400e))
+* red ([f344dda](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/f344dda87a1f965760b86105b2871739d4ec3d06))
+* red ([ed12d01](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/ed12d01be99fb00853c524c9c8c83dbc5c6280f6))
+* red ([676fa7d](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/676fa7d9c09cb1db6d6ebc1ba462bf74274f2b42))
+
+
+### Bug Fixes
+
+* **fleet-launch:** the credential probe keeps the wrapper's refusal text instead of discarding stderr ([75f8e4c](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/75f8e4cee112dba9ce61632c41bd6f51be3d51fb))
+* **fleet-launch:** the probe-stderr harness case reads its log with case, not a pipeline reader ([d7f4287](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/d7f4287194e42b12372265efc081384fc000e83c))
+* persist the breakage key in the item capture creates so a failed annotation cannot cause a duplicate ([79ed0aa](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/79ed0aabcb24d2d4faf7c8fa3795c5220421380b))
+* stamp the breakage key even when capture fails after creating the item ([0fd2b87](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/0fd2b87f1915cbc2babcc2ae93b27ad3a30c929e))
+* take the breakage filing as one record instead of suppressing the argument-count guard ([f06a17e](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/f06a17ecee616c82a61859887e538ad62e59bd1a))
+
 ## [0.339.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.338.1...v0.339.0) (2026-11-18)
 
 
