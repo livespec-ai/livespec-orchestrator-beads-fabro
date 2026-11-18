@@ -27,6 +27,8 @@ run 0 "no PR and no preserved ref passes" STUB_PRS= --
 git -C "$T/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "fix: deliver bd-ib-x"
 delivering_commit=$(git -C "$T/repo" rev-parse HEAD)
 git -C "$T/repo" push -q origin HEAD:refs/heads/master
+git -C "$T/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "fix: deliver bd-ib-x-extra"
+git -C "$T/repo" push -q origin HEAD:refs/heads/master
 run 6 "a delivered origin/master commit is refused" STUB_PRS= --
 case "$LAST" in *"$delivering_commit"*origin/master*) echo "ok   the refusal names the delivering commit and origin/master reason";; *) echo "FAIL delivered-commit refusal text: $LAST"; fail=1;; esac
 run 6 "an open factory PR is refused" STUB_PRS=5527 --

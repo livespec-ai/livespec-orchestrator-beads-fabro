@@ -12,6 +12,9 @@
 # id, not item, so they are not matched here; the preserved-publish ref and the open pull request are what a reclaim destroys.
 set -u
 ITEM=${1:?usage: restore-guard.sh <item> <repo-dir> [--fresh|--redeliver <reason>]}; REPO=${2:?repo-dir}; shift 2
+LAUNCH_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+. "$LAUNCH_DIR/config.sh"
+. "$LAUNCH_DIR/launch-lib.sh"
 BYPASS_FLAG=""; BYPASS_REASON=""
 case "${1:-}" in
   --fresh|--redeliver)
@@ -32,7 +35,7 @@ if refs=$(git -C "$REPO" ls-remote origin "refs/livespec/preserved-publish/$ITEM
   [ -n "$refs" ] && found+=("preserved-publish ref $(echo "$refs" | awk '{print $2}' | head -1)")
 else unread+=("preserved-publish refs"); fi
 if git -C "$REPO" fetch --quiet origin "+refs/heads/master:refs/remotes/origin/master" 2>/dev/null; then
-  delivery_commit=$(git -C "$REPO" log -1 --format=%H --fixed-strings --grep="$ITEM" origin/master 2>/dev/null)
+  delivery_commit=$(origin_master_delivery_commit "$ITEM" "$REPO" 2>/dev/null)
   [ -n "$delivery_commit" ] && found+=("delivery commit $delivery_commit on origin/master (reason: already delivered)")
 else unread+=("origin/master delivery history"); fi
 if [ ${#found[@]} -eq 0 ] && [ ${#unread[@]} -eq 0 ]; then exit 0; fi

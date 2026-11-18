@@ -125,6 +125,24 @@ wrap() {
   wrapper_chain
   "${WRAP_CHAIN[@]}" "$@"
 }
+# origin_master_delivery_commit <item-id> [repo-dir]: print the newest origin/master
+# commit whose subject, body, or trailers name the whole item id.  A fixed-string
+# git grep alone is too broad: `bd-ib-x-extra` is not a delivery of `bd-ib-x`.
+origin_master_delivery_commit() {
+  local item=${1:?work-item id required} repo=${2:-$REPO}
+  git -C "$repo" log --format='%H%x00%B%x00' origin/master | python3 -c '
+import re
+import sys
+
+item = sys.argv[1].encode()
+token = re.compile(rb"(?<![A-Za-z0-9_-])" + re.escape(item) + rb"(?![A-Za-z0-9_-])")
+parts = sys.stdin.buffer.read().split(b"\0")
+for sha, message in zip(parts[0::2], parts[1::2]):
+    if token.search(message):
+        print(sha.strip().decode("ascii"))
+        break
+' "$item"
+}
 # wrapper_description: one phrase for the log line.
 wrapper_description() {
   case $TENANT_WRAPPER_MODE in

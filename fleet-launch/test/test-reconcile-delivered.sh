@@ -12,6 +12,8 @@ git -C "$T/repo" push -q origin HEAD:refs/heads/master
 git -C "$T/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m 'fix: deliver bd-ib-open'
 delivery=$(git -C "$T/repo" rev-parse HEAD)
 git -C "$T/repo" push -q origin HEAD:refs/heads/master
+git -C "$T/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m 'fix: deliver bd-ib-open-extra'
+git -C "$T/repo" push -q origin HEAD:refs/heads/master
 mkdir "$T/bin"
 cat > "$T/bin/bd" <<'STUB'
 #!/usr/bin/env bash

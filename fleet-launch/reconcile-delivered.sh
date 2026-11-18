@@ -49,7 +49,7 @@ found=0
 while IFS=$'\t' read -r item status; do
   [ -n "$item" ] || continue
   case "$status" in done|closed) continue ;; esac
-  commit=$(git -C "$REPO" log -1 --format=%H --fixed-strings --grep="$item" origin/master)
+  commit=$(origin_master_delivery_commit "$item" "$REPO")
   [ -n "$commit" ] || continue
   printf 'DELIVERED-OPEN item=%s status=%s commit=%s source=origin/master reason=delivery-commit-names-open-item\n' \
     "$item" "$status" "$commit"
