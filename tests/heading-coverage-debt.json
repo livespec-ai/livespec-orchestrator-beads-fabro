@@ -1555,6 +1555,13 @@
   },
   {
     "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "heading": "## Scenario 381 — A factory sandbox receives the factory's declared gate credential, and an absent or missing one never refuses the dispatch",
+    "work_item": "bd-ib-nr53me",
+    "first_seen": "2026-11-18"
+  },
+  {
+    "spec_root": "SPECIFICATION",
     "spec_file": "spec.md",
     "heading": "## Dispatcher policy settings",
     "work_item": "bd-ib-heat",
