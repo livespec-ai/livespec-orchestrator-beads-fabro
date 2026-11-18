@@ -9,15 +9,17 @@ STUB=$(mktemp -d); trap 'rm -rf "$STUB"' EXIT
 verdict() { # used_gb size_gb -> GO|HOLD on the /tmp rule alone
     printf '#!/bin/bash\nprintf "Used Size\\n %sG %sG\\n" %s %s\n' "$1" "$2" "$1" "$2" > "$STUB/df"
     chmod +x "$STUB/df"
-    env PATH="$STUB:$PATH" LDSEAT_TMP_HOLD_PCT='' bash "$GUARD" | awk '{print $2}'
+    env PATH="$STUB:$PATH" LDSEAT_TMP_HOLD_PCT="$FIXTURE_SHARE" bash "$GUARD" | awk '{print $2}'
 }
+# A fixture share, never the committed one: the test drives the share computation, it does not pin config.
+FIXTURE_SHARE=75
 fail=0
 check() { # used size expected
     got=$(verdict "$1" "$2")
     if [ "$got" = "$3" ]; then echo "ok   ${1}G of ${2}G -> $3"; else echo "FAIL ${1}G of ${2}G: wanted $3, got $got"; fail=1; fi
 }
 # These cases assume the host's memory and run queue are healthy, as the guard reads them live.
-check 16 24 GO     # 66%: the hetzner reading that the old fixed 16G limit held
+check 16 24 GO     # 66%: held by the old size-blind 16G limit
 check 20 24 HOLD   # 83%
 check 16 48 GO     # 33%
 check 40 48 HOLD   # 83%: the same share holds a 48G tmpfs
