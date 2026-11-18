@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.339.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.338.1...v0.339.0) (2026-11-18)
+
+
+### Features
+
+* select the tests that import a changed module for the affected-tests gate (bd-ib-fde4ie) ([872aa04](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/872aa043fa1c776b966b819041dca7a50b655295))
+
+
+### Bug Fixes
+
+* **refresh:** a generated record the default branch carries out of order passes pr_refresh (bd-ib-myvlqz) ([20e3a3f](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/20e3a3f78723d482f4f6eeb6b131ce98daacbbfd))
+
 ## [0.338.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.338.0...v0.338.1) (2026-11-17)
 
 
