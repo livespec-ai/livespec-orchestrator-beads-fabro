@@ -14,11 +14,15 @@
 : "${FLEET_LAUNCH_PLUGIN_CACHE:=/home/ubuntu/.claude/plugins/cache/livespec-orchestrator-beads-fabro/livespec-orchestrator-beads-fabro}"
 : "${FLEET_LAUNCH_PLUGIN_KEY:=livespec-orchestrator-beads-fabro@livespec-orchestrator-beads-fabro}"
 
-# Repository and seat identity. A launcher invoked without an explicit
-# repository follows its install record rather than assuming that $HOME/workspace
-# names the checkout. If the record cannot be read, use this launcher's checkout.
+# Repository and seat identity. A launcher invoked without an explicit repository is the checkout
+# that holds this file, so its holds, caps and canary-hold-exempt marker are read from that checkout
+# (bd-ib-ctunsl: taking the registry's FIRST projectPath named another repository's state directory
+# and silently failed every hold open). Only a copy of config.sh that is not inside a git checkout,
+# such as an installed build, follows its install record; if that cannot be read, it uses its own tree.
 if [ -z "${FLEET_LAUNCH_ORCH_REPO:-}" ]; then
-  FLEET_LAUNCH_ORCH_REPO=$(python3 - "$FLEET_LAUNCH_PLUGIN_REGISTRY" "$FLEET_LAUNCH_PLUGIN_KEY" <<'PY' 2>/dev/null
+  FLEET_LAUNCH_ORCH_REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+  if [ ! -e "$FLEET_LAUNCH_ORCH_REPO/.git" ]; then
+    FLEET_LAUNCH_ORCH_RECORD=$(python3 - "$FLEET_LAUNCH_PLUGIN_REGISTRY" "$FLEET_LAUNCH_PLUGIN_KEY" <<'PY' 2>/dev/null
 import json
 import sys
 
@@ -30,8 +34,8 @@ except (OSError, ValueError, KeyError, TypeError):
 print(paths[0] if paths else "")
 PY
 )
-  if [ -z "$FLEET_LAUNCH_ORCH_REPO" ]; then
-    FLEET_LAUNCH_ORCH_REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+    [ -z "$FLEET_LAUNCH_ORCH_RECORD" ] || FLEET_LAUNCH_ORCH_REPO=$FLEET_LAUNCH_ORCH_RECORD
+    unset FLEET_LAUNCH_ORCH_RECORD
   fi
 fi
 : "${FLEET_LAUNCH_SEAT:=petri-factory-on-gmktec}"
