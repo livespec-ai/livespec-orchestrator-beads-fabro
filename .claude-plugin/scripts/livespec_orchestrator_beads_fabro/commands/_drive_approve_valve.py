@@ -27,6 +27,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_acceptance_eligibili
 from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done_findings import (
     goal_template_opening_delimiter_findings,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_comments import (
+    item_comment_bodies,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_gate import (
     judge_item_definition_of_done,
 )
@@ -39,6 +42,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_size_gate im
 from livespec_orchestrator_beads_fabro.commands._dispatcher_filing_display import (
     MECHANICAL_FINDING_PREFIX,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_spec_commitments import (
+    ratified_proposal_topics,
+)
 from livespec_orchestrator_beads_fabro.commands._drive_valve_result import (
     invalid_source_state,
     valve_refusal,
@@ -50,10 +56,22 @@ from livespec_orchestrator_beads_fabro.commands._intake_valve_claim_writes impor
     resting_at,
     valve_claim_refusal,
 )
+from livespec_orchestrator_beads_fabro.commands._spec_change_tier_hold import (
+    REASON_AWAITING_REJUDGEMENT,
+)
+from livespec_orchestrator_beads_fabro.commands._spec_change_tier_record import (
+    STAGE_DISPATCH,
+    recorded_spec_change_tier,
+)
+from livespec_orchestrator_beads_fabro.commands._spec_change_tier_wall import (
+    classify_and_hold,
+    standing_hold,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from livespec_orchestrator_beads_fabro.commands._spec_change_tier_hold import SpecChangeHold
     from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 
 __all__: list[str] = ["approve_item"]
@@ -66,6 +84,62 @@ _JUDGED = (
     "any Definition-of-Done judgement this press ran is already recorded on the item "
     "and stays there"
 )
+
+
+def _approval_spec_change_hold(
+    *, repo: Path, config: StoreConfig, item: WorkItem, action_id: str
+) -> tuple[SpecChangeHold | None, dict[str, Any] | None]:
+    """Read the standing tier hold before an approval can spend a judgement.
+
+    An unreadable governed history is not evidence that a recorded spec-change
+    tier has ratified.  Refuse that record here rather than converting the read
+    failure into an empty ratification set (which would falsely tell the
+    operator that its topic is unratified).
+    """
+    spec_root = repo / "SPECIFICATION"
+    try:
+        ratified = ratified_proposal_topics(spec_root=spec_root)
+        hold = standing_hold(
+            item=item, config=config, spec_root=spec_root, ratified_topics=ratified
+        )
+    except OSError:
+        bodies = item_comment_bodies(path=config, work_item_id=item.id)
+        recorded = recorded_spec_change_tier(comments=bodies or ())
+        if recorded is not None and recorded.is_spec_change:
+            return None, valve_refusal(
+                aid=action_id,
+                wid=item.id,
+                err="spec-change-history-unreadable",
+                msg=(
+                    f"approve refused: {item.id} has a recorded spec-change tier, but its "
+                    "governed specification history could not be read; it remains pending-approval."
+                ),
+            )
+        return None, None
+    return hold, None
+
+
+def _approval_spec_change_refusal(
+    *, repo: Path, config: StoreConfig, item: WorkItem, action_id: str
+) -> dict[str, Any] | None:
+    """Refuse a standing hold, re-taking only the hold due a re-judgement."""
+    hold, unreadable = _approval_spec_change_hold(
+        repo=repo, config=config, item=item, action_id=action_id
+    )
+    if unreadable is not None:
+        return unreadable
+    if hold is None:
+        return None
+    if hold.reason == REASON_AWAITING_REJUDGEMENT:
+        hold = classify_and_hold(item=item, repo=repo, path=config, stage=STAGE_DISPATCH)
+    if hold is None:
+        return None
+    return valve_refusal(
+        aid=action_id,
+        wid=item.id,
+        err="spec-change-held",
+        msg=f"approve refused: {hold.refusal.rstrip()}",
+    )
 
 
 def _definition_of_done_refusal(
@@ -182,19 +256,10 @@ def _size_decomposition(
     ) | {"target_status": "backlog", "message": reason}
 
 
-def approve_item(
+def _approval_size_refusal(
     *, repo: Path, config: StoreConfig, item: WorkItem, action_id: str
-) -> dict[str, Any]:
-    """Admit a `pending-approval` item to `ready`, whatever its admission policy.
-
-    The status, not the admission label, is what the item is waiting on. A
-    `set-admission:<id>:auto` flip never moves the item (it rests at
-    `pending-approval` until a Dispatcher pass reaches it), so refusing the
-    explicit `approve` on the label would strand an item that was parked at this
-    valve when its policy changed.
-    """
-    if item.status != _SOURCE_STATUS:
-        return invalid_source_state(aid=action_id, item=item, expected=_SOURCE_STATUS)
+) -> dict[str, Any] | None:
+    """Return the size-gate refusal, if this approval cannot reach `ready`."""
     size_result = resolved_stored_factory_size_decision(
         cwd=repo,
         path_factory=lambda: config,
@@ -217,6 +282,30 @@ def approve_item(
             action_id=action_id,
             reason=cast("str", size.reason),
         )
+    return None
+
+
+def approve_item(
+    *, repo: Path, config: StoreConfig, item: WorkItem, action_id: str
+) -> dict[str, Any]:
+    """Admit a `pending-approval` item to `ready`, whatever its admission policy.
+
+    The status, not the admission label, is what the item is waiting on. A
+    `set-admission:<id>:auto` flip never moves the item (it rests at
+    `pending-approval` until a Dispatcher pass reaches it), so refusing the
+    explicit `approve` on the label would strand an item that was parked at this
+    valve when its policy changed.
+    """
+    if item.status != _SOURCE_STATUS:
+        return invalid_source_state(aid=action_id, item=item, expected=_SOURCE_STATUS)
+    spec_change = _approval_spec_change_refusal(
+        repo=repo, config=config, item=item, action_id=action_id
+    )
+    if spec_change is not None:
+        return spec_change
+    size = _approval_size_refusal(repo=repo, config=config, item=item, action_id=action_id)
+    if size is not None:
+        return size
     held = _definition_of_done_refusal(repo=repo, config=config, item=item, action_id=action_id)
     if held is not None:
         return held
