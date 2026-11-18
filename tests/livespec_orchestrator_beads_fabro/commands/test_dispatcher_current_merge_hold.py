@@ -268,6 +268,25 @@ def test_the_host_arms_nothing_when_the_ledger_currently_holds_an_item_dispatche
     assert _forge_verbs(runner=runner) == {_VIEW_ARGV_HEAD}
 
 
+def test_a_current_merge_hold_refuses_at_the_merge_boundary_without_reporting_green(
+    tmp_path: Path,
+) -> None:
+    """A held item remains open and gives the operator the named refusal."""
+    _tenant(repo=tmp_path, held=True)
+    runner = _Runner(queue=[_view(armed=False)] * 4)
+
+    dispatched = _dispatch(repo=tmp_path, runner=runner, journal=_Journal())
+
+    assert (dispatched.outcome.status, dispatched.outcome.stage) == (
+        "blocked",
+        "merge-hold-active",
+    )
+    assert "merge-hold-active" in dispatched.outcome.detail
+    assert dispatched.outcome.merge_sha is None
+    assert dispatched.sleeps == ()
+    assert _ARM_ARGV not in runner.calls
+
+
 def test_the_host_disarms_a_pull_request_it_finds_armed_while_the_item_is_now_held(
     tmp_path: Path,
 ) -> None:

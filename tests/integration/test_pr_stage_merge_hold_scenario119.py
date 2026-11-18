@@ -152,6 +152,17 @@ def finish(code=0):
 verb = argv[1] if len(argv) > 1 else ""
 armed = state["autoMergeRequest"]
 
+if argv and argv[0] == "api":
+    request = " ".join(argv)
+    if "/protection" in request:
+        print(json.dumps({"required_status_checks": {"contexts": ["ci-green"]}}))
+        finish()
+    if "/rules/branches/" in request:
+        print("[]")
+        finish()
+    sys.stderr.write("unstubbed gh api invocation: %%s\n" %% request)
+    finish(2)
+
 if verb == "list":
     print(state["number"])
     finish()
@@ -166,6 +177,7 @@ if verb == "view":
         "autoMergeRequest": armed,
         "mergeCommit": None,
         "comments": state["comments"],
+        "statusCheckRollup": state["statusCheckRollup"],
     }
     if "," in field:
         print(json.dumps({name: values[name] for name in field.split(",")}))
@@ -399,6 +411,14 @@ def _arc(*, root: Path, merge_hold: bool, merge_queue: bool = False, clean: bool
                     _proof_record(verdict=VERDICT_CAPTURED),
                     _proof_record(verdict=VERDICT_VERIFIED),
                 ],
+                "statusCheckRollup": [
+                    {
+                        "__typename": "CheckRun",
+                        "conclusion": "SUCCESS",
+                        "name": "ci-green",
+                        "status": "COMPLETED",
+                    }
+                ],
                 "calls": [],
             }
         ),
@@ -500,6 +520,34 @@ def test_an_unheld_pr_stage_arms_auto_merge_with_the_declared_merge_mode(tmp_pat
         ]
     ]
     assert arc.forge()["autoMergeRequest"] is not None
+
+
+def test_pr_stage_refuses_a_failed_head_rollup_before_arming_auto_merge(tmp_path: Path) -> None:
+    """Scenario 375: a failed non-required head check blocks this shared merge path."""
+    arc = _arc(root=tmp_path, merge_hold=False)
+    forge = arc.forge()
+    forge["statusCheckRollup"] = [
+        {
+            "__typename": "CheckRun",
+            "conclusion": "SUCCESS",
+            "name": "ci-green",
+            "status": "COMPLETED",
+        },
+        {
+            "__typename": "CheckRun",
+            "conclusion": "FAILURE",
+            "name": "credential-provisioning",
+            "status": "COMPLETED",
+        },
+    ]
+    _ = arc.forge_state.write_text(json.dumps(forge), encoding="utf-8")
+
+    result = arc.run_pr_stage()
+
+    assert result.returncode != 0, result.stderr
+    assert "head-rollup-not-green" in result.stderr
+    assert arc.merge_calls() == []
+    assert arc.forge()["autoMergeRequest"] is None
 
 
 def _release(*, arc: _Arc) -> dict[str, object]:
