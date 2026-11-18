@@ -1,44 +1,50 @@
-"""Read scheduled-workflow verdicts without filing their follow-up work.
+"""Capture failures from watched scheduled workflows as ledger work.
 
-This is S1 of the scheduled-workflow breakage pass.  It deliberately has no
-ledger dependency: S2 owns filing and deduplication.  Every forge read is a
-single cached ``gh api`` request, so one invocation is one observation rather
-than a poll loop.
+Each pass observes the forge exactly once through cached ``gh api`` requests.
+When the host can reach the configured tenant, failed jobs are filed through
+the ordinary capture seam and identified durably by their breakage key.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import cast
-from urllib.parse import quote
 
+from livespec_orchestrator_beads_fabro.commands import _dispatcher_breakage_filing as filing
+from livespec_orchestrator_beads_fabro.commands import _dispatcher_breakage_forge as forge
 from livespec_orchestrator_beads_fabro.commands import _jsonc
+from livespec_orchestrator_beads_fabro.commands._config import resolve_store_config
 from livespec_orchestrator_beads_fabro.commands._dispatcher_default_branch import (
     resolve_default_branch,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
-    CommandResult,
-    CommandRunner,
-)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandRunner
 from livespec_orchestrator_beads_fabro.commands._dispatcher_shell_runner import ShellCommandRunner
+from livespec_orchestrator_beads_fabro.intake_dor import file_captured_work_item
 from livespec_orchestrator_beads_fabro.io import write_stderr, write_stdout
 
 __all__: list[str] = [
     "add_breakage_pass_arguments",
+    "breakage_key",
     "breakage_pass",
     "register_breakage_pass",
     "run_breakage_pass_command",
 ]
 
-_CACHE_DURATION = "1h"
-_TIMEOUT_SECONDS = 30.0
-_JOBS_PAGE_SIZE = 100
 _PLUGIN_BLOCK = "livespec-orchestrator-beads-fabro"
 _FAILURE_LINE = re.compile(r"^(?:FAILED|ERROR)\s+([^\s]+)", re.MULTILINE)
+
+# Compatibility aliases keep S1's focused forge-read probes stable.
+_workflow_verdict = forge.workflow_verdict
+_failed_jobs = forge.failed_jobs
+_job_log = forge.job_log
+
+
+def breakage_key(*, workflow: str, job_name: str, head_sha: str) -> str:
+    """Return the stable per-workflow-job-commit identity used for deduplication."""
+    return filing.key(workflow=workflow, job_name=job_name, head_sha=head_sha)
 
 
 def add_breakage_pass_arguments(*, parser: argparse.ArgumentParser) -> None:
@@ -75,7 +81,7 @@ def breakage_pass(*, repo: Path, runner: CommandRunner) -> int:
         return 1
     failed = False
     for workflow in workflows:
-        outcome = _workflow_verdict(repo=repo, runner=runner, workflow=workflow, branch=branch)
+        outcome = forge.workflow_verdict(repo=repo, runner=runner, workflow=workflow, branch=branch)
         if outcome is None:
             _verdict(workflow=workflow, detail="unreadable workflow run")
             failed = True
@@ -118,36 +124,7 @@ def _watched_workflows(*, repo: Path) -> tuple[str, ...] | None:  # noqa: PLR091
     return tuple(cast("str", item) for item in workflows)
 
 
-def _workflow_verdict(
-    *, repo: Path, runner: CommandRunner, workflow: str, branch: str
-) -> dict[str, object] | None:
-    result = _api(
-        repo=repo,
-        runner=runner,
-        endpoint=(
-            f"repos/{{owner}}/{{repo}}/actions/workflows/{quote(workflow, safe='')}/runs"
-            f"?branch={quote(branch, safe='')}&status=completed&per_page=1"
-        ),
-    )
-    if result.exit_code != 0:
-        return None
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    document = cast("dict[str, object]", payload)
-    raw_runs = document.get("workflow_runs")
-    if not isinstance(raw_runs, list):
-        return None
-    runs = cast("list[object]", raw_runs)
-    if not runs:
-        return {}
-    return cast("dict[str, object]", runs[0]) if isinstance(runs[0], dict) else None
-
-
-def _emit_outcome(
+def _emit_outcome(  # noqa: C901, PLR0911, PLR0912, PLR0915 - terminal verdicts are public.
     *, workflow: str, outcome: dict[str, object], repo: Path, runner: CommandRunner
 ) -> bool:
     if not outcome:
@@ -163,18 +140,88 @@ def _emit_outcome(
         return False
     run_id = _string(value=outcome.get("id"))
     head_sha = _string(value=outcome.get("head_sha"))
-    jobs = _failed_jobs(repo=repo, runner=runner, run_id=run_id)
+    jobs = forge.failed_jobs(repo=repo, runner=runner, run_id=run_id)
     if not run_id or not head_sha or jobs is None:
         _verdict(workflow=workflow, detail="unreadable failed run")
         return True
+    context, context_problem = filing.context(repo=repo, resolve_config=resolve_store_config)
+    if context_problem is not None:
+        _verdict(workflow=workflow, detail=f"unreadable {context_problem}")
+        return True
+    if context is None:
+        return _preview_failed_jobs(
+            workflow=workflow,
+            url=url,
+            head_sha=head_sha,
+            jobs=jobs,
+            repo=repo,
+            runner=runner,
+        )
+
+    filed: list[str] = []
+    already_filed: list[str] = []
     for job in jobs:
         job_id = _string(value=job.get("id"))
         name = _string(value=job.get("name"))
-        log = _job_log(repo=repo, runner=runner, job_id=job_id)
+        if not job_id or not name:
+            _verdict(workflow=workflow, detail="unreadable failed job")
+            return True
+        key = filing.key(workflow=workflow, job_name=name, head_sha=head_sha)
+        prior = context.existing.get(key)
+        if prior is not None:
+            already_filed.append(prior)
+            continue
+        log = forge.job_log(repo=repo, runner=runner, job_id=job_id)
+        if log is None:
+            _verdict(workflow=workflow, detail=f"unreadable job log for {name}")
+            return True
+        item_id, problem = filing.file_job(
+            context=context,
+            workflow=workflow,
+            job=job,
+            url=url,
+            head_sha=head_sha,
+            tests=_failing_tests(log=log),
+            breakage_key=key,
+            capture=file_captured_work_item,
+        )
+        if problem is not None:
+            _verdict(workflow=workflow, detail=f"unreadable {problem}")
+            return True
+        if item_id is not None:
+            filed.append(item_id)
+            context.existing[key] = item_id
+    if filed:
+        _verdict(
+            workflow=workflow,
+            detail=f"run={url} filed {', '.join(filed)}",
+        )
+    elif already_filed:
+        _verdict(
+            workflow=workflow,
+            detail=f"run={url} already-filed {', '.join(already_filed)}",
+        )
+    return False
+
+
+def _preview_failed_jobs(
+    *,
+    workflow: str,
+    url: str,
+    head_sha: str,
+    jobs: list[dict[str, object]],
+    repo: Path,
+    runner: CommandRunner,
+) -> bool:
+    """Retain the read-only observation for an unconfigured local repository."""
+    for job in jobs:
+        job_id = _string(value=job.get("id"))
+        name = _string(value=job.get("name"))
+        log = forge.job_log(repo=repo, runner=runner, job_id=job_id)
         if not job_id or not name or log is None:
             _verdict(workflow=workflow, detail="unreadable failed job")
             return True
-        tests = ",".join(_FAILURE_LINE.findall(log)) or "no failing test named"
+        tests = ",".join(_failing_tests(log=log)) or "no failing test named"
         _verdict(
             workflow=workflow,
             detail=(f"would-file job={name} run={url} head={head_sha} failing-tests={tests}"),
@@ -182,65 +229,8 @@ def _emit_outcome(
     return False
 
 
-def _failed_jobs(
-    *, repo: Path, runner: CommandRunner, run_id: str
-) -> list[dict[str, object]] | None:
-    if not run_id:
-        return None
-    failed: list[dict[str, object]] = []
-    page = 1
-    while True:
-        jobs = _jobs_page(repo=repo, runner=runner, run_id=run_id, page=page)
-        if jobs is None:
-            return None
-        failed.extend(
-            cast("dict[str, object]", job)
-            for job in jobs
-            if isinstance(job, dict)
-            and cast("Mapping[str, object]", job).get("conclusion") == "failure"
-        )
-        if len(jobs) < _JOBS_PAGE_SIZE:
-            return failed
-        page += 1
-
-
-def _jobs_page(*, repo: Path, runner: CommandRunner, run_id: str, page: int) -> list[object] | None:
-    result = _api(
-        repo=repo,
-        runner=runner,
-        endpoint=(
-            f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/jobs"
-            f"?filter=latest&per_page={_JOBS_PAGE_SIZE}&page={page}"
-        ),
-    )
-    if result.exit_code != 0:
-        return None
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-    document = cast("dict[str, object]", payload) if isinstance(payload, dict) else {}
-    jobs = document.get("jobs")
-    return cast("list[object]", jobs) if isinstance(jobs, list) else None
-
-
-def _job_log(*, repo: Path, runner: CommandRunner, job_id: str) -> str | None:
-    if not job_id:
-        return None
-    result = _api(
-        repo=repo,
-        runner=runner,
-        endpoint=f"repos/{{owner}}/{{repo}}/actions/jobs/{job_id}/logs",
-    )
-    return result.stdout if result.exit_code == 0 else None
-
-
-def _api(*, repo: Path, runner: CommandRunner, endpoint: str) -> CommandResult:
-    return runner.run(
-        argv=["gh", "api", "--cache", _CACHE_DURATION, endpoint],
-        cwd=repo,
-        timeout_seconds=_TIMEOUT_SECONDS,
-    )
+def _failing_tests(*, log: str) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(_FAILURE_LINE.findall(log)))
 
 
 def _string(*, value: object) -> str:
