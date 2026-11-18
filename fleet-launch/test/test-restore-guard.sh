@@ -31,6 +31,12 @@ git -C "$T/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "fi
 git -C "$T/repo" push -q origin HEAD:refs/heads/master
 run 6 "a delivered origin/master commit is refused" STUB_PRS= --
 case "$LAST" in *"$delivering_commit"*origin/master*) echo "ok   the refusal names the delivering commit and origin/master reason";; *) echo "FAIL delivered-commit refusal text: $LAST"; fail=1;; esac
+git -C "$T/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m 'fix: deliver body-only item' -m 'The merged delivery is bd-ib-body.'
+body_commit=$(git -C "$T/repo" rev-parse HEAD)
+git -C "$T/repo" push -q origin HEAD:refs/heads/master
+LAST=$(env PATH="$T/bin:$PATH" STUB_PRS= bash "$GUARD" bd-ib-body "$T/repo" 2>&1); rc=$?
+if [ "$rc" = 6 ]; then echo "ok   an item named in the delivery body is refused (rc=$rc)"; else echo "FAIL body delivery: wanted rc=6 got rc=$rc: $LAST"; fail=1; fi
+case "$LAST" in *"$body_commit"*origin/master*) echo "ok   the refusal detects a delivery body item ID";; *) echo "FAIL delivery-body refusal text: $LAST"; fail=1;; esac
 run 6 "an open factory PR is refused" STUB_PRS=5527 --
 case "$LAST" in *seeded-ticket.sh*restore\ rider*) echo "ok   the refusal names seeded-ticket.sh with the restore rider";; *) echo "FAIL refusal text: $LAST"; fail=1;; esac
 git -C "$T/repo" push -q origin HEAD:refs/livespec/preserved-publish/bd-ib-x/abc123
