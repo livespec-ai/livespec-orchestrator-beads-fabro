@@ -983,9 +983,19 @@ else
     fail "the per-scenario watchdog regressed"
 fi
 if bash "$HARNESS_DIR/test-restore-guard.sh" >/dev/null; then
-    pass "the seat restore guard refuses a plain ticket for an item with an open factory PR or a preserved-publish ref, and passes a seeded ruling or an explicit --fresh reason"
+    pass "the seat restore guard refuses a plain ticket for an open factory PR, preserved ref, or origin/master delivery, and passes a seeded ruling or explicit override"
 else
     fail "the seat restore guard regressed"
+fi
+if bash "$HARNESS_DIR/test-reconcile-delivered.sh" >/dev/null; then
+    pass "the fleet delivery reconciliation reports every open item named by origin/master and omits closed or unmentioned items"
+else
+    fail "the fleet delivery reconciliation regressed"
+fi
+if bash "$HARNESS_DIR/test-ticket-redeliver.sh" >/dev/null; then
+    pass "a redelivery records its reason before it can continue past the delivery screen"
+else
+    fail "the seat redelivery ledger record regressed"
 fi
 if bash "$HARNESS_DIR/test-load-guard-tmp-share.sh" >/dev/null; then
     pass "the seat load guard holds /tmp at a share of the mounted tmpfs, the same verdict on a 24G and a 48G tmpfs"
