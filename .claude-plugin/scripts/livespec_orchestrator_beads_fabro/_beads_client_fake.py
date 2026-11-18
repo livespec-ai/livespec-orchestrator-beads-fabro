@@ -73,6 +73,9 @@ class FakeBeadsClient:
         self._assigned_ids: int = 0
         self.custom_statuses_registered: bool = False
 
+    def list_issues_cached(self) -> list[BeadsRecord]:
+        return self.list_issues()
+
     def list_issues(self) -> list[BeadsRecord]:
         return [
             dict(record)

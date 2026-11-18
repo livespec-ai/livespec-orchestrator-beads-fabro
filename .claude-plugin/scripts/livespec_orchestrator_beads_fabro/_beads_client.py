@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from livespec_orchestrator_beads_fabro import _beads_list_cache
 from livespec_orchestrator_beads_fabro._beads_client_argv import (
     build_create_argv,
     build_no_history_create_argv,
@@ -96,6 +97,13 @@ class BeadsClient(Protocol):
 
     def list_issues(self) -> list[BeadsRecord]:
         """Return every issue in the tenant (`bd list --status all --json`)."""
+        ...
+
+    def list_issues_cached(self) -> list[BeadsRecord]:
+        """`list_issues`, shared per host for a few seconds. Read-only uses ONLY.
+
+        Never use this for a claim-taking or dispatch-decision read.
+        """
         ...
 
     def show_issue(self, *, issue_id: str) -> BeadsRecord:
@@ -256,8 +264,18 @@ class ShellBeadsClient:
         return self._parse_json(stdout=completed.stdout, argv_repr=" ".join(verb_args))
 
     def _run_void(self, *, verb_args: list[str]) -> None:
-        """Run a write verb whose stdout we do not parse."""
-        _ = self._invoke(argv=self._build_argv(verb_args=verb_args))
+        """Run a write verb whose stdout we do not parse; the shared list cache is dropped."""
+        try:
+            _ = self._invoke(argv=self._build_argv(verb_args=verb_args))
+        finally:
+            self._invalidate_list_cache()
+
+    def _tenant_key(self) -> str:
+        config = self._config
+        return f"{config.server_host}:{config.server_port}/{config.database}"
+
+    def _invalidate_list_cache(self) -> None:
+        _beads_list_cache.invalidate(tenant_key=self._tenant_key())
 
     def _invoke(self, *, argv: list[str]) -> subprocess.CompletedProcess[str]:
         return invoke(config=self._config, argv=argv)
@@ -278,6 +296,9 @@ class ShellBeadsClient:
     def list_issues(self) -> list[BeadsRecord]:
         parsed = self._run_json(verb_args=["list", "--status", "all", "--limit", "0", "--json"])
         return coerce_record_list(parsed=parsed)
+
+    def list_issues_cached(self) -> list[BeadsRecord]:
+        return _beads_list_cache.read_through(tenant_key=self._tenant_key(), dump=self.list_issues)
 
     def show_issue(self, *, issue_id: str) -> BeadsRecord:
         parsed = self._run_json(verb_args=["show", issue_id, "--json"])
@@ -319,7 +340,10 @@ class ShellBeadsClient:
         `backlog`, and it anchors that extraction on the JSON form.
         """
         verb_args = build_no_history_create_argv(title=title, description=description)
-        return coerce_created_id(parsed=self._run_json(verb_args=verb_args))
+        try:
+            return coerce_created_id(parsed=self._run_json(verb_args=verb_args))
+        finally:
+            self._invalidate_list_cache()
 
     def delete_issue(self, *, issue_id: str) -> None:
         self._run_void(verb_args=["delete", issue_id, "--force"])

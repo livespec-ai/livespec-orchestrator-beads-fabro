@@ -142,7 +142,7 @@ def prepare(
     )
     if staleness_exit is not None:
         return None
-    return load_items(repo=repo), journal
+    return load_items(repo=repo, cached=True), journal
 
 
 def _dispatch_candidates(*, items: list[WorkItem], repo: Path) -> list[WorkItem]:

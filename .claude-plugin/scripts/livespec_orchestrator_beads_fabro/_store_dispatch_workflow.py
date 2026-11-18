@@ -57,7 +57,7 @@ def dispatch_workflows_for(*, path: StoreConfig) -> dict[str, str | None]:
     client = make_beads_client(config=path)
     return {
         issue_id: dispatch_workflow_from_record(record=record)
-        for record in client.list_issues()
+        for record in client.list_issues_cached()
         if isinstance((issue_id := record.get("id")), str)
     }
 

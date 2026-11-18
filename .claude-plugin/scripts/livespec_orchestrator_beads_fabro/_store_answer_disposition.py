@@ -57,7 +57,7 @@ def read_answer_disposition_labels(*, path: StoreConfig) -> dict[str, tuple[str,
     client = make_beads_client(config=path)
     return {
         issue_id: labels
-        for record in client.list_issues()
+        for record in client.list_issues_cached()
         if isinstance(issue_id := record.get("id"), str)
         and (labels := _answer_labels(record=record))
     }

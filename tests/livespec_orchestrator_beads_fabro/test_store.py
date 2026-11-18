@@ -564,6 +564,9 @@ class _StubClient:
     def list_issues(self) -> list[dict[str, object]]:
         return [dict(record) for record in self._records]
 
+    def list_issues_cached(self) -> list[dict[str, object]]:
+        return self.list_issues()
+
 
 def _install_stub(*, monkeypatch: pytest.MonkeyPatch, records: list[dict[str, object]]) -> None:
     stub = _StubClient(records=records)

@@ -57,4 +57,4 @@ def ready_dwell_instants_from_records(
 def read_ready_dwell_instants(*, path: StoreConfig) -> dict[str, str | None]:
     """Return ready item ids mapped to their durable ready-dwell instant or unknown."""
     client = make_beads_client(config=path)
-    return ready_dwell_instants_from_records(records=client.list_issues())
+    return ready_dwell_instants_from_records(records=client.list_issues_cached())

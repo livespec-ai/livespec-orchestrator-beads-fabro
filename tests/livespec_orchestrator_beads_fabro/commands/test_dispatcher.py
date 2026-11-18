@@ -798,8 +798,8 @@ def test_dispatch_gate_auto_normalizes_beads_native_open(
         assert rank is None
         calls.append((item_id, status))
 
-    def fake_read_work_items(*, path: StoreConfig) -> object:
-        _ = path
+    def fake_read_work_items(*, path: StoreConfig, cached: bool = False) -> object:
+        _ = (path, cached)
         return iter(items)
 
     monkeypatch.setattr(_dispatcher_ledger_close, "read_work_items", fake_read_work_items)
