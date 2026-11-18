@@ -58,7 +58,10 @@ _GATES_KUBECONFIG_ENV = "GATES_KUBECONFIG"
 _ENABLED_PROBE = "gate_remote_delegate enabled"
 _DELEGATED_RUN = "gate_remote_delegate run"
 _GREEN_TOKEN_PROBE = "green-token-scope.sh check"
+_PRE_PUSH_REUSE = "green_token pre-push-reuse"
 _AGGREGATE = "just check-skipping check-codex-skill-picker"
+
+_PRE_PUSH_MEMBERS = ("check-alpha", "check-beta")
 
 _LIVE_OID = "b3d4f1a90c7e25486fd1c0b8a7e6554321098765"
 _ZERO_OID = "0" * 40
@@ -76,6 +79,7 @@ _PUBLISH_REFS = f"refs/heads/feature {_LIVE_OID} refs/heads/feature {_ZERO_OID}\
 _UV_STUB = """#!/usr/bin/env bash
 printf "uv %s\\n" "$*" >> "${STUB_LOG}"
 case "$*" in
+    *"green_token pre-push-reuse"*) exit "${STUB_PRE_PUSH_REUSE_EXIT:-3}" ;;
     *"gate_remote_delegate enabled") exit "${STUB_ENABLED_EXIT}" ;;
     *"gate_remote_delegate run") exit "${STUB_RUN_EXIT}" ;;
 esac
@@ -104,7 +108,12 @@ def _run_delegate_probe(
 
 
 def _run_pre_push(
-    *, tmp_path: Path, enabled_exit: int, run_exit: int, skip_targets: str | None = None
+    *,
+    tmp_path: Path,
+    enabled_exit: int,
+    run_exit: int,
+    pre_push_reuse_exit: int = 3,
+    skip_targets: str | None = None,
 ) -> tuple[int, list[str]]:
     """Run the shipped gate script on an ordinary publish, for one delegated-client answer.
 
@@ -124,6 +133,9 @@ def _run_pre_push(
         _ = stub.write_text(body, encoding="utf-8")
         stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
     log = tmp_path / "invocations.log"
+    _ = (tmp_path / "check-targets.txt").write_text(
+        "".join(f"{member}\n" for member in _PRE_PUSH_MEMBERS), encoding="utf-8"
+    )
     env = os.environ.copy()
     env.update(
         {
@@ -131,6 +143,7 @@ def _run_pre_push(
             "STUB_LOG": str(log),
             "STUB_ENABLED_EXIT": str(enabled_exit),
             "STUB_RUN_EXIT": str(run_exit),
+            "STUB_PRE_PUSH_REUSE_EXIT": str(pre_push_reuse_exit),
         }
     )
     _ = env.pop("SKIP_TARGETS", None)
@@ -276,6 +289,36 @@ def test_the_gate_consults_the_client_between_the_token_and_the_local_aggregate(
         f"the delegated probe belongs between the green-token skip and the local "
         f"aggregate; invoked={invoked}"
     )
+
+
+def test_a_qualifying_delegated_pre_commit_verdict_is_reused_before_other_gate_paths(
+    *, tmp_path: Path
+) -> None:
+    """The library owns same-tree reuse and an accepted verdict ends this gate."""
+    code, invoked = _run_pre_push(
+        tmp_path=tmp_path,
+        enabled_exit=0,
+        run_exit=0,
+        pre_push_reuse_exit=0,
+    )
+
+    reuse = [line for line in invoked if _PRE_PUSH_REUSE in line]
+    assert reuse == [
+        "uv run python -m livespec_dev_tooling.green_token pre-push-reuse "
+        + " ".join(_PRE_PUSH_MEMBERS)
+    ], f"the library must receive this gate's own members; invoked={invoked}"
+    assert _invocation_index(invoked=invoked, needle=_PRE_PUSH_REUSE) < _invocation_index(
+        invoked=invoked, needle=_GREEN_TOKEN_PROBE
+    ), f"same-tree reuse must precede the green-token scope; invoked={invoked}"
+    assert (
+        _invocation_index(invoked=invoked, needle=_DELEGATED_RUN) < 0
+    ), f"a reused verdict must submit no pre-push gate Job; invoked={invoked}"
+    assert (
+        _invocation_index(invoked=invoked, needle=_AGGREGATE) < 0
+    ), f"a reused verdict must not run the local fall-through; invoked={invoked}"
+    assert (
+        code == 0
+    ), f"the shared command's accepted verdict is the push verdict; invoked={invoked}"
 
 
 def test_a_selected_delegation_gates_on_the_cluster_instead_of_the_local_aggregate(
