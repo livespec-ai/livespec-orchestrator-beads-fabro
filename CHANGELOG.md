@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.341.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.340.0...v0.341.0) (2026-11-18)
+
+
+### Features
+
+* red ([debca37](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/debca37acff14611eb9c8091f0158b8bd1fda82c))
+* red ([7b4222a](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/7b4222a598e8ab5006143de41c0390b06be4fc7f))
+* red ([081857b](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/081857b644eddf8809c6be67d166c2a69049e75c))
+* red ([ea744d3](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/ea744d350bc9fa4618eb7c091a6356d712db80a0))
+* red ([5f0b618](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/5f0b6188bcee3f57ddb13dbb7ccb1f8f75fb9874))
+* red ([14870f1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/14870f13c1729d0281933fdd71eb257ba9f3c47b))
+* red ([e15d48d](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/e15d48d5b3fda84961173253c6c3d3c3afc34368))
+
+
+### Bug Fixes
+
+* **dispatcher:** a breakage item files with manual admission until the per-job dedupe ships (bd-ib-voazyv) ([5b21613](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/5b2161340be4e875050b6866805967e8bfaeec52))
+* **dispatcher:** the gh-refresh bundle materializes outside the run's working tree (bd-ib-kzgpzm) ([323d149](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/323d1497b369ae94d446a7bed65a357d6fcb3437))
+* **fleet-launch:** an unset orchestrator repository is the checkout that holds config.sh, not the first registry projectPath (bd-ib-ctunsl) ([4966010](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/4966010f385dc47acf3a4ecc69ed68c5d1f0fc82))
+* **fleet-launch:** resolve installed builds through canonical paths ([59e38e3](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/59e38e34a1425010aae18c86c4e5ecae067380fa))
+* **fleet-launch:** screen the spec-change tier hold before a launcher takes a ticket (bd-ib-kix22a) ([3fc2ddd](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/3fc2ddd0d04a071546eac0d5495a413bcb42a652))
+* settle node unstages a failed commit run's work before its checkpoint ([e45eb1d](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/e45eb1d4c34168dbbc2c979702e8e6de88cf7b8e))
+
 ## [0.340.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.339.0...v0.340.0) (2026-11-18)
 
 
