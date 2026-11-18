@@ -334,3 +334,41 @@ def test_preserved_descendant_measurement_only_protects_a_readable_descendant(
         assert result == seed
     else:
         assert result is None
+
+
+def test_a_published_head_and_preserved_ref_from_the_anchored_run_are_ordered_without_a_journal_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The proof anchor orders this run's published head and preserved ref directly.
+
+    A run that published its pull request can preserve work after that publication.
+    The journal need not repeat the publication: the matching proof anchor is the
+    durable run attribution, so recovery proceeds to the descendant measurement
+    instead of refusing ``publishing-run-unobservable``.
+    """
+    module = importlib.import_module(
+        "livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_resume_protection"
+    )
+    journal = JournalFile(path=tmp_path / "journal.jsonl")
+    _ = journal.path.write_text("", encoding="utf-8")
+    preserved = RecoverySeed(
+        source_run_id="run-1",
+        remote="origin",
+        commit_sha="b" * 40,
+        preservation_ref="refs/livespec/wip/item/run-1/2",
+        preservation_tip_sha="b" * 40,
+    )
+    relation = Mock(return_value=None)
+    compared = Mock(return_value=None)
+    monkeypatch.setattr(module, "read_journal_records", Mock(return_value=()))
+    monkeypatch.setattr(module, "verified_preserved_seed", Mock(return_value=preserved))
+    monkeypatch.setattr(module, "published_head_relation", relation)
+    monkeypatch.setattr(module, "preserved_descendant", compared)
+
+    result = module.protected_resume_seed(
+        gather=_gather(), item=_item(), repo=tmp_path, runner=Mock(), journal=journal
+    )
+
+    assert result is None
+    relation.assert_not_called()
+    assert compared.call_args.kwargs["head_is_later"] is False
