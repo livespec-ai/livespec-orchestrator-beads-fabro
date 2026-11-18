@@ -7,14 +7,16 @@ if [ -z "${LDSEAT_TMP_HOLD_PCT:-}" ]; then
   # shellcheck source=fleet-launch/config.sh
   . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../config.sh"
 fi
-avail=$(awk '/MemAvailable/{printf "%d", $2/1048576}' /proc/meminfo)
-psi=$(awk '/^some/{split($2,a,"="); print a[2]}' /proc/pressure/memory)
+# The live host reads come from LDSEAT_PROC_ROOT (default /proc); only the hermetic test points it elsewhere.
+PROC=${LDSEAT_PROC_ROOT:-/proc}
+avail=$(awk '/MemAvailable/{printf "%d", $2/1048576}' "$PROC/meminfo")
+psi=$(awk '/^some/{split($2,a,"="); print a[2]}' "$PROC/pressure/memory")
 samples=""
-for i in 1 2 3 4 5; do samples="$samples $(awk '/procs_running/{print $2}' /proc/stat)"; [ "$i" -lt 5 ] && sleep 1; done
+for i in 1 2 3 4 5; do samples="$samples $(awk '/procs_running/{print $2}' "$PROC/stat")"; [ "$i" -lt 5 ] && sleep 1; done
 run=$(echo $samples | tr ' ' '\n' | sort -n | sed -n 3p)
 read -r tmp tmp_size < <(df --output=used,size -BG /tmp | tail -1 | tr -dc '0-9 ')
 tmp_pct=$(( tmp * 100 / (tmp_size > 0 ? tmp_size : 1) ))
-load=$(cut -d' ' -f1 /proc/loadavg)
+load=$(cut -d' ' -f1 "$PROC/loadavg")
 ok=GO
 [ "$avail" -lt 24 ] && ok=HOLD
 awk -v p="$psi" 'BEGIN{exit !(p>=5)}' && ok=HOLD
