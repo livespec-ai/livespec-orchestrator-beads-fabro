@@ -13,16 +13,12 @@
 : "${FLEET_LAUNCH_ORCH_REPO:=$HOME/workspace/livespec-orchestrator-beads-fabro}"
 : "${FLEET_LAUNCH_SEAT:=petri-factory-on-gmktec}"
 
-# Seat load guard (fleet-launch/seat/load-guard.sh): the GB of /tmp used at or above which the guard
-# answers HOLD. It protects tmpfs headroom, so it is per host: 16 is the vps value; hetzner-xubuntu has
-# a 24G tmpfs on a host with ample RAM and uses 20. A value in the environment wins.
-if [ -z "${LDSEAT_TMP_HOLD_GB:-}" ]; then
-  case "$(hostname -s 2>/dev/null)" in
-    hetzner-xubuntu) LDSEAT_TMP_HOLD_GB=20 ;;
-    *) LDSEAT_TMP_HOLD_GB=16 ;;
-  esac
-fi
-export LDSEAT_TMP_HOLD_GB
+# Seat load guard (fleet-launch/seat/load-guard.sh): the percentage of the mounted /tmp tmpfs used at or
+# above which the guard answers HOLD. It is a fraction of the size `df` reports at run time, so it holds
+# for every host (a 48G tmpfs and a 24G one bind at the same share); a fixed GB limit sized for one host
+# held every launch on a smaller one. A value in the environment wins.
+: "${LDSEAT_TMP_HOLD_PCT:=80}"
+export LDSEAT_TMP_HOLD_PCT
 
 # Data directory: logs, verdicts, the shared fleet-cap file and the hold file.
 # It holds data only, never a script.
