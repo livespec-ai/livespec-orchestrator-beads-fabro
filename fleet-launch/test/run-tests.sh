@@ -1077,15 +1077,50 @@ fi
 # The installed-build guard compares real paths first, then permits exactly one
 # basename fallback for a registry moved independently of the checkout. It must
 # refuse before the credential probe when neither rule identifies one build.
-default_orch=$(env -u FLEET_LAUNCH_ORCH_REPO \
-    FLEET_LAUNCH_PLUGIN_REGISTRY="$REGISTRY" \
-    FLEET_LAUNCH_PLUGIN_CACHE="$PLUGIN_CACHE" \
-    FLEET_LAUNCH_PLUGIN_KEY="$PLUGIN_KEY" \
-    bash -c '. "$1"; printf "%s" "$FLEET_LAUNCH_ORCH_REPO"' bash "$LAUNCH_DIR/config.sh")
-if [ "$default_orch" = "$TENANT" ]; then
-    pass "an unset orchestrator repository defaults from its install record, not a workspace path"
+# With FLEET_LAUNCH_ORCH_REPO unset, the default is the checkout that holds config.sh, never the
+# first registry projectPath (bd-ib-ctunsl): two projectPaths, the FIRST not this checkout.
+ORCH_FIXTURE="$WORK/orch-default"
+rm -rf "$ORCH_FIXTURE"
+mkdir -p "$ORCH_FIXTURE/checkout/fleet-launch" "$ORCH_FIXTURE/checkout/.git" "$ORCH_FIXTURE/other-repo" "$ORCH_FIXTURE/cache-build/fleet-launch"
+cp "$LAUNCH_DIR/config.sh" "$ORCH_FIXTURE/checkout/fleet-launch/config.sh"
+cp "$LAUNCH_DIR/config.sh" "$ORCH_FIXTURE/cache-build/fleet-launch/config.sh"
+ORCH_CHECKOUT=$(cd "$ORCH_FIXTURE/checkout" && pwd -P)
+cat > "$ORCH_FIXTURE/registry-two.json" <<ORCH_REGISTRY
+{"plugins": {"$PLUGIN_KEY": [
+  {"version": "$PLUGIN_BUILD", "projectPath": "$ORCH_FIXTURE/other-repo"},
+  {"version": "$PLUGIN_BUILD", "projectPath": "$ORCH_CHECKOUT"}]}}
+ORCH_REGISTRY
+orch_default() {
+    # orch_default <config.sh> <registry> <variable>: the value config.sh resolves with the repository unset.
+    env -u FLEET_LAUNCH_ORCH_REPO -u FLEET_LAUNCH_STATE_DIR \
+        FLEET_LAUNCH_PLUGIN_REGISTRY="$2" FLEET_LAUNCH_PLUGIN_CACHE="$PLUGIN_CACHE" FLEET_LAUNCH_PLUGIN_KEY="$PLUGIN_KEY" \
+        bash -c '. "$1"; printf "%s" "${!2}"' bash "$1" "$3"
+}
+default_orch=$(orch_default "$ORCH_CHECKOUT/fleet-launch/config.sh" "$ORCH_FIXTURE/registry-two.json" FLEET_LAUNCH_ORCH_REPO)
+if [ "$default_orch" = "$ORCH_CHECKOUT" ]; then
+    pass "an unset orchestrator repository is the checkout that holds config.sh, not the first registry projectPath"
 else
-    fail "an unset orchestrator repository did not use its install record (got '$default_orch')"
+    fail "an unset orchestrator repository was not its own checkout (got '$default_orch', want '$ORCH_CHECKOUT')"
+fi
+default_state=$(orch_default "$ORCH_CHECKOUT/fleet-launch/config.sh" "$ORCH_FIXTURE/registry-two.json" FLEET_LAUNCH_STATE_DIR)
+case "$default_state" in
+    "$ORCH_CHECKOUT"/*) pass "an unset orchestrator repository puts the state directory under the checkout that holds config.sh" ;;
+    *) fail "the default state directory is not under the checkout (got '$default_state')" ;;
+esac
+explicit_orch=$(env FLEET_LAUNCH_ORCH_REPO="$ORCH_FIXTURE/other-repo" \
+    FLEET_LAUNCH_PLUGIN_REGISTRY="$ORCH_FIXTURE/registry-two.json" FLEET_LAUNCH_PLUGIN_CACHE="$PLUGIN_CACHE" FLEET_LAUNCH_PLUGIN_KEY="$PLUGIN_KEY" \
+    bash -c '. "$1"; printf "%s" "$FLEET_LAUNCH_ORCH_REPO"' bash "$ORCH_CHECKOUT/fleet-launch/config.sh")
+if [ "$explicit_orch" = "$ORCH_FIXTURE/other-repo" ]; then
+    pass "an explicit orchestrator repository is kept unchanged"
+else
+    fail "an explicit orchestrator repository was overridden (got '$explicit_orch')"
+fi
+# Negative control: a config.sh that is not inside a git checkout (an installed build) follows its install record.
+installed_orch=$(orch_default "$ORCH_FIXTURE/cache-build/fleet-launch/config.sh" "$ORCH_FIXTURE/registry-two.json" FLEET_LAUNCH_ORCH_REPO)
+if [ "$installed_orch" = "$ORCH_FIXTURE/other-repo" ]; then
+    pass "an installed config.sh outside any checkout follows its install record"
+else
+    fail "an installed config.sh did not follow its install record (got '$installed_orch')"
 fi
 
 TENANT_SYMLINK="$WORK/tenant-through-symlink"
