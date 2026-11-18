@@ -163,7 +163,7 @@ def _work_item(*, config: StoreConfig, workflow: str, job_name: str, description
         audit=None,
         superseded_by=None,
         spec_commitment_hint=None,
-        admission_policy="auto",
+        admission_policy="manual",
     )
 
 
