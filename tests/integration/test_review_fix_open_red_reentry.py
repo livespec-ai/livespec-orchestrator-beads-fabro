@@ -13,6 +13,7 @@ the same bytes.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -20,6 +21,7 @@ from pathlib import Path
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dot_graph import parse_dot_graph
 
 _ROUTE = "review_fix_open_red_route"
+_SETTLE = "review_fix_commit_settle"
 _STAGE = "review_fix"
 _ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW_DIR = _ROOT / ".claude-plugin" / ".fabro" / "workflows" / "implement-work-item"
@@ -171,6 +173,55 @@ def test_a_failed_review_fix_commit_reenters_with_its_hook_refusal_and_unstages_
     assert "check-commit-pairs-source-and-test" in brief
     assert _git("diff", "--cached", "--name-only", repo=repo) == ""
     assert _git("diff", "--name-only", repo=repo) == "module.py"
+
+
+def _settle_script() -> str:
+    """The settle node's script from the shipped graph, with the branch input rendered."""
+    return _node(name=_SETTLE)["script"].replace("{{ inputs.default_branch }}", "master")
+
+
+def _run_settle_with_failed_commit(
+    *, repo: Path, plugins: Path
+) -> subprocess.CompletedProcess[str]:
+    """Run the settle node against a stub commit runner that settles the run as failed."""
+    plugins.mkdir()
+    _ = (plugins / "livespec-commit-runner.py").write_text(
+        "import sys\n"
+        "path = sys.argv[sys.argv.index('--brief-file') + 1]\n"
+        "text = 'failed\\nCommit run commit-refused-review-fix ended FAILED with exit status 1.\\n"
+        "failed targets: check-commit-pairs-source-and-test\\n'\n"
+        "open(path, 'w', encoding='utf-8').write(text)\n",
+        encoding="utf-8",
+    )
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"LIVESPEC_PUBLISH_BRANCH", "LIVESPEC_SANDBOX_GH_REFRESH_ROOT"}
+    }
+    env["LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT"] = str(plugins)
+    return subprocess.run(
+        ["sh", "-c", _settle_script()],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+def test_the_settle_node_unstages_a_failed_commit_runs_work_before_its_checkpoint(
+    tmp_path: Path,
+) -> None:
+    """The settle node's own engine checkpoint must not carry the refused staged change."""
+    repo = _repo(tmp_path=tmp_path)
+    _ = (repo / "module.py").write_text("VALUE = 2\n", encoding="utf-8")
+    _git("add", "module.py", repo=repo)
+
+    done = _run_settle_with_failed_commit(repo=repo, plugins=tmp_path / "plugins")
+
+    assert done.returncode == 0, done.stderr
+    assert _git("diff", "--cached", "--name-only", repo=repo) == ""
+    assert (repo / "module.py").read_text(encoding="utf-8") == "VALUE = 2\n"
 
 
 def test_a_brief_from_an_earlier_visit_is_cleared_once_the_red_is_completed(
