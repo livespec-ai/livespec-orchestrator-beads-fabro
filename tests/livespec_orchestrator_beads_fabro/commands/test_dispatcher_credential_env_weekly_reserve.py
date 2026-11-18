@@ -18,6 +18,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential im
     ClaudeCredentialStatus,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_selector import (
+    admission_slot_chooser_registered,
     register_admission_slot_chooser,
 )
 
@@ -96,3 +97,55 @@ def test_a_bypass_launcher_keeps_non_skipped_weekly_reserve_cases(
 
     assert checked == credential_env.CheckedCredentialEnv(env_name=_SLOT)
     assert probes == ["token-4"]
+
+
+def test_a_bypass_launcher_grades_the_slot_it_selected_and_registers_no_chooser(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The reserve is applied to the bypass-selected slot, never to the pool winner.
+
+    Two declared slots: the first (the bypass pick) is below the reserve and the
+    second is healthy.  Building the policy must not install an admission chooser
+    that swaps the launcher onto the healthy slot, nor leave one behind for the
+    projection that reads the same selection afterwards.
+    """
+    first, second = _SLOT, "CLAUDE_CODE_OAUTH_TOKEN__ANTHROPIC_2"
+    config = {
+        _PLUGIN: {
+            "dispatcher": {
+                "claude_credential_policy": {"mode": "numbered-slots", "slots": [first, second]},
+                "session_headroom_weekly_floor_percent": 10,
+            }
+        }
+    }
+    (tmp_path / ".livespec.jsonc").write_text(json.dumps(config), encoding="utf-8")
+    monkeypatch.setenv(first, "token-first")
+    monkeypatch.setenv(second, "token-second")
+    real_policy = headroom_gate.session_headroom_policy
+
+    def _policy(**kwargs: Any) -> headroom.SessionHeadroomPolicy:
+        def _read(*, token: str | None, observed_at: str) -> headroom.SessionHeadroomReading:
+            used = 95 if token == "token-first" else 10
+            return headroom.session_headroom_reading(
+                credential_identity=f"id-{token}",
+                observed_at=observed_at,
+                utilization=5,
+                seven_day=headroom.seven_day_reading(utilization=used, status="allowed_warning"),
+            )
+
+        return real_policy(read=_read, **kwargs)
+
+    monkeypatch.setattr(headroom_gate, "session_headroom_policy", _policy)
+    probes: list[str] = []
+
+    def _probe(*, token: str) -> ClaudeCredentialStatus:
+        probes.append(token)
+        return _usable_status()
+
+    checked = credential_env.checked_credential_env(repo=tmp_path, probe=_probe)
+
+    assert isinstance(checked, str)
+    assert first in checked
+    assert probes == []
+    assert not admission_slot_chooser_registered()
