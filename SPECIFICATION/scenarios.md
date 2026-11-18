@@ -16052,3 +16052,35 @@ Feature: A delegated coverage check does not change what a commit run records
     And it sets no variable that skips or relaxes a check
     And it changes no hook's severity
 ```
+
+## Scenario 381 — A factory sandbox receives the factory's declared gate credential, and an absent or missing one never refuses the dispatch
+
+```gherkin
+Feature: A factory may hand its sandboxes a gate-Job credential
+  As the maintainer of a factory whose sandbox commit hooks delegate a long check to a cluster gate Job
+  I want that factory's declared kubeconfig mounted into each run's sandbox
+  So that delegation can fire without sharing another consumer's credential
+
+  Scenario: A declared existing file is mounted read-only where the client reads it
+    Given a target whose dispatcher.factories.<name>.gates_kubeconfig names an existing file on the dispatching host
+    When the Dispatcher dispatches an item to that factory
+    Then the per-run sandbox configuration mounts the file read-only at the path the gate-delegation client reads
+    And no log, journal or other record carries the file's contents
+
+  Scenario: An absent key leaves the run unchanged
+    Given a factory that declares no gates_kubeconfig
+    When the Dispatcher dispatches an item to it
+    Then the run proceeds without the mount
+    And the commit hook falls back to the local aggregate
+
+  Scenario: A declared key naming a missing file is a warning, never a refusal
+    Given a factory whose gates_kubeconfig names a file that does not exist
+    When the Dispatcher dispatches an item to it
+    Then the dispatch journal records a warning naming the key and the path
+    And the dispatch is not refused
+
+  Scenario: A value that is not a non-empty string refuses before claim
+    Given a factory whose gates_kubeconfig is an empty string or not a string
+    When the Dispatcher evaluates the dispatch
+    Then it refuses before claim with a diagnostic naming dispatcher.factories.<name>.gates_kubeconfig
+```
