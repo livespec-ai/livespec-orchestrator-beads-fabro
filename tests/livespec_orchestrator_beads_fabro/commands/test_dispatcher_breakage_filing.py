@@ -257,3 +257,35 @@ def test_file_job_stamps_key_even_when_capture_fails_after_creating_the_item(
         "unfiled nightly.yml:tests:abc: capture work item was not routed;"
         " record breakage key: unreachable",
     )
+
+
+def test_breakage_key_is_persisted_by_capture_and_found_without_the_annotation(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(filing, "new_work_item_id", lambda **_: "bd-ib-new")
+    captured: list[object] = []
+    client = _Client(fail_update=True)
+    item_id, problem = _file_job(
+        context=_context(client=client),
+        capture=lambda **kwargs: captured.append(kwargs["item"]) or IOSuccess("ready"),
+    )
+    assert item_id is None
+    assert problem is not None
+    description = captured[0].description  # type: ignore[attr-defined]
+    assert "\nBreakage key: nightly.yml:tests:abc\n" in description
+
+    # The failed annotation left no metadata, yet the created item is still found by its key.
+    client.records = [
+        {"id": "bd-ib-new", "description": description},
+        {"id": "other", "description": "Breakage key: nightly.yml:tests:def\nmore"},
+        {"id": "quoted", "description": "see Breakage key: nightly.yml:tests:ghi inline"},
+        {"id": 7, "description": "Breakage key: nightly.yml:tests:num"},
+    ]
+    monkeypatch.setattr(filing, "make_beads_client", lambda **_: client)
+    context, problem = filing.context(repo=tmp_path, resolve_config=lambda **_: _config())
+    assert problem is None
+    assert context is not None
+    assert context.existing == {
+        "nightly.yml:tests:abc": "bd-ib-new",
+        "nightly.yml:tests:def": "other",
+    }
