@@ -46,9 +46,9 @@ fi
 
 HARNESS_SLICE=${1:-all}
 case "$HARNESS_SLICE" in
-    all|scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|queue-position|launcher-reexec|parity|gate-detach) ;;
+    all|scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|queue-position|launcher-reexec|parity|gate-detach|probe-stderr) ;;
     *)
-        echo "usage: run-tests.sh [scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|queue-position|launcher-reexec|parity|gate-detach]" >&2
+        echo "usage: run-tests.sh [scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|queue-position|launcher-reexec|parity|gate-detach|probe-stderr]" >&2
         exit 2
         ;;
 esac
@@ -338,6 +338,7 @@ for argument in "$@"; do
                     exit 0
                     ;;
             esac
+            if [ -n "${STUB_CRED_REFUSAL:-}" ]; then printf '%s\n' "$STUB_CRED_REFUSAL" >&2; exit 3; fi
             printf 'stub: the Claude credential is usable (HTTP 200)\n'
             exit 0
             ;;
@@ -4191,6 +4192,34 @@ if [ "$parent_rc" = 0 ] && [ -z "$(detached_pid_of "$parent_out")" ] && [ "$(dri
     pass "control: with no gate stamp the launcher runs in place exactly as before and dispatches"
 else
     fail "control: a launcher with no gate stamp detached or did not dispatch (rc=$parent_rc, dispatches: $(drive_log_items))"
+fi
+fi
+
+if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = probe-stderr ]; then
+
+new_case probe-stderr
+open_boards
+export FLEET_LAUNCH_MAX_WAIT_S=120
+refusal="credential_wrapper could not run in this environment (required secret env var(s) ['BEADS_DOLT_PASSWORD', 'GITHUB_APP_ID'])"
+parent_out=$(STUB_CRED_REFUSAL="$refusal" ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-probestderr 2>&1)
+parent_rc=$?
+if [ "$parent_rc" = 75 ] && printf '%s' "$parent_out" | grep -q "credential probe NOT usable (rc=3)" \
+    && printf '%s' "$parent_out" | grep -qF "required secret env var(s) ['BEADS_DOLT_PASSWORD', 'GITHUB_APP_ID']" \
+    && [ -z "$(drive_log_items)" ]; then
+    pass "a credential probe refused by the wrapper holds the launch (exit 75) and the launcher log carries the refusal text naming the missing variables"
+else
+    fail "the probe refusal was swallowed or the launch was not held (rc=$parent_rc): $(printf '%s' "$parent_out" | tail -5)"
+fi
+
+new_case probe-stderr-control
+open_boards
+export FLEET_LAUNCH_MAX_WAIT_S=120
+parent_out=$(ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-probeok 2>&1)
+parent_rc=$?
+if [ "$parent_rc" = 0 ] && [ "$(drive_log_items)" = "bd-ib-probeok" ]; then
+    pass "control: a usable credential probe still launches and dispatches"
+else
+    fail "control: a usable probe did not dispatch (rc=$parent_rc, dispatches: $(drive_log_items))"
 fi
 fi
 
