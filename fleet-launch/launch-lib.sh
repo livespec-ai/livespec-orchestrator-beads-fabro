@@ -136,10 +136,26 @@ wrapper_description() {
 }
 
 # --- the installed plugin build ----------------------------------------------
+# FLEET_LAUNCH_BUILD_OVERRIDE=<build>: ONE launch runs on that candidate build instead of the registry's
+# (a canary beside band work on the launch build). It names a directory under FLEET_LAUNCH_PLUGIN_CACHE; an
+# override that is not materialized there, or that is not one path segment, refuses (empty output, rc=1)
+# naming it and NEVER falls back silently to the registry. Unset, the launch is unchanged.
 installed_build() {
+  local override=${FLEET_LAUNCH_BUILD_OVERRIDE:-}
+  if [ -n "$override" ]; then
+    case $override in
+      */*|.|..) echo "fleet-launch: build override '$override' is not a single build directory name: refusing" >&2; return 1 ;;
+    esac
+    [ -d "$FLEET_LAUNCH_PLUGIN_CACHE/$override" ] || { echo "fleet-launch: build override '$override' is not materialized in $FLEET_LAUNCH_PLUGIN_CACHE: refusing" >&2; return 1; }
+    printf '%s\n' "$override"
+    return 0
+  fi
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print([e["version"] for e in d["plugins"][sys.argv[2]] if e.get("projectPath")==sys.argv[3]][0])' \
     "$FLEET_LAUNCH_PLUGIN_REGISTRY" "$FLEET_LAUNCH_PLUGIN_KEY" "$REPO" 2>/dev/null
 }
+
+# build_source: where the launch's build came from, for the start line.
+build_source() { if [ -n "${FLEET_LAUNCH_BUILD_OVERRIDE:-}" ]; then printf 'override'; else printf 'installed registry'; fi; }
 
 # --- caps read live from state files -------------------------------------------
 # read_cap_file <file> <fallback>: the one number a cap file holds, or the fallback.

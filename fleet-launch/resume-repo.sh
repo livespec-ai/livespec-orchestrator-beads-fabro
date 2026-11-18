@@ -26,11 +26,11 @@ if ! resolve_tenant_wrapper; then
   exit 2
 fi
 build=$(installed_build)
-[ -n "$build" ] || { echo "resume-repo: no installed plugin build is registered for $REPO; refusing" >&2; exit 2; }
+[ -n "$build" ] || { echo "resume-repo: no plugin build resolved for $REPO (installed registry, or FLEET_LAUNCH_BUILD_OVERRIDE not materialized); refusing" >&2; exit 2; }
 plugin="$FLEET_LAUNCH_PLUGIN_CACHE/$build"
 token=$(ssh -o BatchMode=yes "$FLEET_LAUNCH_GMK_SSH" cat "$FLEET_LAUNCH_GMK_SERVER_ENV" 2>/dev/null | sed -n 's/^FABRO_DEV_TOKEN=//p' | tail -n 1)
 if [ -n "$token" ]; then export "FABRO_DEV_TOKEN__${FACTORY}=$token"; fi
-echo "=== $(date -u +%FT%TZ) RESUME start: dispatcher.py resume --repo $REPO --item $ITEM --factory $FACTORY (build $build, wrapper: $(wrapper_description))"
+echo "=== $(date -u +%FT%TZ) RESUME start: dispatcher.py resume --repo $REPO --item $ITEM --factory $FACTORY (build $build from $(build_source), wrapper: $(wrapper_description))"
 (cd "$REPO" && wrap -- env LIVESPEC_FACTORY_READ_WRAPPER="$FLEET_LAUNCH_DEFAULT_WRAPPER" python3 "$plugin/scripts/bin/dispatcher.py" resume --repo "$REPO" --item "$ITEM" --factory "$FACTORY" --invoker "$FLEET_LAUNCH_RESUME_INVOKER" --json) > "$OUT/$ITEM-resume.json" 2> "$OUT/$ITEM-resume.stderr"
 rc=$?
 echo "$(date -u +%FT%TZ) RESUME rc=$rc"

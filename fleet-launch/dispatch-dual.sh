@@ -15,6 +15,9 @@
 #
 # Usage: dispatch-dual.sh <item-id>
 # Environment (all optional):
+#   FLEET_LAUNCH_BUILD_OVERRIDE=<build>   run THIS launch on that candidate orchestrator build (a
+#                          directory name under the plugin cache) instead of the build installed_plugins.json
+#                          names; a build not materialized there refuses. Unset: the installed build.
 #   REPO_OVERRIDE=<path>   the tenant repository (default: this orchestrator repo)
 #   WRAPPER=<path>         override the tenant credential wrapper chain (default: the
 #                          target repository's committed credential_wrapper, a
@@ -1119,6 +1122,7 @@ while :; do
   fi
   checkout_at_origin_tip
   build=$(installed_build)
+  [ -n "$build" ] || { echo "$(date -u +%FT%TZ) build unresolved: $(if [ -n "${FLEET_LAUNCH_BUILD_OVERRIDE:-}" ]; then echo "override '$FLEET_LAUNCH_BUILD_OVERRIDE' is not materialized in $FLEET_LAUNCH_PLUGIN_CACHE"; else echo "no installed build registered for $REPO"; fi): refuse, no launch"; rm -f "$marker"; marker=""; release_lock; exit_cause="build unresolved"; exit 70; }
   plugin="$FLEET_LAUNCH_PLUGIN_CACHE/$build"
   build_version=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['version'])" "$plugin/plugin.json" 2>/dev/null)
   cred=$(cd "$REPO" && wrap -- timeout 120 python3 "$plugin/scripts/bin/dispatcher.py" claude-cred-status 2>&1); cred_rc=$?
@@ -1144,7 +1148,7 @@ while :; do
     while IFS= read -r line || [ -n "$line" ]; do case "$line" in ""|"#"*) ;; *) ACP_ARGS+=(--acp-node "$line") ;; esac; done < "$FLEET_LAUNCH_ACP_OVERRIDES_FILE"
   fi
   echo "$(date -u +%FT%TZ) acp overrides: $(( ${#ACP_ARGS[@]} / 2 )) --acp-node arguments from $FLEET_LAUNCH_ACP_OVERRIDES_FILE"
-  echo "$(date -u +%FT%TZ) LAUNCH target=$target head=$(git -C "$REPO" rev-parse --short HEAD) build=$build version=${build_version:-?}"
+  echo "$(date -u +%FT%TZ) LAUNCH target=$target head=$(git -C "$REPO" rev-parse --short HEAD) build=$build build-source=$(build_source) version=${build_version:-?}"
   # One-shot: this item's freeze-allowlist line is consumed at LAUNCH, so a pre-listing re-ticket
   # waits behind the hold like any other ticket.
   [ "$target" = mi-homelab ] || [ "$target" = homelab-worker-arm64 ] || consume_allowlist_line LAUNCH

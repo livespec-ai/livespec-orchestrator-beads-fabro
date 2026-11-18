@@ -97,6 +97,17 @@ The state directory (`FLEET_LAUNCH_STATE_DIR`) holds data only: logs, verdicts, 
 `acp-overrides.txt`, the per-repository `wip-act.<repo>` and `wip-claimed-cache.<repo>.*` files
 and the re-ticket state. It never holds a script.
 
+### Running one launch on a candidate build (bd-ib-inzpxt)
+
+A launch runs on the build the plugin registry (`installed_plugins.json`) names for its repository path.
+To run ONE launch on a candidate release while the band stays on the installed build, set
+`FLEET_LAUNCH_BUILD_OVERRIDE=<build>` (a directory name under the plugin cache, for example the twelve-character
+build identifier) in that launch's environment. The launcher's `LAUNCH` line then reads
+`build=<build> build-source=override`, and a launch without it reads `build-source=installed registry`. A build that
+is not materialized in the plugin cache refuses (rc=70) naming it; it never falls back to the registry. An alternative
+that needs no override is a dedicated clone or worktree of the repository registered at the candidate build and
+launched with `REPO_OVERRIDE=<that path>`, at the cost of one extra checkout and registry install per candidate.
+
 ## Parity with the running copies (2026-11-15, bd-ib-yax6gv)
 
 The launchers the dispatching host ran (`tmp/petri-canary/dispatch-dual-r681b.sh` at version
