@@ -27,7 +27,7 @@ from livespec_orchestrator_beads_fabro.errors import (
 from livespec_orchestrator_beads_fabro.intake_dor import DefinitionOfReadyChecklist
 from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 
-__all__: list[str] = ["FilingContext", "context", "file_job", "key"]
+__all__: list[str] = ["FilingContext", "FilingRecord", "context", "file_job", "key"]
 
 _BREAKAGE_KEY = "breakage_key"
 _CHECKLIST = DefinitionOfReadyChecklist(
@@ -60,6 +60,18 @@ class FilingContext:
     existing: dict[str, str]
 
 
+@dataclass(frozen=True, kw_only=True)
+class FilingRecord:
+    """One failed workflow job, as the ledger item that reports it."""
+
+    workflow: str
+    job: dict[str, object]
+    url: str
+    head_sha: str
+    tests: tuple[str, ...]
+    breakage_key: str
+
+
 def context(
     *, repo: Path, resolve_config: Callable[..., object]
 ) -> tuple[FilingContext | None, str | None]:
@@ -84,29 +96,18 @@ def key(*, workflow: str, job_name: str, head_sha: str) -> str:
     return f"{workflow}:{job_name}:{head_sha}"
 
 
-def file_job(  # noqa: PLR0913 - the data is one filing record.
+def file_job(
     *,
     context: FilingContext,
-    workflow: str,
-    job: dict[str, object],
-    url: str,
-    head_sha: str,
-    tests: tuple[str, ...],
-    breakage_key: str,
+    record: FilingRecord,
     capture: Callable[..., IOResult[object, object]],
 ) -> tuple[str | None, str | None]:
     """File and annotate one failed job via the capture seam."""
-    name = _string(value=job.get("name"))
+    workflow, breakage_key = record.workflow, record.breakage_key
+    name = _string(value=record.job.get("name"))
     if not name:
         return None, "failed job has no name"
-    description = _description(
-        workflow=workflow,
-        job_name=name,
-        url=url,
-        head_sha=head_sha,
-        tests=tests,
-        failed_step=_failed_step(job=job),
-    )
+    description = _description(record=record, job_name=name)
     if minijinja_openers_in_text(source="breakage-pass", text=description):
         return None, f"unfiled {breakage_key}: description contains a template opener"
     item = _work_item(
@@ -165,16 +166,10 @@ def _work_item(*, config: StoreConfig, workflow: str, job_name: str, description
     )
 
 
-def _description(
-    *,
-    workflow: str,
-    job_name: str,
-    url: str,
-    head_sha: str,
-    tests: tuple[str, ...],
-    failed_step: str,
-) -> str:
-    lines = "\n".join(f"- Failing test: {test}" for test in tests)
+def _description(*, record: FilingRecord, job_name: str) -> str:
+    workflow, url, head_sha = record.workflow, record.url, record.head_sha
+    failed_step = _failed_step(job=record.job)
+    lines = "\n".join(f"- Failing test: {test}" for test in record.tests)
     if not lines:
         lines = f"- No failing test was named in the log; failing step: {failed_step}"
     return (
