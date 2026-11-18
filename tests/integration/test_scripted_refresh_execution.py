@@ -336,7 +336,13 @@ def _commit(*, cwd: Path, path: str, text: str, subject: str) -> str:
     return _git("rev-parse", "HEAD", cwd=cwd).stdout.strip()
 
 
-def _origin_with_default(*, root: Path, record_json: str = '[{"id": "seed"}]\n') -> Path:
+def _origin_with_default(
+    *,
+    root: Path,
+    record_json: str = '[{"id": "seed"}]\n',
+    declaration: str = _DECLARATION,
+    extra_files: dict[str, str] | None = None,
+) -> Path:
     """A bare origin whose default branch carries the shared file."""
     origin = root / "origin.git"
     _ = origin.mkdir(parents=True)
@@ -344,13 +350,15 @@ def _origin_with_default(*, root: Path, record_json: str = '[{"id": "seed"}]\n')
     seed = root / "seed"
     _ = seed.mkdir()
     _ = _git("init", "--quiet", f"--initial-branch={_DEFAULT_BRANCH}", cwd=seed)
-    _ = (seed / _DECLARATION_FILE).write_text(_DECLARATION, encoding="utf-8")
+    _ = (seed / _DECLARATION_FILE).write_text(declaration, encoding="utf-8")
     _ = (seed / ".gitattributes").write_text(
         "record.json merge=record-conflict\n", encoding="utf-8"
     )
     _ = (seed / _RECORD_JSON).write_text(record_json, encoding="utf-8")
     _ = (seed / _RECORD_MARKDOWN).write_text("- seed entry\n", encoding="utf-8")
-    _ = _git("add", ".gitattributes", _DECLARATION_FILE, _RECORD_JSON, _RECORD_MARKDOWN, cwd=seed)
+    for path, text in (extra_files or {}).items():
+        _ = (seed / path).write_text(text, encoding="utf-8")
+    _ = _git("add", "-A", cwd=seed)
     _ = _commit(cwd=seed, path=_SHARED_FILE, text="base\n", subject="chore: seed")
     _ = _git("push", "--quiet", str(origin), f"HEAD:refs/heads/{_DEFAULT_BRANCH}", cwd=seed)
     return origin
@@ -392,6 +400,8 @@ def _build(
     arming_unreadable: bool = False,
     disarm_fails: bool = False,
     record_json: str = '[{"id": "seed"}]\n',
+    declaration: str = _DECLARATION,
+    extra_files: dict[str, str] | None = None,
 ) -> _Refresh:
     """An origin carrying `master` and the publish branch, and a clone on the branch.
 
@@ -403,7 +413,12 @@ def _build(
     which is what makes the stage's later re-entry the ENFORCEMENT arm rather
     than a first recording.
     """
-    origin = _origin_with_default(root=root, record_json=record_json)
+    origin = _origin_with_default(
+        root=root,
+        record_json=record_json,
+        declaration=declaration,
+        extra_files=extra_files,
+    )
     clone = root / "clone"
     _ = _git("clone", "--quiet", str(origin), str(clone), cwd=root)
     _ = _git("config", "merge.record-conflict.driver", "false", cwd=clone)
@@ -654,6 +669,62 @@ def test_an_advanced_default_is_rebased_gated_and_republished_under_a_lease(
     assert box.state(name=REFRESH_COUNT_STATE_FILENAME) is None
     assert box.state(name=_CLEAN_STATE_FILENAME) is not None
     assert box.state(name=REFRESH_CHANGED_STATE_FILENAME) == ""
+
+
+def test_a_clean_rebase_regenerates_a_generated_record_before_the_declared_gate(
+    tmp_path: Path,
+) -> None:
+    """A default-branch move can stale the run's generated record without a conflict.
+
+    The run changes one generator input and commits the corresponding record;
+    master later changes a different input.  Git applies that rebase cleanly,
+    but its resulting record still has the pre-move output.  This must be
+    regenerated and committed by `pr_refresh`, rather than spending a
+    refresh-repair round that a later default-branch move can invalidate again.
+    """
+    declaration = json.dumps(
+        {
+            "livespec-orchestrator-beads-fabro": {
+                "dispatcher": {
+                    "record_files": [{"path": _RECORD_JSON, "generator": ["sh", "generate.sh"]}]
+                }
+            }
+        }
+    )
+    box = _build(
+        root=tmp_path,
+        declaration=declaration,
+        record_json="run: base\ndefault: base\n",
+        extra_files={
+            "generate.sh": "#!/bin/sh\ncat input-run.txt input-default.txt > record.json\n",
+            "input-run.txt": "run: base\n",
+            "input-default.txt": "default: base\n",
+        },
+    )
+    _ = (box.clone / "input-run.txt").write_text("run: work\n", encoding="utf-8")
+    _ = _git("add", "input-run.txt", cwd=box.clone)
+    _ = _git("commit", "--quiet", "-m", "feat: change the run input", cwd=box.clone)
+    _ = subprocess.run(
+        ["sh", "generate.sh"], cwd=box.clone, check=True, capture_output=True, text=True
+    )
+    _ = _git("add", _RECORD_JSON, cwd=box.clone)
+    _ = _git("commit", "--quiet", "-m", "chore: regenerate the record", cwd=box.clone)
+    published = box.local_head()
+    _ = _git("push", "--quiet", "--force", "origin", f"HEAD:refs/heads/{_BRANCH}", cwd=box.clone)
+    _ = (box.state_dir() / PUBLISH_HEAD_STATE_FILENAME).write_text(
+        box.local_head(), encoding="utf-8"
+    )
+    _ = _advance_default(box=box, path="input-default.txt", text="default: moved\n")
+
+    result = _run(box=box)
+
+    assert result.returncode == 0, result.stderr
+    assert "LIVESPEC_REFRESH_REPAIR" not in result.stderr
+    assert "LIVESPEC_RECORD_FILE_REGENERATED" in result.stderr
+    assert (box.clone / _RECORD_JSON).read_text(encoding="utf-8") == "run: work\ndefault: moved\n"
+    assert box.remote_head(ref=_BRANCH) == box.local_head()
+    assert box.local_head() != published
+    assert box.state(name=REFRESH_COUNT_STATE_FILENAME) is None
 
 
 def test_an_armed_pull_request_is_disarmed_before_the_rebase(tmp_path: Path) -> None:
