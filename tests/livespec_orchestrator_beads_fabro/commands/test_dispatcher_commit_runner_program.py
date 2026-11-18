@@ -910,6 +910,26 @@ _HOOK_REFUSAL_OUTPUT = (
 )
 
 
+def test_failing_section_names_a_check_lint_row_with_a_literal_shell_variable_path(
+    tmp_path: Path,
+) -> None:
+    """A non-coverage target keeps its Ruff path, location, and rule intact."""
+    program = _settle_program(tmp_path)
+    lint_path = (
+        "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}"
+        "/livespec-gh-refresh/bin/mint_app_token.py"
+    )
+    output = (
+        f"{lint_path}:17:1: E402 Module level import not at top of file\n"
+        "Failed targets (1):\n"
+        "  - check-lint\n"
+    )
+
+    section = program["failing_section"](output)
+
+    assert f"- {lint_path}:17:1: E402 Module level import not at top of file\n" in section
+
+
 def _settle_program(tmp_path: Path) -> dict[str, Any]:
     program = _program(tmp_path)
     assert "settle" in program
