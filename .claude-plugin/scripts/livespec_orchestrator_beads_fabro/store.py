@@ -126,15 +126,18 @@ _META_NOTES = "notes"
 # --------------------------------------------------------------------------
 
 
-def read_work_items(*, path: StoreConfig) -> Iterator[WorkItem]:
+def read_work_items(*, path: StoreConfig, cached: bool = False) -> Iterator[WorkItem]:
     """Stream every issue in the tenant as a WorkItem.
 
     `path` is the repurposed connection descriptor. `depends_on` is
     populated from each issue's `blocks` edges so the existing `next`
     ranker works UNCHANGED over the materialized WorkItems.
+
+    `cached=True` reads the per-host shared dump (a few seconds old at most, dropped
+    on any write through this client); only read-only snapshot callers opt in.
     """
     client = make_beads_client(config=path)
-    records = client.list_issues()
+    records = client.list_issues_cached() if cached else client.list_issues()
     superseded_by = superseded_by_from_records(records=records)
     for record in records:
         issue_id = _require_str(record=record, key="id")

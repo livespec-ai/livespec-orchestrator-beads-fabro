@@ -24,7 +24,7 @@ def read_work_item_native_priorities(*, path: StoreConfig) -> dict[str, int]:
     """
     client = make_beads_client(config=path)
     priorities: dict[str, int] = {}
-    for record in client.list_issues():
+    for record in client.list_issues_cached():
         issue_id = _require_str(record=record, key="id")
         priority = record.get("priority")
         if not isinstance(priority, int) or isinstance(priority, bool):

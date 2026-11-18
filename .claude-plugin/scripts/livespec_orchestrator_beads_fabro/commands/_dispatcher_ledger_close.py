@@ -294,8 +294,8 @@ def _write_findings(*, findings: list[LedgerFinding]) -> None:
     _ = write_stderr(text="ERROR: pre-dispatch ledger checks failed; dispatch blocked\n")
 
 
-def load_items(*, repo: Path) -> list[WorkItem]:
-    records = read_work_items(path=store_config(repo=repo))
+def load_items(*, repo: Path, cached: bool = False) -> list[WorkItem]:
+    records = read_work_items(path=store_config(repo=repo), cached=cached)
     return list(materialize_work_items(records=records).values())
 
 
