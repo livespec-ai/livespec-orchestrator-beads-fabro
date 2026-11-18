@@ -200,9 +200,14 @@ Deliberate omissions, each with its reason:
 - `chain-opd3hq-after-close.sh`, `fill-precheck.py`, `drive_cpu_*.py`, `throughput-watch.sh` and
   the other one-off chain, watch and measurement scripts: seat-side tooling, not launch gates; their
   evidence lives in the ledger comments that cite them.
-- The seat's `ticket.sh`, `resume.sh`, `seeded-ticket.sh`, `allowlist-add.sh` and `hold-write.sh`
-  under `/var/tmp/ldseat`: the seat's own entry points and hold editors; they invoke these launchers
-  and are not launch gates. The cutover changes only the launcher path they name.
+- The seat's `ticket.sh`, `resume.sh`, `seeded-ticket.sh`, `allowlist-add.sh` and `hold-write.sh`,
+  with `load-guard.sh` (the host load reading `ticket.sh` runs before it takes a ticket), now committed
+  under `fleet-launch/seat/`: the seat's own entry points and hold editors; they invoke these launchers
+  and are not launch gates. They take every host path from `config.sh` (the orchestrator checkout, the
+  state directory) or the environment (`SEAT_LOAD_GUARD`, `SEAT_PLUGIN_ROOT` for `seeded-ticket.sh`),
+  so a seat on any host runs them from its own checkout. They were copied from `/var/tmp/ldseat` and
+  `/var/tmp/vps-load-guard.sh` on the vps, where nothing declared them; the cutover changes only the
+  launcher path they name.
 - The seat's pre-launch screen cannot see the Dispatcher's dispatch-stage spec-change-tier
   judgement (finding on bd-ib-yax6gv, 2026-11-13); neither can this launcher. The Dispatcher's own
   refusal (exit 5, cause `refused`) still ends the launcher without a re-ticket.
