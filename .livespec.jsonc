@@ -1208,6 +1208,15 @@
           "bin": "/home/ubuntu/.local/state/fabro-web-prod/v0393-bbe693847/fabro",
           "secret_channel": "native_secrets",
           "environment": "factory-python"
+        },
+        // `homelab-worker-arm64` is the dedicated :32279 arm64 factory lane.
+        // Its registry-backed address resolves on the dispatching host; its
+        // server uses the same pinned client and factory environment as petri.
+        "homelab-worker-arm64": {
+          "registry": true,
+          "bin": "/home/ubuntu/.local/state/fabro-web-prod/v0393-bbe693847/fabro",
+          "secret_channel": "native_secrets",
+          "environment": "factory-python"
         }
       },
       // The priority-epic idle-slot audit (contracts.md, "Priority-epic
