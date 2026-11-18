@@ -52,11 +52,20 @@ if [ "${CAPTURE_LIVENESS_PROBE_DENIED:-}" = 1 ]; then
     }
 fi
 PROBE_ENV
-if output="$(CAPTURE_LIVENESS_PROBE_DENIED=1 \
+# The invocation is bounded so that a harness which waits unbounded on the live
+# capture server fails this test (timeout status 124 or 137) instead of hanging
+# until the outer gate ceiling.
+probe_status=0
+output="$(CAPTURE_LIVENESS_PROBE_DENIED=1 \
     BASH_ENV="$liveness_probe_env" \
     CAPTURE_START_DELAY_SECONDS=2.1 \
-    bash "$HARNESS" 2>&1)" \
-        && grep -qF 'telemetry: bd.invoke span emitted' <<<"$output"; then
+    timeout --kill-after=5 120 bash "$HARNESS" 2>&1)" || probe_status=$?
+if [ "$probe_status" -eq 124 ] || [ "$probe_status" -eq 137 ]; then
+    printf '%s\n' "$output" >&2
+    echo "FAIL: denied capture liveness probe made the harness wait unbounded (timeout status ${probe_status})" >&2
+    exit 1
+fi
+if [ "$probe_status" -eq 0 ] && grep -qF 'telemetry: bd.invoke span emitted' <<<"$output"; then
     printf '%s\n' 'ok: denied capture liveness probe keeps polling for the port'
 else
     printf '%s\n' "$output" >&2
