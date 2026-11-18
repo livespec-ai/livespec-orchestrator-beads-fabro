@@ -556,3 +556,53 @@ def test_commit_red_refusal_returns_the_branch_and_tree_to_the_dispatch_base(
     newest = recorded.split("## commit_red")[-1]
     assert "src/pkg/existing.py" in newest
     assert "src/pkg/created.py" in newest
+
+
+def test_commit_green_program_runs_the_affected_tests_gate_as_the_implement_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The split Green amend gives its hook the authoring turn for gate selection."""
+    programs = importlib.import_module(_COMMIT_PROGRAMS_MODULE)
+    plugins_root = tmp_path / "plugins"
+    _ = land_helpers(roots={PLUGINS_ROOT: plugins_root})
+    repo = _initialize_repository(tmp_path=tmp_path)
+    _git(repo=repo, argv=["config", "livespec.factoryRunId", "current-run"])
+
+    test_file = repo / "tests" / "test_feature.py"
+    test_file.parent.mkdir()
+    _ = test_file.write_text("def test_feature() -> None:\n    assert True\n", encoding="utf-8")
+    _git(repo=repo, argv=["add", "tests/test_feature.py"])
+    _git(
+        repo=repo,
+        argv=["commit", "--quiet", "-m", "feat: red", "-m", "Factory-Run-Id: current-run"],
+    )
+    _ = (repo / "implementation.py").write_text("VALUE = 2\n", encoding="utf-8")
+    _checkpoint(repo=repo, name="green")
+
+    calls = tmp_path / "just-calls"
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    just = tools / "just"
+    _ = just.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + str(calls) + "\n",
+        encoding="utf-8",
+    )
+    just.chmod(0o755)
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    _ = hook.write_text(
+        "#!/bin/sh\n"
+        f"PATH={tools}:$PATH LIVESPEC_GATE_CONTEXT=1 bash {_ROOT / 'dev-tooling' / 'just-check-pre-commit.sh'}\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+    monkeypatch.setenv("LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT", str(plugins_root))
+
+    completed = _run(
+        repo=repo, argv=["sh", "-c", programs.commit_green_command_script()], check=False
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert calls.read_text(encoding="utf-8").splitlines() == [
+        "check-staged-precheck",
+        "check-changed",
+    ]
