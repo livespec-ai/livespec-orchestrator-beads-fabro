@@ -30,6 +30,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SCRIPT = _REPO_ROOT / "dev-tooling" / "just-check-pre-commit.sh"
 _INCREMENTAL_GATE = "check-check-coverage-incremental"
+_FLEET_LAUNCH_GATE = "check-fleet-launch"
 _MASTER_CI_GATE = "check-master-ci-green"
 _SANDBOX_EXEMPT_MARKER = "livespec.sandboxExempt"
 _RED_TRAILER = "TDD-Red-Test-File-Checksum: deadbeef"
@@ -241,6 +242,23 @@ def test_red_mode_arm_skips_the_incremental_coverage_gate(*, tmp_path: Path) -> 
         "check-per-file-coverage",
         _INCREMENTAL_GATE,
         "check-codex-skill-picker",
+    ]
+
+
+def test_red_mode_arm_skips_the_fleet_launch_gate_for_an_unrelated_test(*, tmp_path: Path) -> None:
+    """A Red test outside fleet-launch and its inputs cannot affect that expensive harness."""
+    repo, env = _init_repo(tmp_path=tmp_path, baseline_message="baseline")
+    _stage(repo=repo, relative_path="tests/test_placeholder.py", body="def test_red(): assert 0\n")
+
+    invocation = _invoke_pre_commit(repo=repo, env=env)
+
+    assert invocation.split() == [
+        "check-skipping",
+        "check-coverage",
+        "check-per-file-coverage",
+        _INCREMENTAL_GATE,
+        "check-codex-skill-picker",
+        _FLEET_LAUNCH_GATE,
     ]
 
 
