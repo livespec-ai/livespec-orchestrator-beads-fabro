@@ -976,6 +976,11 @@ if bash "$HARNESS_DIR/test-scenario-watchdog.sh" >/dev/null; then
 else
     fail "the per-scenario watchdog regressed"
 fi
+if bash "$HARNESS_DIR/test-load-guard-tmp-share.sh" >/dev/null; then
+    pass "the seat load guard holds /tmp at a share of the mounted tmpfs, the same verdict on a 24G and a 48G tmpfs"
+else
+    fail "the seat load guard's /tmp rule regressed to a size-blind limit"
+fi
 new_case board-read
 write_board "$BOARD_GMK" 2 gmk
 write_board "$BOARD_HL" 1 hl
