@@ -11,6 +11,9 @@ from typing import Any
 from unittest.mock import Mock
 
 import pytest
+from livespec_orchestrator_beads_fabro.commands import (
+    _dispatcher_base_advance_record as base_record,
+)
 from livespec_orchestrator_beads_fabro.commands import _dispatcher_lifecycle_writes as writes
 from livespec_orchestrator_beads_fabro.commands import _dispatcher_loop as loop_module
 from livespec_orchestrator_beads_fabro.commands import _dispatcher_loop_selection as selection
@@ -355,6 +358,58 @@ def test_a_refused_resume_rests_the_item_at_needs_human_and_names_the_refusal(
     assert result.detail.startswith("base-advanced-after-arming: the automatic resume")
     assert (refusals[0] if refusals else "nothing to resume from") in result.detail
     assert journal.records[0]["stage"] == "needs-human-blocked"
+
+
+def test_a_refused_record_file_resume_records_its_refusal_on_the_overtaken_item(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scenario 184 keeps the refusal in both its outcome and durable cause record."""
+    world = _ResumeWorld(refusals=("the item has already taken 2 resumes",))
+    _, admit = _install(monkeypatch=monkeypatch, world=world)
+    journal = _Journal()
+    comments: list[str] = []
+    resumed = overtaken.bound_overtaken_resume(
+        args=argparse.Namespace(journal=None),
+        repo=tmp_path,
+        journal=journal,  # pyright: ignore[reportArgumentType]
+        janitor=None,
+        admit_and_dispatch=admit,
+    )
+    monkeypatch.setattr(selection, "livespec_config_text", lambda **_: _CONFIG)
+    monkeypatch.setattr(selection, "_release_for_resume", lambda **_: None)
+    monkeypatch.setattr(
+        base_record,
+        "append_work_item_comment",
+        lambda **kwargs: comments.append(kwargs["body"]),
+    )
+    for name, replacement in (
+        ("record_provider_exhaustion_if_observed", lambda **_: None),
+        ("record_dead_implementer_truncation_if_observed", lambda **_: None),
+        ("preserve_terminated_run_work", lambda **_: None),
+        ("record_groom_draft", lambda **_: False),
+        ("escalate_needs_human_block", lambda **_: None),
+        ("record_needs_human_cause", lambda **_: None),
+        ("dispose_terminal_routing", lambda **_: None),
+        ("emit_calibration", lambda **_: None),
+    ):
+        monkeypatch.setattr(selection, name, replacement)
+
+    result = selection.post_run_dispositions(
+        args=argparse.Namespace(close_on_merge=False),
+        repo=tmp_path,
+        item=SimpleNamespace(id=_ITEM_ID),  # pyright: ignore[reportArgumentType]
+        outcome=_outcome(base_advanced=_advanced()),
+        journal=journal,  # pyright: ignore[reportArgumentType]
+        wall_clock_seconds=1.0,
+        dispatch_context_size=1,
+        token_supplier=lambda: "token",
+        resume=resumed,
+    )
+
+    assert "2 resumes" in result.detail
+    assert len(comments) == 1
+    assert "livespec-base-advanced-after-arming" in comments[0]
+    assert "2 resumes" in comments[0]
 
 
 def test_the_command_offers_its_own_launch_as_the_admit_and_dispatch_path() -> None:

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from livespec_orchestrator_beads_fabro._beads_client import make_beads_client
+from livespec_orchestrator_beads_fabro.commands._config import resolve_store_config
 
 if TYPE_CHECKING:
     from livespec_orchestrator_beads_fabro.types import StoreConfig
@@ -65,7 +67,7 @@ def read_work_item_comments(
     return tuple(comments)
 
 
-def append_work_item_comment(*, path: StoreConfig, work_item_id: str, body: str) -> None:
+def append_work_item_comment(*, path: StoreConfig | Path, work_item_id: str, body: str) -> None:
     """Append one comment to a work-item — the write half of the sidecar.
 
     Beads comments are APPEND-ONLY: `bd comments` offers neither an edit nor a
@@ -75,7 +77,8 @@ def append_work_item_comment(*, path: StoreConfig, work_item_id: str, body: str)
     it, because what counts as unusable depends on where the body is bound —
     the goal brief, a handoff export, a recurrence bump.
     """
-    make_beads_client(config=path).add_comment(issue_id=work_item_id, body=body)
+    config = resolve_store_config(cwd=path, work_items_arg=None) if isinstance(path, Path) else path
+    make_beads_client(config=config).add_comment(issue_id=work_item_id, body=body)
 
 
 def _comment_field_str(*, value: object) -> str | None:

@@ -43,13 +43,14 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_correlation import (
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import DispatchOutcome
 from livespec_orchestrator_beads_fabro.commands._dispatcher_goal import minijinja_openers_in_text
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import JournalFile
-from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import store_config
 from livespec_orchestrator_beads_fabro.effects import AttemptFailure, attempt
 from livespec_orchestrator_beads_fabro.errors import (
     BeadsCommandError,
     BeadsConnectionError,
     BeadsMappingError,
     BeadsTenantMissingError,
+    ConnectionPrefixMissingError,
+    LivespecConfigUnreadableError,
     WorkItemNotFoundError,
 )
 from livespec_orchestrator_beads_fabro.types import WorkItem
@@ -71,6 +72,8 @@ _LEDGER_WRITE_ERRORS = (
     BeadsConnectionError,
     BeadsMappingError,
     BeadsTenantMissingError,
+    ConnectionPrefixMissingError,
+    LivespecConfigUnreadableError,
 )
 
 _UNREPORTED = "(not reported by the forge view)"
@@ -113,6 +116,7 @@ def record_base_advanced_after_arming(
         pr_number=outcome.pr_number,
         pr_head=measured.pr_head,
         default_branch_tip=measured.default_branch_tip,
+        resume_refusals=measured.resume_refusals,
     )
     body = _with_conflict_measurement_failure(
         body=body,
@@ -130,7 +134,7 @@ def record_base_advanced_after_arming(
         return
     written = attempt(
         action=lambda: append_work_item_comment(
-            path=store_config(repo=repo),
+            path=repo,
             work_item_id=item.id,
             body=body,
         ),
@@ -154,7 +158,7 @@ def record_base_advanced_after_arming(
     )
 
 
-def base_advanced_comment_body(
+def base_advanced_comment_body(  # noqa: PLR0913 -- each measured record field is explicit.
     *,
     work_item_id: str,
     run_id: str | None,
@@ -162,6 +166,7 @@ def base_advanced_comment_body(
     pr_number: int | None,
     pr_head: str | None,
     default_branch_tip: str | None,
+    resume_refusals: tuple[str, ...] = (),
 ) -> str:
     """Render the overtaken-arming record. PURE, so each claim is testable in isolation."""
     return _comment_body(
@@ -170,10 +175,11 @@ def base_advanced_comment_body(
         work_item_id=work_item_id,
         pr_number=pr_number,
         names=(run_id, factory, pr_head, default_branch_tip),
+        resume_refusals=resume_refusals,
     )
 
 
-def merge_poll_budget_exhausted_comment_body(
+def merge_poll_budget_exhausted_comment_body(  # noqa: PLR0913 -- mirrors the base-advance record shape.
     *,
     work_item_id: str,
     run_id: str | None,
@@ -181,6 +187,7 @@ def merge_poll_budget_exhausted_comment_body(
     pr_number: int | None,
     pr_head: str | None,
     default_branch_tip: str | None,
+    resume_refusals: tuple[str, ...] = (),
 ) -> str:
     """Render the exhausted-budget record: the same facts under its own marker and decision."""
     return _comment_body(
@@ -189,6 +196,7 @@ def merge_poll_budget_exhausted_comment_body(
         work_item_id=work_item_id,
         pr_number=pr_number,
         names=(run_id, factory, pr_head, default_branch_tip),
+        resume_refusals=resume_refusals,
     )
 
 
@@ -199,6 +207,7 @@ def _comment_body(
     work_item_id: str,
     pr_number: int | None,
     names: tuple[str | None, str, str | None, str | None],
+    resume_refusals: tuple[str, ...],
 ) -> str:
     """The record both endings share; only the marker line and the decision differ.
 
@@ -229,6 +238,11 @@ def _comment_body(
         *rendered,
         "",
         f"{left_out} names were left out for not being identifier-shaped.",
+        *(
+            ["", "automatic resume refusal:", *(f"- {refusal}" for refusal in resume_refusals)]
+            if resume_refusals
+            else []
+        ),
         "",
         decision,
     ]

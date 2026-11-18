@@ -14,9 +14,16 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_base_advance import (
+    BaseAdvancedAfterArming,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_base_advance_record import (
+    record_base_advanced_after_arming,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dispatch_lock import (
     dispatch_lock_path,
     release_dispatch_lock,
@@ -77,7 +84,7 @@ def bound_overtaken_resume(
     )
 
 
-def resume_overtaken_item(
+def resume_overtaken_item(  # noqa: PLR0913 -- collaborators are independently injected.
     *,
     args: argparse.Namespace,
     repo: Path,
@@ -85,6 +92,7 @@ def resume_overtaken_item(
     janitor: tuple[str, ...] | None,
     admit_and_dispatch: Callable[..., DispatchOutcome],
     work_item_id: str,
+    base_advanced: BaseAdvancedAfterArming | None = None,
 ) -> DispatchOutcome:
     """Resume the item through the path `resume --item` takes, in this invocation.
 
@@ -108,6 +116,33 @@ def resume_overtaken_item(
     pull_request = gather.observation.pull_request
     refusals = resume_refusals(observation=gather.observation)
     if refusals or anchor is None or pull_request is None:
+        named_refusals = refusals or (_UNANCHORED_REFUSAL,)
+        outcome = DispatchOutcome(
+            work_item_id=item.id,
+            status="blocked",
+            stage="merge-poll",
+            pr_number=pull_request,
+            merge_sha=None,
+            detail=(
+                "base-advanced-after-arming: the automatic resume was refused: "
+                + "; ".join(named_refusals)
+            ),
+            base_advanced=(
+                replace(base_advanced, resume_refusals=named_refusals)
+                if base_advanced is not None
+                else None
+            ),
+        )
+        # The automatic path still owns the same pre-transition durable record
+        # as an overtaken pull request that never entered a resume.  A regular
+        # `resume --item` has no overtaking measurement and deliberately leaves
+        # this as a no-op.
+        record_base_advanced_after_arming(
+            repo=repo,
+            item=item,
+            outcome=outcome,
+            journal=journal,
+        )
         write_blocked_state_and_reconcile(
             repo=repo,
             item_id=item.id,
@@ -124,17 +159,7 @@ def resume_overtaken_item(
                 "outcome_status": "blocked",
             }
         )
-        return DispatchOutcome(
-            work_item_id=item.id,
-            status="blocked",
-            stage="merge-poll",
-            pr_number=pull_request,
-            merge_sha=None,
-            detail=(
-                "base-advanced-after-arming: the automatic resume was refused: "
-                + "; ".join(refusals or (_UNANCHORED_REFUSAL,))
-            ),
-        )
+        return outcome
     journal.append(
         record=resume_journal_record(
             work_item_id=item.id,
