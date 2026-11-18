@@ -1929,7 +1929,7 @@ def test_render_run_config_overlay_projects_gh_mint_helper_for_target_without_sc
     assert rendered is not None
     env_table_at = rendered.index("[environments.livespec-ci.env]")
     prepare_steps = rendered[:env_table_at]
-    assert "/workspace/.livespec-gh-refresh/bin/mint_app_token.py" in prepare_steps
+    assert f"{DEFAULT_SANDBOX_GH_REFRESH_ROOT}/bin/mint_app_token.py" in prepare_steps
     assert "$PWD/.claude-plugin/scripts/bin/mint_app_token.py" not in prepare_steps
     steps = steps_in(block=rendered)
     # The wrapper's fixed tail is a fetched helper below the bundle root: the
@@ -1983,7 +1983,7 @@ def test_render_run_config_overlay_ignores_target_repo_mint_helper_when_present(
     env_table_at = rendered.index("[environments.livespec-ci.env]")
     prepare_steps = rendered[:env_table_at]
     assert str(target_helper) not in prepare_steps
-    assert "/workspace/.livespec-gh-refresh/bin/mint_app_token.py" in prepare_steps
+    assert f"{DEFAULT_SANDBOX_GH_REFRESH_ROOT}/bin/mint_app_token.py" in prepare_steps
 
 
 def test_projected_gh_wrapper_publishes_for_target_without_scripts(
@@ -2018,13 +2018,9 @@ def _assert_projected_gh_wrapper_publishes(
 ) -> None:
     monkeypatch.setenv("GITHUB_APP_ID", "42")
     monkeypatch.setenv("GITHUB_PRIVATE_KEY", "stub-pem")
-    # The production bundle root is the absolute in-sandbox path
-    # /workspace/.livespec-gh-refresh. This test lands the fetched bundle there
-    # and EXECUTES the rendered prepare script for real, so without redirecting
-    # that root both would write at the RUNNER's filesystem root: refused under
-    # uid 1000 (`mkdir: Permission denied`, measured), and under uid 0 it would
-    # write into a real /workspace. Redirect it into tmp_path so the test stays
-    # hermetic under both uids.
+    # The production bundle root lives under the sandbox plugins root. This test
+    # executes the rendered prepare script for real, so redirect that root into
+    # tmp_path to keep the script hermetic under both uid 0 and uid 1000.
     sandbox_root = tmp_path / "sandbox-bundle"
     monkeypatch.setenv(SANDBOX_GH_REFRESH_ROOT_ENV_VAR, str(sandbox_root))
     if target_helper_source is not None:
@@ -2049,7 +2045,8 @@ def _assert_projected_gh_wrapper_publishes(
     for script in scripts:
         assert (
             DEFAULT_SANDBOX_GH_REFRESH_ROOT not in script
-            or "root=${LIVESPEC_SANDBOX_GH_REFRESH_ROOT:-/workspace/.livespec-gh-refresh}" in script
+            or "root=${LIVESPEC_SANDBOX_GH_REFRESH_ROOT:-${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-gh-refresh}"
+            in script
         )
     # The payload must never ride in one exec slot above the cap again
     # (bd-ib-gnli): Linux caps a SINGLE argument or environment string at
