@@ -218,3 +218,38 @@ def test_pass_covers_filing_terminal_paths_and_registration(
         workflow="nightly.yml", outcome=outcome, repo=tmp_path, runner=object()
     )
     assert "filed first, second" in capsys.readouterr().out
+
+
+def test_file_job_stamps_key_even_when_capture_fails_after_creating_the_item(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(filing, "new_work_item_id", lambda **_: "bd-ib-new")
+    stamp = {
+        "issue_id": "bd-ib-new",
+        "add_labels": ["breakage:nightly.yml"],
+        "metadata": {"breakage_key": "nightly.yml:tests:abc"},
+    }
+
+    unrouted = _Client()
+    assert _file_job(context=_context(client=unrouted), capture=lambda **_: IOFailure("no")) == (
+        None,
+        "unfiled nightly.yml:tests:abc: capture work item was not routed",
+    )
+    assert unrouted.updates == [stamp]
+
+    def _raise(**_: object) -> IOSuccess[str]:
+        raise OSError("annotation write failed")
+
+    raised = _Client()
+    assert _file_job(context=_context(client=raised), capture=_raise) == (
+        None,
+        "unfiled nightly.yml:tests:abc: capture work item: annotation write failed",
+    )
+    assert raised.updates == [stamp]
+
+    both = _Client(fail_update=True)
+    assert _file_job(context=_context(client=both), capture=lambda **_: IOFailure("no")) == (
+        None,
+        "unfiled nightly.yml:tests:abc: capture work item was not routed;"
+        " record breakage key: unreachable",
+    )
