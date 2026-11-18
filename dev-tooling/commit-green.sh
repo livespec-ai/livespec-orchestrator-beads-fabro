@@ -71,6 +71,64 @@ seeded_open_red_declared() {
     grep -q '^##[[:space:]]\+seeded-open-red\([[:space:]]\|$\)' "$handoff"
 }
 
+seed_red_commit() {
+    # The resumed seed's own open Red: the first commit under the seed head that is
+    # not an engine checkpoint. It must carry TDD-Red trailers and no Green trailer,
+    # so a seeded run still proves a failing Red existed.
+    local seed_head="${LIVESPEC_RESUME_PUBLISHED_HEAD:-}"
+    local index=0
+    local ref=""
+    [[ -n "$seed_head" ]] || return 1
+    git cat-file -e "${seed_head}^{commit}" 2>/dev/null || return 1
+    while (( index < CHECKPOINT_LIMIT )); do
+        ref="${seed_head}~${index}"
+        git rev-parse --verify --quiet "${ref}^{commit}" >/dev/null || return 1
+        if ! checkpoint_commit "$ref"; then
+            open_seed_red "$ref" || return 1
+            git rev-parse "$ref"
+            return 0
+        fi
+        ((index += 1))
+    done
+    return 1
+}
+
+rebuild_seeded_red() {
+    # Re-create the seed's Red as a commit on the run's base: the base tree with the
+    # paths the seed's Red changed taken from the carried tree, under the Red's own
+    # message (its TDD-Red trailers). What the carried tree adds beyond those paths
+    # stays staged for Green's amend.
+    local base="$1"
+    local seed_red="$2"
+    local index_file=""
+    local path=""
+    local entry=""
+    local mode=""
+    local rest=""
+    local blob=""
+    local tree=""
+    local rebuilt=""
+    index_file="$(git rev-parse --git-path livespec-seed-red-index)"
+    rm -f "$index_file"
+    GIT_INDEX_FILE="$index_file" git read-tree "$base" || return 2
+    while IFS= read -r path; do
+        entry="$(git ls-tree HEAD -- "$path")"
+        if [[ -z "$entry" ]]; then
+            GIT_INDEX_FILE="$index_file" git update-index --force-remove -- "$path" || return 2
+        else
+            mode="${entry%% *}"
+            rest="${entry#* }"
+            blob="${rest#* }"
+            blob="${blob%%$'\t'*}"
+            GIT_INDEX_FILE="$index_file" git update-index --add --cacheinfo "$mode,$blob,$path" || return 2
+        fi
+    done < <(git diff-tree --no-commit-id --name-only -r --root "$seed_red")
+    tree="$(GIT_INDEX_FILE="$index_file" git write-tree)" || return 2
+    rm -f "$index_file"
+    rebuilt="$(git log -1 --format=%B "$seed_red" | git commit-tree "$tree" -p "$base" -F -)" || return 2
+    git reset --soft "$rebuilt" || return 2
+}
+
 current_engine_run_id() {
     local branch=""
     if [[ -n "${FABRO_RUN_ID:-}" ]]; then
@@ -135,13 +193,22 @@ fold_checkpoints() {
         ((depth += 1))
         ref="HEAD~${depth}"
     done
-    if ! seeded_open_red_declared || ! open_seed_red "$ref"; then
-        printf '%s\n' "current run's own Red commit was not found beneath checkpoint commits ($(red_search_evidence "$depth"))"
-        return 2
+    if seeded_open_red_declared && open_seed_red "$ref"; then
+        if (( depth > 0 )); then
+            git reset --soft "HEAD~${depth}"
+        fi
+        return
     fi
-    if (( depth > 0 )); then
-        git reset --soft "HEAD~${depth}"
+    # The engine's run branch hangs off the master base and snapshots the seeded tree,
+    # so the seed's own Red commit never reaches this history and its Factory-Run-Id
+    # names the EARLIER run (bd-ib-5ypy5v). Resolve it from the resumed seed itself.
+    seed_red=""
+    if seeded_open_red_declared && seed_red="$(seed_red_commit)" && [[ -n "$seed_red" ]]; then
+        rebuild_seeded_red "$(git rev-parse "$ref")" "$seed_red"
+        return
     fi
+    printf '%s\n' "current run's own Red commit was not found beneath checkpoint commits ($(red_search_evidence "$depth"))"
+    return 2
 }
 
 append_failure_details() {
