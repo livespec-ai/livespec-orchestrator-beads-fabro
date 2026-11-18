@@ -70,11 +70,17 @@ def test_the_host_timer_surveys_only_the_live_factories() -> None:
     and neither is `legacy`, the hp-xubuntu :32276 instance retired and
     removed from the table on 2026-10-24 (plan fabro-currency). `candidate` is
     gmktec's live :32278 mirror of `petri` (maintainer ruling 2026-11-02, plan
-    fabro-currency), so its runs are reconciled too.
+    fabro-currency), so its runs are reconciled too. The dedicated
+    `homelab-worker-arm64` lane is also active, so its runs must be reconciled
+    alongside the two amd64 lanes.
     """
     configured = dispatcher_block(cwd=_REPO_ROOT)
 
-    assert declared_factory_names(block=configured) == ("candidate", "petri")
+    assert declared_factory_names(block=configured) == (
+        "candidate",
+        "homelab-worker-arm64",
+        "petri",
+    )
 
 
 def test_the_timer_counts_its_interval_from_the_end_of_the_previous_pass() -> None:
