@@ -85,6 +85,37 @@ def test_scenario285_implement_completion_no_longer_routes_to_implementation_dif
     assert ("implement_completion", "implementation_diff") not in pairs
 
 
+def test_scenario285_an_unlabelled_seeded_red_without_a_test_skips_commit_red(
+    tmp_path: Path,
+) -> None:
+    """A carried tree with no Red test reaches Green without an empty Red commit."""
+    repo = _scratch_repo(tmp_path=tmp_path)
+    (repo / "tracked.txt").write_text("carried implementation\n", encoding="utf-8")
+    _run(cwd=repo, args=["git", "commit", "-qam", "carried implementation"])
+    _run(
+        cwd=repo,
+        args=["git", "commit", "--allow-empty", "-qm", "fabro(seed): red (success)"],
+    )
+    handoff = repo / ".git" / "livespec-implement-handoff.md"
+    handoff.write_text("## red\nNo test was written on this seeded tree.\n", encoding="utf-8")
+
+    graph = _graph()
+    assert "red_unlabelled_seed_route" in graph.nodes
+    script = graph.nodes["red_unlabelled_seed_route"]["script"].replace(
+        "{{ inputs.default_branch }}", "master"
+    )
+    route = _run(cwd=repo, args=["sh", "-c", script], check=False)
+
+    assert route.returncode == 0, route.stderr
+    assert route.stdout == '{"preferred_next_label":"carried"}\n'
+    edges = {
+        (edge.source, edge.destination, edge.attributes.get("condition")) for edge in graph.edges
+    }
+    assert ("red", "red_unlabelled_seed_route", None) in edges
+    assert ("red_unlabelled_seed_route", "green_admission", "preferred_label=carried") in edges
+    assert ("red", "commit_red", None) not in edges
+
+
 def test_scenario285_test_wrong_reset_restores_the_dispatch_base(tmp_path: Path) -> None:
     """A test-wrong lap leaves its handoff but removes all branch changes."""
     repo = _scratch_repo(tmp_path=tmp_path)
