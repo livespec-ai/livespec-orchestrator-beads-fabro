@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.343.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.0...v0.343.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* red — a seeded Red the engine checkpoint chain never carried is rebuilt from the seed for commit_green (bd-ib-5ypy5v) ([2609e6d](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/2609e6da2918ce501de2ad645ec8d474d1040e31))
+
 ## [0.343.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.342.0...v0.343.0) (2026-11-18)
 
 
