@@ -811,7 +811,7 @@ else
     rcout=$(ready_check); rcrc=$?; echo "$(date -u +%FT%TZ) $rcout"
     if [ $rcrc = 0 ]; then exit_cause=""; break; fi
     ready_refused "$rcout"
-    sleep "$FLEET_LAUNCH_POLL_S"
+    nap "$FLEET_LAUNCH_POLL_S"
   done
 fi
 host_only_screen
@@ -954,7 +954,7 @@ while :; do
       ensure_ticket
       yield_ticket repository-hold
       log_repository_hold
-      sleep "$FLEET_LAUNCH_POLL_S"
+      nap "$FLEET_LAUNCH_POLL_S"
       continue
     fi
     if canary_held; then
@@ -963,7 +963,7 @@ while :; do
       ensure_ticket
       yield_ticket canary-hold
       log_canary_hold
-      sleep "$FLEET_LAUNCH_POLL_S"
+      nap "$FLEET_LAUNCH_POLL_S"
       continue
     fi
     if [ -n "$ticket" ] && [ -f "$ticket" ]; then
@@ -1011,18 +1011,18 @@ while :; do
     elif ! fleet_green; then
       echo "$(date -u +%FT%TZ) fleet not green: $(fleet_summary)"
       head_preflight_while_capped
-      sleep "$FLEET_LAUNCH_POLL_S"; continue
+      nap "$FLEET_LAUNCH_POLL_S"; continue
     fi
     # Re-check the ready set before spending a preflight, so a launcher whose item left the ready set
     # while it waited exits instead of burning one (bounded by the same retry rule as the first check).
     # A seat-gated release stays blocked until its valve runs after the bind, so it is not re-checked here.
     if [ -z "${RELEASE_BLOCKED:-}" ]; then
       rcout=$(ready_check); rcrc=$?
-      if [ $rcrc != 0 ]; then ready_refused "$rcout"; sleep "$FLEET_LAUNCH_POLL_S"; continue; fi
+      if [ $rcrc != 0 ]; then ready_refused "$rcout"; nap "$FLEET_LAUNCH_POLL_S"; continue; fi
     fi
     # A held gmktec launcher skips its model-backed preflight while the hold lasts, so it runs once
     # after the lift, just before launch.
-    if [ "$FIFO_CLASS" != hl ] && gmk_held; then echo "$(date -u +%FT%TZ) hold file present ($GMK_HOLD_FILE): $(gmk_hold_text): preflight skipped while held, wait"; sleep "$FLEET_LAUNCH_POLL_S"; continue; fi
+    if [ "$FIFO_CLASS" != hl ] && gmk_held; then echo "$(date -u +%FT%TZ) hold file present ($GMK_HOLD_FILE): $(gmk_hold_text): preflight skipped while held, wait"; nap "$FLEET_LAUNCH_POLL_S"; continue; fi
     launch_preflight
     if [ -n "${ONLY_ARM:-}" ]; then
       if arm_green; then
@@ -1037,7 +1037,7 @@ while :; do
           echo "$(date -u +%FT%TZ) under the gmktec mutex: homelab-worker-arm64 no longer green (arm_inflight=$arm_inflight fleet=$fleet): release"; release_lock
         fi
       else echo "$(date -u +%FT%TZ) homelab-worker-arm64 not green: enrolled=$([ -e "$FLEET_LAUNCH_ARM_ENROLLED_FILE" ] && echo yes || echo no) arm_inflight=$arm_inflight cap=$FLEET_LAUNCH_ARM_CAP"; fi
-      sleep "$FLEET_LAUNCH_POLL_S"; continue
+      nap "$FLEET_LAUNCH_POLL_S"; continue
     fi
     if [ -n "${ONLY_HL:-}" ]; then
       if hl_green; then
@@ -1052,7 +1052,7 @@ while :; do
           echo "$(date -u +%FT%TZ) under the gmktec mutex: mi-homelab no longer green (hl=$hl_live fleet=$fleet): release"; release_lock
         fi
       else echo "$(date -u +%FT%TZ) mi-homelab not green: live=$hl_live cap=$(hl_cap)"; fi
-      sleep "$FLEET_LAUNCH_POLL_S"; continue
+      nap "$FLEET_LAUNCH_POLL_S"; continue
     fi
     if [ "$(gmk_target)" = candidate ]; then
       # The gmktec target setting selects the candidate instance: launch onto it only while its live run
@@ -1069,7 +1069,7 @@ while :; do
           echo "$(date -u +%FT%TZ) under the gmktec mutex: candidate no longer green (live=$candidate_live fleet=$fleet): release"; release_lock
         fi
       else echo "$(date -u +%FT%TZ) gmktec candidate not green: live=$candidate_live cap=$(candidate_cap)"; fi
-      sleep "$FLEET_LAUNCH_POLL_S"; continue
+      nap "$FLEET_LAUNCH_POLL_S"; continue
     fi
     if { [ -z "${CAPTURE_NULL:-}" ] || [ "${CAPTURE_EXPECT:-}" = petri ] || [ "${CAPTURE_EXPECT:-}" = candidate ]; } && gmk_green; then
       echo "$(date -u +%FT%TZ) gmktec green (live=$gmk_live hl=$hl_live idle=$gmk_idle fleet=$fleet): queue for the gmktec mutex"
@@ -1082,10 +1082,10 @@ while :; do
         [ -n "$marker" ] && { rm -f "$marker"; marker=""; }
         echo "$(date -u +%FT%TZ) under the gmktec mutex: no longer green (gmktec=$gmk_live fleet=$fleet): release"; release_lock
       fi
-      sleep "$FLEET_LAUNCH_POLL_S"; continue
+      nap "$FLEET_LAUNCH_POLL_S"; continue
     fi
     echo "$(date -u +%FT%TZ) no factory green: gmktec=$gmk_live (idle ${gmk_idle:-?}) markers=$markers fleet=$fleet/$FLEET_CAP"
-    sleep "$FLEET_LAUNCH_POLL_S"
+    nap "$FLEET_LAUNCH_POLL_S"
   done
 
   # Release the launch mutex right after the binding count; the in-flight marker stays until the run
@@ -1136,7 +1136,7 @@ while :; do
     # This launcher has dropped its ticket at the bind: release the marker, re-take the ticket at the same
     # number and poll again, up to the same bound as the first check.
     echo "$(date -u +%FT%TZ) ready-set re-check refused before launch: $rcout"; rm -f "$marker"; marker=""; release_lock
-    ready_refused "$rcout"; ensure_ticket; sleep "$FLEET_LAUNCH_POLL_S"; continue
+    ready_refused "$rcout"; ensure_ticket; nap "$FLEET_LAUNCH_POLL_S"; continue
   fi
   # The configured ACP overrides: one --acp-node argument per non-empty, non-comment line, in file order.
   ACP_ARGS=()

@@ -2780,6 +2780,50 @@ os.execv(sys.argv[1], sys.argv[1:])' "$launcher" bd-ib-term > "$STUB_RM_PROBE_LO
         signal_during_hold "$RESUME_LAUNCHER" resume HUP 129 'signal HUP' "$signal_attempt"
     done
 
+    # A single INT delivered straight to the launcher shell while it sits in the
+    # repository-hold wait must end it at once.  The wait is a long poll here so a
+    # foreground `sleep` would hold bash's cooperative exit for the whole poll and
+    # then discard the INT (the bash 5.2/5.3 behaviour that made the jittered INT
+    # cases flaky under load); an interruptible wait exits within the bound.
+    single_int_during_long_hold() {
+        local launcher="$1" label="$2" sig_pid sig_rc deadline
+        prepare_312_case "single-int-long-hold-$label"
+        export FLEET_LAUNCH_POLL_S=5
+        set_hold "$TENANT_HOLD" 'reason: single-int'
+        PATH="$STUB/rm-probe:$PATH" ONLY_GMK=1 TICKET_NS=9 FLEET_LAUNCH_MAX_WAIT_S=86400 python3 -c 'import os, signal, sys
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+os.setsid()
+os.execv(sys.argv[1], sys.argv[1:])' "$launcher" bd-ib-term > "$STUB_RM_PROBE_LOG_SOURCE" 2>&1 &
+        sig_pid=$!
+        if ! wait_for_line "$STUB_RM_PROBE_LOG_SOURCE" 'repository hold present' "$HOLD_LINE_WAIT_S"; then
+            fail "$label never yielded on the repository hold before the single INT"
+            stop_launcher "$sig_pid"
+            wait "$sig_pid" 2>/dev/null
+            return 0
+        fi
+        sleep 0.3
+        kill -INT "$sig_pid" 2>/dev/null
+        deadline=$(( $(date +%s) + 2 ))
+        while kill -0 "$sig_pid" 2>/dev/null && [ "$(date +%s)" -lt "$deadline" ]; do sleep 0.05; done
+        if kill -0 "$sig_pid" 2>/dev/null; then
+            stop_launcher "$sig_pid"
+            wait "$sig_pid" 2>/dev/null
+            fail "$label swallowed a single INT during a long repository-hold poll"
+            return 0
+        fi
+        wait "$sig_pid"
+        sig_rc=$?
+        if [ "$sig_rc" = 130 ] && line_has_all "$STUB_RM_PROBE_LOG_SOURCE" 'terminal:' 'cause=signal INT'; then
+            pass "$label exits 130 on one INT during a long repository-hold poll"
+        else
+            fail "$label did not record one INT during a long poll as signal INT (rc=$sig_rc)"
+            tail -n 4 "$STUB_RM_PROBE_LOG_SOURCE" >&2
+        fi
+        export FLEET_LAUNCH_POLL_S=0.01
+    }
+    single_int_during_long_hold "$LAUNCHER" impl
+    single_int_during_long_hold "$RESUME_LAUNCHER" resume
+
     # A separate gate pauses dispatch after it has recorded its mutex holder.
     # TERM must remove both that owned mutex and its ticket before the process
     # exits, rather than leaving the next launcher blocked behind either.

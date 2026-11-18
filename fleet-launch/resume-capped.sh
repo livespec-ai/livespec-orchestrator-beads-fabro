@@ -284,7 +284,7 @@ wait_for_listing() {
         return
       fi
     fi
-    sleep "$FLEET_LAUNCH_POLL_S"
+    nap "$FLEET_LAUNCH_POLL_S"
   done
 }
 
@@ -305,41 +305,41 @@ while :; do
   if repository_hold_applies resume; then
     yield_ticket repository-hold
     log_repository_hold
-    sleep "$FLEET_LAUNCH_POLL_S"
+    nap "$FLEET_LAUNCH_POLL_S"
     continue
   fi
   if canary_held; then
     yield_ticket canary-hold
     log_canary_hold
-    sleep "$FLEET_LAUNCH_POLL_S"
+    nap "$FLEET_LAUNCH_POLL_S"
     continue
   fi
   restore_ticket
   ahead=$(oldest_live_ticket "$QUEUE")
   if [ "$ahead" != "$ticket" ]; then
     echo "$(date -u +%FT%TZ) queued behind an older gmktec ticket: $(tr '\n' ' ' < "$ahead" 2>/dev/null | sed 's/ *$//')"
-    sleep "$FLEET_LAUNCH_POLL_S"
+    nap "$FLEET_LAUNCH_POLL_S"
     continue
   fi
   # The gmktec hold, unless the freeze allowlist or priority 1 releases this item.
   if [ -e "$GMK_HOLD_FILE" ] && gmk_held; then
     echo "$(date -u +%FT%TZ) hold file present ($GMK_HOLD_FILE): $(gmk_hold_text): wait"
-    sleep "$FLEET_LAUNCH_POLL_S"
+    nap "$FLEET_LAUNCH_POLL_S"
     continue
   fi
-  if ! take_mutex; then sleep "$FLEET_LAUNCH_POLL_S"; continue; fi
+  if ! take_mutex; then nap "$FLEET_LAUNCH_POLL_S"; continue; fi
   read_fleet_cap
   read_boards direct
   if [ "$fleet" = U ] || [ "$FLEET_CAP" -le 0 ] || [ "$fleet" -ge "$FLEET_CAP" ]; then
     echo "$(date -u +%FT%TZ) fleet at cap under mutex: fleet=$fleet cap=$FLEET_CAP; keep FIFO ticket"
     release_lock
-    sleep "$FLEET_LAUNCH_POLL_S"
+    nap "$FLEET_LAUNCH_POLL_S"
     continue
   fi
   if ! write_marker; then
     echo "$(date -u +%FT%TZ) could not write resume in-flight marker; keep FIFO ticket"
     release_lock
-    sleep "$FLEET_LAUNCH_POLL_S"
+    nap "$FLEET_LAUNCH_POLL_S"
     continue
   fi
   if script_changed; then
@@ -355,7 +355,7 @@ while :; do
     yield_ticket repository-hold
     log_repository_hold
     release_lock
-    sleep "$FLEET_LAUNCH_POLL_S"
+    nap "$FLEET_LAUNCH_POLL_S"
     continue
   fi
   if canary_held; then
@@ -364,7 +364,7 @@ while :; do
     yield_ticket canary-hold
     log_canary_hold
     release_lock
-    sleep "$FLEET_LAUNCH_POLL_S"
+    nap "$FLEET_LAUNCH_POLL_S"
     continue
   fi
   if [ -e "$GMK_HOLD_FILE" ] && gmk_held; then
@@ -372,7 +372,7 @@ while :; do
     marker=""
     release_lock
     echo "$(date -u +%FT%TZ) hold file present at the launch point ($GMK_HOLD_FILE): released the mutex and marker, keeping the ticket"
-    sleep "$FLEET_LAUNCH_POLL_S"
+    nap "$FLEET_LAUNCH_POLL_S"
     continue
   fi
   drop_ticket
