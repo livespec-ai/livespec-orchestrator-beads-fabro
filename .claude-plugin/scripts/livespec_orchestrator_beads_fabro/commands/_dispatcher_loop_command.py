@@ -111,7 +111,12 @@ def _loop_in_pass(*, args: argparse.Namespace) -> int:
     if size_exit is not None:
         return size_exit
     with profile.during(name="candidate-selection"):
-        selected_candidates = candidates(args=args, items=items, repo=repo)[: args.budget]
+        selected_candidates = candidates(
+            args=args,
+            items=items,
+            repo=repo,
+            journal=None if args.dry_run else journal,
+        )[: args.budget]
     # `--item` narrows BOTH legs to the named ids, and `--budget` bounds the
     # pass as a whole rather than each leg separately.
     rework = ReworkPass(
