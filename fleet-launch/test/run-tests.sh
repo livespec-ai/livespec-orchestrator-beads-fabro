@@ -2540,6 +2540,32 @@ prepare_312_case() {
     export STUB_RM_PROBE_LOG_SOURCE="$CASE_DIR/probed.log"
     : > "$STUB_RM_PROBE_LOG_SOURCE"
 }
+# start_signal_contention: occupy the available test CPUs while the single-
+# delivery signal exercise runs.  A swallowed signal was observed only when a
+# launcher's short hold-poll child could win this scheduling race.
+start_signal_contention() {
+    local capacity workers worker
+    capacity=$(nproc 2>/dev/null || echo 1)
+    case $capacity in ''|*[!0-9]*|0) capacity=1 ;; esac
+    if [ -r /sys/fs/cgroup/cpu.max ]; then
+        read -r load_quota load_period < /sys/fs/cgroup/cpu.max
+        case "$load_quota:$load_period" in
+            *[!0-9:]*|:*) ;;
+            *) capacity=$(( (load_quota + load_period - 1) / load_period )) ;;
+        esac
+    fi
+    case $capacity in ''|*[!0-9]*|0) capacity=1 ;; esac
+    workers="${LIVESPEC_TEST_PARALLELISM:-$capacity}"
+    case $workers in ''|*[!0-9]*|0) workers=1 ;; esac
+    [ "$workers" -le "$capacity" ] || workers=$capacity
+    [ "$workers" -le 4 ] || workers=4
+    worker=0
+    while [ "$worker" -lt "$workers" ]; do
+        while :; do :; done &
+        LOAD_PIDS="$LOAD_PIDS $!"
+        worker=$((worker + 1))
+    done
+}
 count_matching() { grep -cF -- "$2" "$1" 2>/dev/null || true; }
 # queue_ticket_number: the number of the one ticket in the case's queue directory.
 queue_ticket_number() {
@@ -2702,11 +2728,11 @@ os.execv(sys.argv[1], sys.argv[1:])' "$launcher" bd-ib-term > "$STUB_RM_PROBE_LO
     # reported as a failed assertion, never mistaken for a signal attribution.
     SIGNAL_EXIT_GRACE_S=${SIGNAL_EXIT_GRACE_S:-5}
     wait_for_signal_exit() {
-        local pid="$1" sig="$2" log="$3" deadline retry_due
+        local pid="$1" sig="$2" log="$3" retry="$4" deadline retry_due
         deadline=$(( $(date +%s) + SIGNAL_EXIT_GRACE_S ))
         retry_due=$(date +%s)
         while kill -0 "$pid" 2>/dev/null && [ "$(date +%s)" -lt "$deadline" ]; do
-            if ! grep -qF 'terminal:' "$log" && [ "$(date +%s)" -ge "$retry_due" ]; then
+            if [ "$retry" = yes ] && ! grep -qF 'terminal:' "$log" && [ "$(date +%s)" -ge "$retry_due" ]; then
                 kill -"$sig" "$pid" 2>/dev/null || true
                 retry_due=$(( $(date +%s) + 1 ))
             fi
@@ -2723,7 +2749,7 @@ os.execv(sys.argv[1], sys.argv[1:])' "$launcher" bd-ib-term > "$STUB_RM_PROBE_LO
     # an INT or HUP that lands in the repository-hold wait must be recorded as
     # that signal, not as the TERM description the wait loop preloads.
     signal_during_hold() {
-        local launcher="$1" label="$2" sig="$3" want_rc="$4" want_cause="$5" attempt="$6" sig_pid sig_rc
+        local launcher="$1" label="$2" sig="$3" want_rc="$4" want_cause="$5" attempt="$6" retry="$7" stop_after_failure="$8" sig_pid sig_rc
         prepare_312_case "signal-$sig-$label-$attempt"
         export FLEET_LAUNCH_POLL_S=0.01
         set_hold "$TENANT_HOLD" "reason: signal-$sig"
@@ -2747,12 +2773,14 @@ os.execv(sys.argv[1], sys.argv[1:])' "$launcher" bd-ib-term > "$STUB_RM_PROBE_LO
             fail "$label never yielded on the repository hold before $sig"
             stop_launcher "$sig_pid"
             wait "$sig_pid" 2>/dev/null
+            [ "$stop_after_failure" = yes ] && return 1
             return 0
         fi
-        if ! wait_for_signal_exit "$sig_pid" "$sig" "$STUB_RM_PROBE_LOG_SOURCE"; then
+        if ! wait_for_signal_exit "$sig_pid" "$sig" "$STUB_RM_PROBE_LOG_SOURCE" "$retry"; then
             wait "$sig_pid" 2>/dev/null
             fail "$label did not exit after bounded $sig delivery during the repository-hold wait"
             tail -n 4 "$STUB_RM_PROBE_LOG_SOURCE" >&2
+            [ "$stop_after_failure" = yes ] && return 1
             return 0
         fi
         wait "$sig_pid"
@@ -2760,24 +2788,44 @@ os.execv(sys.argv[1], sys.argv[1:])' "$launcher" bd-ib-term > "$STUB_RM_PROBE_LO
         if [ "$sig_rc" = "$want_rc" ] \
             && [ "$(count_matching "$STUB_RM_PROBE_LOG_SOURCE" 'terminal:')" = 1 ] \
             && line_has_all "$STUB_RM_PROBE_LOG_SOURCE" 'terminal:' 'item=bd-ib-term' 'ticket=' "cause=$want_cause" \
+            && [ -z "$(find "$FLEET_LAUNCH_GMK_QUEUE_DIR" -type f -print -quit)" ] \
+            && [ ! -d "$FLEET_LAUNCH_GMK_LOCK_DIR" ] \
             && ! grep -qF -- 'cause=resume gave up:' "$STUB_RM_PROBE_LOG_SOURCE" \
             && { [ "$sig" = TERM ] || ! grep -qF -- 'cause=signal TERM' "$STUB_RM_PROBE_LOG_SOURCE"; }; then
             pass "$label records a $sig during the repository-hold wait as $want_cause, not as TERM"
         else
             fail "$label did not record $sig as $want_cause (rc=$sig_rc)"
             tail -n 4 "$STUB_RM_PROBE_LOG_SOURCE" >&2
+            [ "$stop_after_failure" = yes ] && return 1
         fi
+        return 0
     }
+    # A launcher must not depend on the harness sending a second SIGINT.  Run
+    # the measured resume-hold failure shape 200 times while CPU-contended,
+    # with exactly one directly delivered INT per iteration.
+    start_signal_contention
+    single_int_failures=0
+    for signal_attempt in $(seq 1 "${HARNESS_SINGLE_INT_HOLD_ATTEMPTS:-200}"); do
+        if ! signal_during_hold "$RESUME_LAUNCHER" resume INT 130 'signal INT' "$signal_attempt" no yes; then
+            single_int_failures=1
+            break
+        fi
+    done
+    stop_load
+    if [ "$single_int_failures" = 0 ]; then
+        pass "resume exits from 200 CPU-contended repository-hold waits after one directly delivered INT each time"
+    fi
+
     # The normal gate samples each signal once.  A focused stability run sets
     # HARNESS_SIGNAL_HOLD_ATTEMPTS=200 to repeat every launcher/signal case
     # without multiplying the unrelated Scenario 312 exercises.
     for signal_attempt in $(seq 1 "${HARNESS_SIGNAL_HOLD_ATTEMPTS:-1}"); do
-        signal_during_hold "$LAUNCHER" impl INT 130 'signal INT' "$signal_attempt"
-        signal_during_hold "$LAUNCHER" impl TERM 143 'signal TERM' "$signal_attempt"
-        signal_during_hold "$LAUNCHER" impl HUP 129 'signal HUP' "$signal_attempt"
-        signal_during_hold "$RESUME_LAUNCHER" resume INT 130 'signal INT' "$signal_attempt"
-        signal_during_hold "$RESUME_LAUNCHER" resume TERM 143 'signal TERM' "$signal_attempt"
-        signal_during_hold "$RESUME_LAUNCHER" resume HUP 129 'signal HUP' "$signal_attempt"
+        signal_during_hold "$LAUNCHER" impl INT 130 'signal INT' "$signal_attempt" yes no
+        signal_during_hold "$LAUNCHER" impl TERM 143 'signal TERM' "$signal_attempt" yes no
+        signal_during_hold "$LAUNCHER" impl HUP 129 'signal HUP' "$signal_attempt" yes no
+        signal_during_hold "$RESUME_LAUNCHER" resume INT 130 'signal INT' "$signal_attempt" yes no
+        signal_during_hold "$RESUME_LAUNCHER" resume TERM 143 'signal TERM' "$signal_attempt" yes no
+        signal_during_hold "$RESUME_LAUNCHER" resume HUP 129 'signal HUP' "$signal_attempt" yes no
     done
 
     # A separate gate pauses dispatch after it has recorded its mutex holder.
