@@ -493,6 +493,23 @@ def test_the_recorded_seeded_open_red_endings_route_to_green_admission(attempt: 
     assert _destination(graph=graph, source="red", output=output) == "green_admission", output
 
 
+def test_an_unlabelled_seeded_red_without_a_red_test_skips_commit_red() -> None:
+    """A carried seed cannot fall into a Red command that has no test to commit."""
+    graph = _graph(_IMPLEMENT)
+    red_edges = [edge for edge in graph.edges if edge.source == "red"]
+    fallthrough = [edge.destination for edge in red_edges if "condition" not in edge.attributes]
+
+    assert fallthrough == ["red_unlabelled_seed_route"]
+    assert (
+        _destination(
+            graph=graph,
+            source="red_unlabelled_seed_route",
+            output={"preferred_label": "carried"},
+        )
+        == "green_admission"
+    )
+
+
 @pytest.mark.parametrize(
     ("node", "text", "destination"),
     [
