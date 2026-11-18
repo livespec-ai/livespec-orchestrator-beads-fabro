@@ -46,7 +46,7 @@ fi
 
 HARNESS_SLICE=${1:-all}
 case "$HARNESS_SLICE" in
-    all|scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|queue-position|launcher-reexec|parity|gate-detach|probe-stderr) ;;
+    all|scenario185|scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|queue-position|launcher-reexec|parity|gate-detach|probe-stderr) ;;
     *)
         echo "usage: run-tests.sh [scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|queue-position|launcher-reexec|parity|gate-detach|probe-stderr]" >&2
         exit 2
@@ -171,6 +171,19 @@ fi
 printf 'RUN ID       REPO      STATUS    DATE       DURATION  ITEM\n'
 cat "$rows"
 FABRO_STUB
+
+# The stub merged-pull-request lookup.  The listed-then-refused cases below
+# select one merged result or no result through its number fixture.  It lives
+# on the same prepended PATH as the other host-command stubs.
+cat > "$STUB/bin/gh" <<'GH_STUB'
+#!/usr/bin/env bash
+set -u
+if [ -n "${STUB_MERGED_PR_NUMBER:-}" ]; then
+    printf '[{"number": %s}]\n' "$STUB_MERGED_PR_NUMBER"
+else
+    printf '[]\n'
+fi
+GH_STUB
 
 # The stub credential wrapper, invoked as `wrapper -- <command...>`. It answers
 # for each command the launcher routes through the wrapper, keyed on the
@@ -383,8 +396,13 @@ for argument in "$@"; do
             printf '%s\n' "$item" >> "$STUB_DRIVE_LOG"
             if [ -n "${STUB_DRIVE_FAIL_TIMES:-}" ] \
                 && [ "$(grep -cxF -- "$item" "$STUB_DRIVE_LOG")" -le "$STUB_DRIVE_FAIL_TIMES" ]; then
-                # A drive that exits before its run lists, optionally printing a scripted JSON answer.
+                # A drive that exits before its run lists, or one whose run listed
+                # before its final pass refused, optionally printing a scripted answer.
+                if [ -n "${STUB_DRIVE_LIST_THEN_FAIL:-}" ]; then
+                    printf '%s %s\n' "$server" "$item" > "$STUB_DRIVEN_DIR/$item"
+                fi
                 [ -z "${STUB_DRIVE_FAIL_STDOUT:-}" ] || printf '%s\n' "$STUB_DRIVE_FAIL_STDOUT"
+                [ -z "${STUB_DRIVE_FAIL_STDERR:-}" ] || printf '%s\n' "$STUB_DRIVE_FAIL_STDERR" >&2
                 exit "${STUB_DRIVE_FAIL_RC:-1}"
             fi
             if [ -d "$STUB_LOCK_DIR" ]; then
@@ -509,7 +527,7 @@ case $command_line in
 esac
 SSH_STUB
 
-chmod +x "$STUB/fabro" "$STUB/wrapper" "$STUB/bin/ssh"
+chmod +x "$STUB/fabro" "$STUB/wrapper" "$STUB/bin/ssh" "$STUB/bin/gh"
 
 # --- the throwaway tenant repository ----------------------------------------
 # The launcher fast-forwards the tenant repository to origin/master before it
@@ -656,7 +674,7 @@ new_case() {
     printf '0\n' > "$STUB_WIP_COUNT_FILE"
     printf '5\n' > "$STUB_WIP_CAP_FILE"
     export STUB_WIP_UNREADABLE_FILE="$CASE_DIR/wip-unreadable"
-    unset STUB_DRIVE_FAIL_TIMES STUB_DRIVE_FAIL_RC STUB_DRIVE_FAIL_STDOUT STUB_DRIVE_EXPIRE_SNAPSHOT
+    unset STUB_DRIVE_FAIL_TIMES STUB_DRIVE_FAIL_RC STUB_DRIVE_FAIL_STDOUT STUB_DRIVE_FAIL_STDERR STUB_DRIVE_LIST_THEN_FAIL STUB_DRIVE_EXPIRE_SNAPSHOT STUB_MERGED_PR_NUMBER
     export STUB_DRIVEN_DIR="$CASE_DIR/driven"
     export STUB_DRIVE_LISTED_DIR="$CASE_DIR/listed"
     export STUB_RESUMED_DIR="$CASE_DIR/resumed"
@@ -963,6 +981,51 @@ open_boards() {
     : > "$BOARD_HL"
     printf '8\n' > "$CAP_FILE"
 }
+
+scenario185_listed_then_ready_refused() {
+    # Scenario 185 — A released item's recovery route is decided before
+    # admission and executed per item, and a deferred item keeps its branch.
+    # A final ready-set refusal after this launcher has observed its run is
+    # delivery only when the item's pull request is already merged.
+    scenario "185. a listed run whose final ready-set pass refuses is classified by its pull request"
+    new_case listed-then-ready-refused-merged
+    open_boards
+    export STUB_DRIVE_FAIL_TIMES=1
+    export STUB_DRIVE_FAIL_RC=3
+    export STUB_DRIVE_LIST_THEN_FAIL=1
+    export STUB_DRIVE_FAIL_STDERR='ERROR: requested work-item(s) not in the ready set: bd-ib-delivered'
+    export STUB_MERGED_PR_NUMBER=4963
+    run_launcher bd-ib-delivered
+    if [ "$RC" = 0 ] && grep -qF 'outcome=delivered merged-pr=#4963' "$CASE_DIR/state/bd-ib-delivered-r267.verdict"; then
+        pass "a listed run whose final ready-set pass refuses is recorded as delivered with its merged pull request"
+    else
+        fail "a listed run whose final ready-set pass refused was not recorded as delivered with merged pull request #4963"
+        cat "$CASE_DIR/state/bd-ib-delivered-r267.verdict" >&2
+    fi
+
+    new_case listed-then-ready-refused-unmerged
+    open_boards
+    export STUB_DRIVE_FAIL_TIMES=1
+    export STUB_DRIVE_FAIL_RC=3
+    export STUB_DRIVE_LIST_THEN_FAIL=1
+    export STUB_DRIVE_FAIL_STDERR='ERROR: requested work-item(s) not in the ready set: bd-ib-refused'
+    run_launcher bd-ib-refused
+    if [ "$RC" = 3 ] && grep -qF 'outcome=failed refusal=not-in-ready-set' "$CASE_DIR/state/bd-ib-refused-r267.verdict"; then
+        pass "a listed run whose final ready-set pass refuses without a merged pull request is recorded as refused"
+    else
+        fail "a listed run without a merged pull request did not record its ready-set refusal"
+        cat "$CASE_DIR/state/bd-ib-refused-r267.verdict" >&2
+    fi
+}
+
+if [ "$HARNESS_SLICE" = scenario185 ]; then
+    echo "=== fleet-launch hermetic harness"
+    scenario185_listed_then_ready_refused
+    echo
+    echo "=== fleet-launch hermetic harness: $PASS passed, $FAIL failed"
+    exit "$FAIL"
+fi
+
 echo "=== fleet-launch hermetic harness"
 
 if [ "$HARNESS_SLICE" = all ]; then
@@ -3337,6 +3400,8 @@ else
     fail "an unreadable WIP count held the launch (rc=$RC, dispatches: $(drive_log_items))"
     tail -5 "$CASE_LOG" >&2
 fi
+
+scenario185_listed_then_ready_refused
 
 scenario "26. a drive that exits before its run lists re-takes a ticket for the same item"
 new_case reticket

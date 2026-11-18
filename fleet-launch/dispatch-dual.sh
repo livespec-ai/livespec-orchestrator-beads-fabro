@@ -1234,6 +1234,55 @@ echo "$(date -u +%FT%TZ) target=$target build=$build version=${build_version:-?}
 wait "$drive_pid"; rc=$?
 echo "$(date -u +%FT%TZ) drive rc=$rc"
 echo "$(date -u +%FT%TZ) drive rc=$rc" >> "$OUT/$ITEM-r267.verdict"
+# A dispatcher can list its factory run and then refuse its final ready-set
+# pass because that run's pull request has already merged. That is delivery,
+# not a failed launch. The normal drive process exits 1 for its failed status
+# while preserving the Dispatcher's exit 3 in its JSON payload; the hermetic
+# launcher harness stubs the Dispatcher directly and therefore exits 3 itself.
+final_ready_set_refusal() {
+  local result_file="$1" result_exit="$2"
+  if [ "$result_exit" -eq 3 ] \
+    && grep -qF 'requested work-item(s) not in the ready set' "$OUT/$ITEM-r267.stderr" 2>/dev/null; then
+    return 0
+  fi
+  python3 -I - "$result_file" <<'PY'
+import json
+import sys
+
+try:
+    text = open(sys.argv[1], encoding="utf-8").read()
+    payload = json.loads(text[text.find("{") :])
+except (OSError, ValueError, json.JSONDecodeError):
+    raise SystemExit(1)
+dispatcher = payload.get("dispatcher") if isinstance(payload, dict) else None
+if not isinstance(dispatcher, dict):
+    raise SystemExit(1)
+if dispatcher.get("exit_code") != 3:
+    raise SystemExit(1)
+stderr = dispatcher.get("stderr")
+raise SystemExit(0 if isinstance(stderr, str) and "requested work-item(s) not in the ready set" in stderr else 1)
+PY
+}
+merged_pull_request_number() {
+  local listing number
+  listing=$(cd "$REPO" && gh pr list --head "feat/$ITEM" --state merged --json number --limit 20 2>/dev/null) || return 1
+  number=$(printf '%s' "$listing" | python3 -I -c 'import json,sys
+try:
+    rows=json.load(sys.stdin)
+except json.JSONDecodeError:
+    raise SystemExit(1)
+numbers=[row.get("number") for row in rows if isinstance(row,dict) and isinstance(row.get("number"),int) and row["number"] > 0]
+if numbers: print(max(numbers))') || return 1
+  case "$number" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$number"
+}
+if [ -n "$run_row" ] && final_ready_set_refusal "$OUT/$ITEM-r267.json" "$rc"; then
+  if merged_pr=$(merged_pull_request_number); then
+    echo "$(date -u +%FT%TZ) outcome=delivered merged-pr=#$merged_pr" >> "$OUT/$ITEM-r267.verdict"
+    exit 0
+  fi
+  echo "$(date -u +%FT%TZ) outcome=failed refusal=not-in-ready-set" >> "$OUT/$ITEM-r267.verdict"
+fi
 # A successful drive can submit its run after the listing poll read a shared,
 # still-young snapshot. Read the factory directly once more before classifying
 # that exit as early: re-ticketing an item whose run has already listed can

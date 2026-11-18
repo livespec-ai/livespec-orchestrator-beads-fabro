@@ -10,8 +10,11 @@ launch's journal record never fails the dispatch.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
+import pytest
+from livespec_orchestrator_beads_fabro.commands import _drive_impl_delivery as delivery
 from livespec_orchestrator_beads_fabro.commands._drive_impl_dispatch import (
     CommandRun,
     build_dispatcher_argv,
@@ -73,3 +76,95 @@ def test_a_fault_writing_the_launch_record_does_not_fail_the_dispatch(tmp_path: 
     assert len(runner.calls) == 1
     assert result["status"] == "green"
     assert result["launch"] == "unscoped"
+
+
+def test_a_final_ready_set_refusal_after_a_merged_pull_request_reports_delivery(
+    tmp_path: Path,
+) -> None:
+    class _RefusingRunner:
+        def __call__(self, *, argv: tuple[str, ...], cwd: Path | None = None) -> CommandRun:
+            del argv, cwd
+            return CommandRun(
+                argv=("dispatcher.py",),
+                returncode=3,
+                stdout="",
+                stderr="ERROR: requested work-item(s) not in the ready set: bd-ib-szbxu7\n",
+            )
+
+    result = run_impl_dispatch(
+        repo=tmp_path,
+        work_item_ref=_ITEM,
+        runner=_RefusingRunner(),
+        dispatcher_bin=tmp_path / "dispatcher.py",
+        acp_nodes=(),
+        workflow_name=None,
+        identity=None,
+        merged_pull_request_lookup=lambda _repo, _branch: 4963,
+    )
+
+    assert result["summary"] == (
+        "Dispatcher delivered bd-ib-szbxu7: merged pull request #4963 landed before its final "
+        "ready-set refusal."
+    )
+
+
+def test_only_the_final_ready_set_refusal_looks_up_a_merged_pull_request(tmp_path: Path) -> None:
+    def lookup(_repo: Path, _branch: str) -> int | None:
+        raise AssertionError("an unrelated Dispatcher failure must not query pull requests")
+
+    assert (
+        delivery.delivered_merged_pull_request(
+            repo=tmp_path,
+            work_item_ref=_ITEM,
+            returncode=1,
+            stderr="Dispatcher failed before listing a run",
+            lookup=lookup,
+        )
+        is None
+    )
+
+
+def test_a_final_ready_set_refusal_uses_the_default_merged_pull_request_lookup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(delivery, "merged_pull_request_number", lambda **_kwargs: 4963)
+
+    assert (
+        delivery.delivered_merged_pull_request(
+            repo=tmp_path,
+            work_item_ref=_ITEM,
+            returncode=3,
+            stderr="ERROR: requested work-item(s) not in the ready set",
+            lookup=None,
+        )
+        == 4963
+    )
+
+
+@pytest.mark.parametrize(
+    ("gh", "returncode", "stdout", "expected"),
+    [
+        (None, 0, "[]", None),
+        ("gh", 1, "[]", None),
+        ("gh", 0, "{}", None),
+        ("gh", 0, '[null, {"number": 0}, {"number": 4963}]', 4963),
+    ],
+)
+def test_the_merged_pull_request_lookup_handles_forge_failures_and_results(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    gh: str | None,
+    returncode: int,
+    stdout: str,
+    expected: int | None,
+) -> None:
+    monkeypatch.setattr(delivery.shutil, "which", lambda _command: gh)
+    monkeypatch.setattr(
+        delivery.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=("gh",), returncode=returncode, stdout=stdout, stderr=""
+        ),
+    )
+
+    assert delivery.merged_pull_request_number(repo=tmp_path, branch=f"feat/{_ITEM}") == expected

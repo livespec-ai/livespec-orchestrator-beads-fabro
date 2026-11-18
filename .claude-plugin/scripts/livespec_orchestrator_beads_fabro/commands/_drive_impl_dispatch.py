@@ -16,7 +16,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 from livespec_orchestrator_beads_fabro.commands import _drive_impl_scope as scope
 from livespec_orchestrator_beads_fabro.commands._dispatcher_invoker import (
@@ -26,13 +26,20 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_invoker import (
     default_invoker_identity,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_journal_file import JournalFile
-from livespec_orchestrator_beads_fabro.commands._dispatcher_merge_wait_handoff import (
-    HANDED_OFF_STATUS,
-)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_reconcile_hook import (
     dispatch_journal_path,
 )
-from livespec_orchestrator_beads_fabro.effects import JsonParseFailure, attempt, parse_json
+from livespec_orchestrator_beads_fabro.commands._drive_impl_delivery import (
+    MergedPullRequestLookup,
+    delivered_merged_pull_request,
+)
+from livespec_orchestrator_beads_fabro.commands._drive_impl_result import (
+    dispatch_status,
+    dispatch_summary,
+    goal_template_refusal,
+    parse_dispatcher_json,
+)
+from livespec_orchestrator_beads_fabro.effects import attempt
 
 __all__: list[str] = [
     "CommandRun",
@@ -65,6 +72,7 @@ def run_impl_dispatch(  # noqa: PLR0913 — kw-only transport; `workflow_name` i
     acp_nodes: tuple[str, ...],
     workflow_name: str | None,
     identity: InvokerIdentity | None,
+    merged_pull_request_lookup: MergedPullRequestLookup | None = None,
 ) -> dict[str, Any]:
     """Run one `impl:<id>` action as a `dispatcher.py loop` subprocess."""
     resolved_runner = _SubprocessRunner() if runner is None else runner
@@ -103,9 +111,16 @@ def run_impl_dispatch(  # noqa: PLR0913 — kw-only transport; `workflow_name` i
         scope_unit=unit,
         detail=detail,
     )
-    parsed = _parse_json_object_or_array(text=result.stdout)
-    status = _dispatch_status(returncode=result.returncode, parsed=parsed)
-    goal_template_refusal = _goal_template_refusal(parsed=parsed)
+    parsed = parse_dispatcher_json(text=result.stdout)
+    status = dispatch_status(returncode=result.returncode, parsed=parsed)
+    goal_template_refusal_detail = goal_template_refusal(parsed=parsed)
+    merged_pull_request = delivered_merged_pull_request(
+        repo=repo,
+        work_item_ref=work_item_ref,
+        returncode=result.returncode,
+        stderr=result.stderr,
+        lookup=merged_pull_request_lookup,
+    )
     return {
         "action_id": f"impl:{work_item_ref}",
         "kind": "impl",
@@ -119,12 +134,13 @@ def run_impl_dispatch(  # noqa: PLR0913 — kw-only transport; `workflow_name` i
             "stdout_json": parsed,
             "stderr": result.stderr,
         },
-        "summary": _dispatch_summary(
+        "summary": dispatch_summary(
             status=status,
             work_item_ref=work_item_ref,
-            goal_template_refusal=goal_template_refusal,
+            goal_template_refusal_detail=goal_template_refusal_detail,
+            merged_pull_request=merged_pull_request,
         ),
-        "goal_template_refusal": goal_template_refusal,
+        "goal_template_refusal": goal_template_refusal_detail,
     }
 
 
@@ -225,56 +241,6 @@ def _forwarded_invoker(*, identity: InvokerIdentity | None) -> tuple[str, ...]:
     if identity is None or identity.invoker_source == FALLBACK_SOURCE:
         return ()
     return (INVOKER_FLAG, identity.invoker)
-
-
-def _dispatch_status(*, returncode: int, parsed: object) -> str:
-    if isinstance(parsed, list) and parsed:
-        parsed_list = cast("list[object]", parsed)
-        first = parsed_list[0]
-        if isinstance(first, dict):
-            first_dict = cast("dict[str, object]", first)
-            status = first_dict.get("status")
-            if isinstance(status, str):
-                return status
-    if returncode == 0:
-        return "green"
-    return "failed"
-
-
-def _dispatch_summary(*, status: str, work_item_ref: str, goal_template_refusal: str | None) -> str:
-    if status == "green":
-        return f"Dispatcher reported green for {work_item_ref}."
-    if status == HANDED_OFF_STATUS:
-        return (
-            f"Dispatcher handed the merge wait for {work_item_ref} off to reconciliation: "
-            "its pull request is armed and its required checks are passing or still running."
-        )
-    if status == "blocked":
-        return f"Dispatcher reported a human-gated blocked run for {work_item_ref}."
-    if goal_template_refusal is not None:
-        return f"Dispatcher refused at goal-minijinja-preflight: {goal_template_refusal}."
-    return f"Dispatcher did not report green for {work_item_ref}."
-
-
-def _goal_template_refusal(*, parsed: object) -> str | None:
-    """Extract the safe preflight detail from one Dispatcher JSON outcome."""
-    if not isinstance(parsed, list):
-        return None
-    outcomes = cast("list[object]", parsed)
-    if len(outcomes) != 1 or not isinstance(outcomes[0], dict):
-        return None
-    outcome = cast("dict[str, object]", outcomes[0])
-    if outcome.get("stage") != "goal-minijinja-preflight":
-        return None
-    detail = outcome.get("detail")
-    return detail if isinstance(detail, str) else None
-
-
-def _parse_json_object_or_array(*, text: str) -> object:
-    parsed = parse_json(text=text)
-    if isinstance(parsed, JsonParseFailure):
-        return None
-    return parsed
 
 
 def _resolve_dispatcher_bin(*, dispatcher_bin: Path | None) -> Path:
