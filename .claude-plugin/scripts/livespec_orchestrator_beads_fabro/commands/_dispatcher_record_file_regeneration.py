@@ -111,8 +111,10 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 
 RECORD_FILES_KEY = "__RECORD_FILES_KEY__"
 GENERATOR_KEY = "__GENERATOR_KEY__"
@@ -127,7 +129,9 @@ DISPATCHER_KEY = "dispatcher"
 RESOLVED_MARKER = "LIVESPEC_RECORD_FILE_REGENERATED"
 HELD_MARKER = "LIVESPEC_RECORD_FILE_HELD"
 TARGET_MARKER = "LIVESPEC_GENERATED_RECORD_FILE"
+CARRIED_MARKER = "LIVESPEC_RECORD_FILE_DEFAULT_CARRIED"
 MODES = ("--resolve", "--brief", "--check-head")
+DEFAULT_REF_FLAG = "--default-ref"
 
 # `//` line comments only, which is the form every `.livespec.jsonc` in this
 # family uses and the form the package's own reader admits. The capture keeps a
@@ -332,8 +336,12 @@ def regenerate(root, path, argv):
     return None
 
 
-def check_head(root, generators):
+def check_head(root, generators, default_ref=None, carried=None):
     """(the paths whose committed bytes are not their output, the reason to hold).
+
+    With a `default_ref`, a path whose drift the DEFAULT BRANCH already carries is
+    not reported as differing: it is appended to `carried` as (path, commit)
+    instead. See `default_carries` for what establishes that.
 
     Both halves can be empty, and the pair is what the stage routes on: a path
     names the register and takes the refresh-repair route, while a reason names a
@@ -356,7 +364,7 @@ def check_head(root, generators):
             return ([], "the working tree already differs from HEAD at " + path
                     + " before any generator ran, so a reading taken now would be"
                     " about that change rather than about the committed file")
-        held = compare(root, path, generators[path], differing)
+        held = compare(root, path, generators[path], differing, (default_ref, carried))
         if held is not None:
             return ([], held)
     residue = porcelain(root)
@@ -367,7 +375,7 @@ def check_head(root, generators):
     return (differing, None)
 
 
-def compare(root, path, argv, differing):
+def compare(root, path, argv, differing, default=(None, None)):
     """Note whether one committed generated file is its generator's output.
 
     Appends to `differing` rather than returning, because the only other thing
@@ -377,6 +385,7 @@ def compare(root, path, argv, differing):
     """
     produced = run(list(argv), cwd=root)
     changed = dirty(root, path)
+    generated = read_bytes(os.path.join(root, path))
     restored = run(["git", "checkout", "HEAD", "--", path], cwd=root)
     if produced.returncode != 0:
         return ("the generator " + shlex.join(list(argv)) + " for " + path
@@ -387,9 +396,85 @@ def compare(root, path, argv, differing):
         return ("the generator output at " + path + " could not be restored to the"
                 " committed bytes, so the repository-declared gate would run on a"
                 " head nobody committed: " + " ".join(restored.stderr.split())[:400])
-    if changed:
+    if not changed:
+        return None
+    default_ref, carried = default
+    commit = None
+    if default_ref and carried is not None:
+        commit = default_carries(root, path, argv, default_ref, generated)
+    if commit is None:
         differing.append(path)
+    else:
+        carried.append((path, commit))
     return None
+
+
+def read_bytes(path):
+    """One file's bytes, or None when it cannot be read."""
+    try:
+        with open(path, "rb") as handle:
+            return handle.read()
+    except OSError:
+        return None
+
+
+def blob(root, rev, path):
+    """The object id of `path` at `rev`, or None when git will not name one."""
+    result = run(["git", "rev-parse", "--verify", "--quiet", rev + ":" + path], cwd=root)
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def default_carries(root, path, argv, default_ref, generated):
+    """The default-branch commit that carries this drift, or None.
+
+    A head's generated file differs from its generator's output for one of two
+    reasons: the pull request's own change, or the default branch's own copy
+    being out of its generator's order. Only the first is the run's to repair; a
+    repair of the second is undone by the next refresh and the loop never
+    converges. The drift is the DEFAULT BRANCH's exactly when all three hold: the
+    head's file is byte-identical to the default branch's, the generator over the
+    default branch's own tree does not reproduce that file, and the generator
+    over the default branch's tree produces the same bytes as over this head, so
+    nothing this pull request changed reaches the generator's output.
+
+    Any reading that cannot be taken answers None, which keeps the drift the
+    run's: a head is only waved through on a positive reading, never on a missing
+    one.
+    """
+    default_blob = blob(root, default_ref, path)
+    if default_blob is None or default_blob != blob(root, "HEAD", path):
+        return None
+    commit = run(["git", "rev-parse", "--verify", "--quiet", default_ref + "^{commit}"],
+                 cwd=root).stdout.strip()
+    archive = subprocess.run(["git", "archive", "--format=tar", default_ref], cwd=root,
+                             capture_output=True, check=False, stdin=subprocess.DEVNULL)
+    if not commit or archive.returncode != 0 or generated is None:
+        return None
+    scratch = tempfile.mkdtemp(prefix="livespec-default-tree-")
+    try:
+        unpacked = subprocess.run(["tar", "-x", "-C", scratch], input=archive.stdout,
+                                  capture_output=True, check=False)
+        if unpacked.returncode != 0:
+            return None
+        env = dict(os.environ)
+        environment = os.path.join(root, ".venv")
+        if os.path.isdir(environment):
+            env["UV_PROJECT_ENVIRONMENT"] = environment
+            env["UV_NO_SYNC"] = "1"
+        produced = subprocess.run(list(argv), cwd=scratch, capture_output=True,
+                                  check=False, stdin=subprocess.DEVNULL, env=env)
+        default_output = read_bytes(os.path.join(scratch, path))
+        committed = subprocess.run(["git", "cat-file", "blob", default_blob], cwd=root,
+                                   capture_output=True, check=False, stdin=subprocess.DEVNULL)
+        if produced.returncode != 0 or default_output is None:
+            return None
+        if default_output == committed.stdout or default_output != generated:
+            return None
+        return commit
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def porcelain(root):
@@ -406,7 +491,7 @@ def dirty(root, path):
 
 
 def parse_argv(argv):
-    """(state directory, mode, named paths), or None when an input is absent.
+    """(state directory, mode, named paths, default ref), or None when an input is absent.
 
     Neither input has a safe default. A mode defaulted to `--resolve` would
     regenerate on an invocation that meant to ask a question, and a state
@@ -415,6 +500,7 @@ def parse_argv(argv):
     """
     state = None
     mode = None
+    default_ref = None
     paths = []
     index = 0
     while index < len(argv):
@@ -423,6 +509,12 @@ def parse_argv(argv):
             if index + 1 >= len(argv):
                 return None
             state = argv[index + 1]
+            index += 2
+            continue
+        if token == DEFAULT_REF_FLAG:
+            if index + 1 >= len(argv):
+                return None
+            default_ref = argv[index + 1]
             index += 2
             continue
         if token in MODES:
@@ -435,7 +527,7 @@ def parse_argv(argv):
         index += 1
     if state is None or mode is None:
         return None
-    return (state, mode, paths)
+    return (state, mode, paths, default_ref)
 
 
 def main(argv):
@@ -444,7 +536,7 @@ def main(argv):
         note("LIVESPEC_RECORD_FILE_USAGE: --state-dir <dir> and exactly one of "
              + ", ".join(MODES) + " are both required")
         return 2
-    state, mode, named = parsed
+    state, mode, named, default_ref = parsed
     root = repository_root()
     if root is None:
         note(HELD_MARKER + ": no git clone resolved from this working directory,"
@@ -470,12 +562,18 @@ def main(argv):
             return 0
         note(HELD_MARKER + ": " + refusal)
         return 1
-    return head_outcome(root, state, generators)
+    return head_outcome(root, state, generators, default_ref)
 
 
-def head_outcome(root, state, generators):
+def head_outcome(root, state, generators, default_ref=None):
     """The `--check-head` verdict, with both state files written either way."""
-    differing, held = check_head(root, generators)
+    carried = []
+    differing, held = check_head(root, generators, default_ref, carried)
+    for path, commit in carried:
+        note(CARRIED_MARKER + ": the committed " + path + " is not its generator output"
+             " over this head, but the default branch commit " + commit + " already"
+             " carries that file out of its generator order and nothing this run"
+             " changed reaches the generator output, so no refresh-repair round is owed")
     write_state(state, TARGETS_FILENAME,
                 [GATE_TARGET + ":" + one for one in differing])
     write_state(state, BRIEF_FILENAME, regenerate_lines(generators, differing))
