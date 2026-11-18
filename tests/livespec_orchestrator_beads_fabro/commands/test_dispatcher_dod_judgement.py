@@ -147,6 +147,45 @@ def test_a_passed_reply_that_says_a_check_could_not_be_verified_holds_the_item()
     )
 
 
+def test_a_passed_reply_whose_check_line_says_it_could_not_read_a_body_holds_the_item() -> None:
+    """The second measured shape ("Check N: ... I could not read ...") is not an admission."""
+    judgement = importlib.import_module(
+        "livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement"
+    )
+
+    verdict = judgement.parse_judgement_reply(
+        reply=(
+            "Check 1: the description carries one heading and its bullets.\n"
+            "Check 2: the reference names ## Dev host disk retention. I could not read the "
+            "body of ## Dev host disk retention here, because the verdict selected no clause "
+            "from it. I took its content from the description.\n"
+            "Check 3: every assertion names its proof mode.\n"
+            '{"outcome": "passed"}'
+        )
+    )
+
+    assert verdict.outcome == judgement.JUDGEMENT_HELD
+    assert verdict.holds
+    assert len(verdict.findings) == 1
+    assert "I could not read the body of ## Dev host disk retention here" in verdict.findings[0]
+
+
+def test_a_passed_reply_with_no_unverified_check_is_still_admitted() -> None:
+    """Widening the caveat matcher must not hold an ordinary pass that mentions its checks."""
+    judgement = importlib.import_module(
+        "livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement"
+    )
+
+    verdict = judgement.parse_judgement_reply(
+        reply=(
+            "Check 1: passed. Check 2: passed, I could not find any gap.\n" '{"outcome": "passed"}'
+        )
+    )
+
+    assert verdict.outcome == judgement.JUDGEMENT_ADMITTED
+    assert verdict.findings == ()
+
+
 def test_unresolved_and_unreadable_spec_references_stay_distinct_from_no_reference(
     tmp_path: Path,
 ) -> None:
