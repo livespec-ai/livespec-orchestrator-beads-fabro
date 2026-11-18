@@ -179,9 +179,16 @@ def launcher_log(*, dispatched: str) -> str:
 
 def installed_build(*, repo: Path) -> str:
     installed = json.loads(PLUGIN_REGISTRY.read_text())
-    return next(
-        e["version"] for e in installed["plugins"][PLUGIN_KEY] if e.get("projectPath") == str(repo)
+    repository = repo.resolve()
+    for entry in installed["plugins"][PLUGIN_KEY]:
+        project_path = entry.get("projectPath")
+        if project_path and Path(project_path).resolve() == repository:
+            return entry["version"]
+    msg = (
+        f"no installed build for repository {repo} in plugin registry {PLUGIN_REGISTRY} "
+        f"under plugin key {PLUGIN_KEY}"
     )
+    raise RefusedError(msg)
 
 
 def first_host_captured_assertion(*, repo: Path, item: str) -> str:

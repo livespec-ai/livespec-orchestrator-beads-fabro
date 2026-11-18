@@ -46,9 +46,9 @@ fi
 
 HARNESS_SLICE=${1:-all}
 case "$HARNESS_SLICE" in
-    all|scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|queue-position|launcher-reexec|parity|gate-detach|probe-stderr) ;;
+    all|scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|queue-position|launcher-reexec|parity|gate-detach|probe-stderr|ready-check-crash) ;;
     *)
-        echo "usage: run-tests.sh [scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|queue-position|launcher-reexec|parity|gate-detach|probe-stderr]" >&2
+        echo "usage: run-tests.sh [scenario242|scenario297|scenario307|scenario312|scenario316|scenario330|queue-position|launcher-reexec|parity|gate-detach|probe-stderr|ready-check-crash]" >&2
         exit 2
         ;;
 esac
@@ -196,6 +196,10 @@ fi
 for argument in "$@"; do
     case ${argument##*/} in
         ready-set-check.py)
+            if [ -n "${STUB_READY_CRASH:-}" ]; then
+                printf '%s\n' "$STUB_READY_CRASH" >&2
+                exit "${STUB_READY_CRASH_EXIT:-70}"
+            fi
             if [ -n "${STUB_READY_BLOCKED_UNTIL_RELEASE:-}" ] && [ ! -s "$STUB_RELEASE_LOG" ]; then
                 printf 'READY-CHECK stub: blocked until the seat-gated release runs\n'
                 exit 3
@@ -3104,6 +3108,35 @@ stop_launcher "$reader_pid"
 wait "$reader_pid" 2>/dev/null
 kill "$live_pid" 2>/dev/null
 wait "$live_pid" 2>/dev/null
+fi
+
+if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = ready-check-crash ]; then
+scenario "23a. a ready-set check crash is a terminal diagnostic, not a refusal"
+
+# A launcher crash is not a ready-set refusal: the process did not answer
+# dispatchable or not-in-the-ready-set. Its terminal record must retain the
+# diagnostic the failed check wrote to stderr instead of reducing it to a
+# misleading empty refusal.
+new_case ready-check-crash
+export FLEET_LAUNCH_MAX_WAIT_S=120
+: > "$BOARD_GMK"
+: > "$BOARD_HL"
+printf '8\n' > "$CAP_FILE"
+export FLEET_LAUNCH_READY_RETRY_POLLS=1
+export STUB_READY_CRASH='READY-CHECK crash: installed plugin build is absent'
+export STUB_READY_CRASH_EXIT=70
+ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-ready-crash > "$CASE_LOG" 2>&1
+ready_rc=$?
+if [ "$ready_rc" -ne 0 ] \
+    && line_has_all "$CASE_LOG" 'terminal:' 'item=bd-ib-ready-crash' 'ready-set check crashed' \
+        'READY-CHECK crash: installed plugin build is absent' \
+    && ! grep -qF 'ready-set check refused (rc=70, no output)' "$CASE_LOG"; then
+    pass "a crashed ready-set check ends on a terminal line naming the crash and its stderr"
+else
+    fail "a crashed ready-set check was reported as a refusal or lost its stderr (rc=$ready_rc)"
+    tail -n 8 "$CASE_LOG" >&2
+fi
+unset FLEET_LAUNCH_READY_RETRY_POLLS STUB_READY_CRASH STUB_READY_CRASH_EXIT
 fi
 
 # --- 21. a running launcher follows its script on disk ------------------------
