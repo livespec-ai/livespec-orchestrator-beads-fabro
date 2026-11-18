@@ -7,9 +7,7 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
-from dataclasses import asdict
 from pathlib import Path
-from typing import Any, cast
 
 from returns.pipeline import is_successful
 from returns.unsafe import unsafe_perform_io
@@ -33,16 +31,17 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_policy_settings impo
 from livespec_orchestrator_beads_fabro.commands._dispatcher_shell_runner import ShellCommandRunner
 from livespec_orchestrator_beads_fabro.commands._incident_authority_lifecycle import (
     LIFECYCLE_PAYLOADS,
-    lifecycle_body,
     run_lifecycle_action,
+)
+from livespec_orchestrator_beads_fabro.commands._incident_authority_reply import (
+    absent_reply,
+    reply,
 )
 from livespec_orchestrator_beads_fabro.commands._intake_valve_claim_writes import TakeoverWait
 from livespec_orchestrator_beads_fabro.commands.incident_local_gate_lookup import (
-    LocalGateLookup,
     read_local_gates,
 )
 from livespec_orchestrator_beads_fabro.commands.incident_local_gate_receipt import (
-    LocalGateReceipt,
     read_receipt_stream,
     record_local_gates,
 )
@@ -57,29 +56,12 @@ from livespec_orchestrator_beads_fabro.incident_authority import (
     file_incident,
     publish_incident_genesis,
     read_incident_authority,
+    read_incident_head,
 )
-from livespec_orchestrator_beads_fabro.incident_completion import IncidentCompletion
-from livespec_orchestrator_beads_fabro.incident_drill_close import DrillClose
-from livespec_orchestrator_beads_fabro.incident_normal_repayment import RepaymentEntry
-from livespec_orchestrator_beads_fabro.incident_regression_recovery import RecoveryEntry
-from livespec_orchestrator_beads_fabro.io import write_stdout
 
 __all__: list[str] = ["main"]
 
 _RECORD_GATES = "record-local-gates"
-_Reply = (
-    IncidentReading
-    | AuthorityRefusal
-    | LocalGateLookup
-    | LocalGateReceipt
-    | GenesisReceipt
-    | FilingReceipt
-    | RepaymentEntry
-    | RecoveryEntry
-    | IncidentCompletion
-    | DrillClose
-)
-
 # Each writing action and the payload arguments it alone requires.
 _ACTION_ARGUMENTS: dict[str, tuple[str, ...]] = {
     "commit-transition": ("successor_json",),
@@ -96,6 +78,7 @@ _PAYLOAD_OWNERS = {
 _ADVANCE = "advance-repayment"
 _HISTORICAL = frozenset(("read-history", "commit-transition", *LIFECYCLE_PAYLOADS))
 _FILING = "file-incident"
+_HEAD = "read-head"
 _IDENTITY = ("item", "attempt", "phase", "generation")
 _TRANSITION_PENDING = "incident-genesis-claim-transition-pending"
 _IDENTITY_RULE = "--item, --attempt, --phase and --generation: required unless file-incident"
@@ -109,17 +92,32 @@ def _check_receipt_source(*, parser: argparse.ArgumentParser, args: argparse.Nam
         parser.error(f"--receipt-stdin is only valid for {_RECORD_GATES}")
 
 
+def _check_identity(*, parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Only the item-only head read omits the effect-bound identity fields."""
+    if args.action == _HEAD:
+        if args.item is None:
+            parser.error("--item: required for read-head")
+        return
+    if any(value is None for value in (args.operation, args.owner)):
+        parser.error("--operation and --owner: required unless read-head")
+    if any((getattr(args, name) is None) != (args.action == _FILING) for name in _IDENTITY):
+        parser.error(_IDENTITY_RULE)
+
+
 def _parse(*, argv: Sequence[str] | None) -> argparse.Namespace:
     """Each action-only payload argument belongs to exactly one action."""
     parser = argparse.ArgumentParser(prog="incident-authority")
-    _ = parser.add_argument("action", choices=(*_ACTION_ARGUMENTS, "read-current", "read-history"))
+    _ = parser.add_argument(
+        "action", choices=(*_ACTION_ARGUMENTS, "read-current", "read-history", _HEAD)
+    )
     for field in _PAYLOAD_OWNERS:
         _ = parser.add_argument("--" + field.replace("_", "-"))
     _ = parser.add_argument("--admission-complete", action="store_true")
     _ = parser.add_argument("--receipt-stdin", action="store_true")
     _ = parser.add_argument("--repo", required=True, type=Path)
-    for name in ("repository", "operation", "owner"):
-        _ = parser.add_argument(f"--{name}", required=True)
+    _ = parser.add_argument("--repository", required=True)
+    for name in ("operation", "owner"):
+        _ = parser.add_argument(f"--{name}")
     for name in ("item", "attempt", "phase"):
         _ = parser.add_argument(f"--{name}")
     _ = parser.add_argument("--generation", type=int)
@@ -133,9 +131,7 @@ def _parse(*, argv: Sequence[str] | None) -> argparse.Namespace:
     _check_receipt_source(parser=parser, args=args)
     if args.admission_complete and args.action != _ADVANCE:
         parser.error(f"--admission-complete is only valid for {_ADVANCE}")
-    # A filing has no item identity yet; every other action names one exactly.
-    if any((getattr(args, name) is None) != (args.action == _FILING) for name in _IDENTITY):
-        parser.error(_IDENTITY_RULE)
+    _check_identity(parser=parser, args=args)
     return args
 
 
@@ -143,10 +139,15 @@ def main(*, argv: Sequence[str] | None = None) -> int:
     """Print one schema-1 reply; an unverifiable identity exits 78, not normal mode."""
     args = _parse(argv=argv)
     if args.action == "publish-genesis":
-        return _reply(result=_genesis(args=args), authorizes=False)
+        return reply(result=_genesis(args=args), authorizes=False)
     if args.action == _FILING:
-        return _reply(result=_filing(args=args), authorizes=False)
+        return reply(result=_filing(args=args), authorizes=False)
     client = make_beads_client(config=store_config(repo=args.repo))
+    if args.action == _HEAD:
+        result = read_incident_head(client=client, repository=args.repository, item_id=args.item)
+        if isinstance(result, AuthorityRefusal) and result.code == "incident-authority-missing":
+            return absent_reply(repository=args.repository, item_id=args.item)
+        return reply(result=result, authorizes=False)
     result = read_incident_authority(
         client=client,
         repository=args.repository,
@@ -188,7 +189,7 @@ def main(*, argv: Sequence[str] | None = None) -> int:
         result = run_lifecycle_action(
             args=args, client=client, reading=result, runner=ShellCommandRunner()
         )
-    return _reply(result=result, authorizes=args.action == "read-current")
+    return reply(result=result, authorizes=args.action == "read-current")
 
 
 def _claim_tokens(*, repo: Path, detail: str) -> bool | AuthorityRefusal:
@@ -254,41 +255,3 @@ def _filing(*, args: argparse.Namespace) -> FilingReceipt | AuthorityRefusal:
         request=request,
         claim_tokens=cutover,
     )
-
-
-def _without_walk_scope(*, value: object) -> object:
-    """Leave out the operations a reading happened to walk.
-
-    That set is the whole chain for a historical read and only the segment after the
-    item's head hint for a current one, so the same committed reading would otherwise
-    serialize differently when a retry recovers it.
-    """
-    if isinstance(value, dict):
-        return {
-            key: _without_walk_scope(value=item)
-            for key, item in cast("dict[str, object]", value).items()
-            if key != "operation_ids"
-        }
-    return value
-
-
-def _result_body(*, result: _Reply) -> dict[str, object]:
-    body = cast("dict[str, Any]", _without_walk_scope(value=asdict(result)))
-    if isinstance(result, IncidentReading | GenesisReceipt):
-        body["attempt"] = attempt_record(attempt=result.attempt)
-    if isinstance(result, RepaymentEntry | RecoveryEntry | IncidentCompletion):
-        lifecycle_body(result=result, body=body)
-    return body
-
-
-def _reply(*, result: _Reply, authorizes: bool) -> int:
-    refused = isinstance(result, AuthorityRefusal)
-    response: dict[str, object] = {
-        "schema": 1,
-        "status": "refused" if refused else "verified",
-        "result": _result_body(result=result),
-        "authorizes_current_effects": authorizes and not refused,
-        "normal_factory_proof": False,
-    }
-    _ = write_stdout(text=json.dumps(response, sort_keys=True) + "\n")
-    return 78 if refused else 0
