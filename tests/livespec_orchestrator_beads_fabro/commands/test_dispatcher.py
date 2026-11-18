@@ -7450,3 +7450,41 @@ def test_the_dispatch_span_file_is_tailed_and_forwarded_by_the_enrich_path(
     }
     assert forwarded["work.item.id"] == "a-1"
     assert forwarded["livespec.dispatch.factory"] == "default"
+
+
+def test_each_dispatch_pass_reads_a_fresh_journal_while_the_ledger_listing_cache_is_warm(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_reflection_journal import (
+        read_journal_records,
+    )
+
+    repo = tmp_path / "repo"
+    workflow = repo / "workflow.toml"
+    workflow.parent.mkdir(parents=True)
+    _ = workflow.write_text("[workflow]\n", encoding="utf-8")
+    listing_reads: list[bool] = []
+
+    def warm_listing(*, repo: Path, cached: bool = False) -> list[object]:
+        _ = repo
+        listing_reads.append(cached)
+        return []
+
+    monkeypatch.setattr(_dispatcher_loop_selection, "load_items", warm_listing)
+    monkeypatch.setattr(
+        _dispatcher_loop_selection, "apply_dispatcher_staleness_gate", lambda **_: None
+    )
+    args = argparse.Namespace(
+        workflow=str(workflow), journal=str(repo / "journal.jsonl"), repo=str(repo)
+    )
+
+    first = _dispatcher_loop_selection.prepare(args=args, repo=repo)
+    assert first is not None
+    first[1].append(record={"event": "between-passes"})
+    second = _dispatcher_loop_selection.prepare(args=args, repo=repo)
+
+    assert second is not None
+    assert second[1] is not first[1]
+    assert listing_reads == [True, True]
+    events = [record.get("event") for record in read_journal_records(journal_path=second[1].path)]
+    assert events == ["between-passes"]
