@@ -148,7 +148,23 @@ def test_a_removal_between_polls_is_recovered_when_the_first_view_is_already_deq
         views=[
             _view(queued=False, armed=False, merge_state="CLEAN"),
             _view(queued=True, armed=True, merge_state="CLEAN"),
-            _view(queued=True, armed=True, merge_state="CLEAN"),
+            CommandResult(
+                exit_code=0,
+                stdout=json.dumps(
+                    {
+                        "number": 5522,
+                        "state": "MERGED",
+                        "autoMergeRequest": None,
+                        "mergeQueueEntry": None,
+                        "mergeStateStatus": "CLEAN",
+                        "mergeCommit": {"oid": "a" * 40},
+                        "headRefOid": "098658d0",
+                        "baseRefOid": "11b7ad2d",
+                        "statusCheckRollup": [],
+                    }
+                ),
+                stderr="",
+            ),
         ]
     )
     journal = _Journal()
@@ -159,7 +175,7 @@ def test_a_removal_between_polls_is_recovered_when_the_first_view_is_already_deq
         runner=forge,
         journal=journal,
         sleep=lambda _: None,
-        poll=PollPolicy(attempts=2, interval_seconds=0.0),
+        poll=PollPolicy(attempts=3, interval_seconds=0.0),
         pr_number=5522,
         run_id="01M7Q76A2EYA",
     )
