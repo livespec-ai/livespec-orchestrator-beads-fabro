@@ -97,23 +97,23 @@ def test_scenario297_queued_preflight_harness_runs_from_the_check_aggregate() ->
 
 
 def _run_stale_pass_ordering(
-    *, preflights: list[tuple[int, str]], drives: list[tuple[int, str]]
+    *, preflights: list[tuple[int, str]], mutex_holds: list[tuple[int, str]]
 ) -> int:
     """Run the harness's real stale-pass ordering helpers against scripted stub logs."""
     harness = _REPO_ROOT / "fleet-launch" / "test" / "run-tests.sh"
     preflight_lines = "".join(f"{stamp} {item}\n" for stamp, item in preflights)
-    drive_lines = "".join(f"{stamp} {item}\n" for stamp, item in drives)
+    mutex_lines = "".join(f"{stamp} {item}\n" for stamp, item in mutex_holds)
     script = f"""
 set -u
 eval "$(sed -n '/^preflight_between() {{/,/^}}/p' '{harness}')"
-eval "$(sed -n '/^first_drive_ns() {{/,/^}}/p' '{harness}')"
+eval "$(sed -n '/^first_mutex_ns() {{/,/^}}/p' '{harness}')"
 PREFLIGHT_LOG=$(mktemp)
-DRIVE_TIME_LOG=$(mktemp)
+MUTEX_OBSERVATION_LOG=$(mktemp)
 printf '%s' '{preflight_lines}' > "$PREFLIGHT_LOG"
-printf '%s' '{drive_lines}' > "$DRIVE_TIME_LOG"
+printf '%s' '{mutex_lines}' > "$MUTEX_OBSERVATION_LOG"
 release_ns=1000
-drive_ns=$(first_drive_ns the-younger)
-[ -n "$drive_ns" ] && preflight_between the-younger "$release_ns" "$drive_ns"
+mutex_ns=$(first_mutex_ns the-younger)
+[ -n "$mutex_ns" ] && preflight_between the-younger "$release_ns" "$mutex_ns"
 """
     return subprocess.run(
         ["bash", "-c", script], capture_output=True, check=False, text=True, timeout=60
@@ -121,38 +121,47 @@ drive_ns=$(first_drive_ns the-younger)
 
 
 def test_scenario297_stale_queued_preflight_is_ordered_on_events_not_counted() -> None:
-    """A preflight between the older release and the younger drive is what the case needs."""
-    drives = [(2000, "the-older"), (3000, "the-younger")]
+    """A preflight between the older release and the younger mutex hold is what the case needs."""
+    # The older launcher held the mutex first, then released it; the younger took it at 3000.
+    holds = [(1900, "the-older"), (3000, "the-younger"), (3100, "the-younger")]
     queued = (500, "the-younger")
 
     # One re-run, and several head polls, both satisfy the ordering.
-    assert _run_stale_pass_ordering(preflights=[queued, (1500, "the-younger")], drives=drives) == 0
+    assert (
+        _run_stale_pass_ordering(preflights=[queued, (1500, "the-younger")], mutex_holds=holds) == 0
+    )
     extra_polls = [queued, (1100, "the-younger"), (1200, "the-younger"), (1300, "the-younger")]
-    assert _run_stale_pass_ordering(preflights=extra_polls, drives=drives) == 0
+    assert _run_stale_pass_ordering(preflights=extra_polls, mutex_holds=holds) == 0
 
-    # Only the queued pass (before the release): the head took its turn without re-running.
-    assert _run_stale_pass_ordering(preflights=[queued], drives=drives) != 0
-    # A preflight of another item, or one after the younger drive, is not the head re-run.
+    # Only the queued pass (before the release): the head took the mutex without re-running.
+    assert _run_stale_pass_ordering(preflights=[queued], mutex_holds=holds) != 0
+    # A preflight of another item is not the younger launcher's head re-run.
     other_item = [queued, (1500, "the-older")]
-    assert _run_stale_pass_ordering(preflights=other_item, drives=drives) != 0
-    assert _run_stale_pass_ordering(preflights=[queued, (3500, "the-younger")], drives=drives) != 0
-    # A younger launcher that never drove has no mutex acquisition to order against.
+    assert _run_stale_pass_ordering(preflights=other_item, mutex_holds=holds) != 0
+    # A preflight stamped once the younger launcher already held the mutex came too late, as did
+    # one stamped at the very instant the stub saw the mutex held (a preflight run under it).
+    late = [queued, (3050, "the-younger")]
+    assert _run_stale_pass_ordering(preflights=late, mutex_holds=holds) != 0
+    under_mutex = [queued, (3000, "the-younger")]
+    assert _run_stale_pass_ordering(preflights=under_mutex, mutex_holds=holds) != 0
+    # A younger launcher that was never seen holding the mutex has nothing to order against.
     assert (
         _run_stale_pass_ordering(
-            preflights=[queued, (1500, "the-younger")], drives=[(2000, "the-older")]
+            preflights=[queued, (1500, "the-younger")], mutex_holds=[(1900, "the-older")]
         )
         != 0
     )
 
 
 def test_scenario297_stale_case_checks_the_ordering_not_an_exact_count() -> None:
-    """The stale-pass case decides on the ordering helper, with no preflight-count verdict."""
+    """The stale-pass case decides on the mutex ordering helper, with no preflight-count verdict."""
     harness = (_REPO_ROOT / "fleet-launch" / "test" / "run-tests.sh").read_text(encoding="utf-8")
     stale_case = harness.split(
         'scenario "7. re-runs a stale queued preflight at the FIFO head"', maxsplit=1
     )[1].split('scenario "8. drops a ticket when its queued preflight fails"', maxsplit=1)[0]
 
-    assert 'preflight_between bd-ib-stale-younger "$release_ns" "$younger_drive_ns"' in stale_case
+    assert 'preflight_between bd-ib-stale-younger "$release_ns" "$younger_mutex_ns"' in stale_case
+    assert "first_drive_ns" not in stale_case
     assert 'preflight_count bd-ib-stale-younger)" =' not in stale_case
     assert 'preflight_count bd-ib-stale-younger)" -ge' not in stale_case
 

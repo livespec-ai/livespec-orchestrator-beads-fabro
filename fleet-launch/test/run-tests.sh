@@ -137,6 +137,12 @@ if [ -n "${STUB_TERM_MUTEX_GATE:-}" ] && [ -f "$FLEET_LAUNCH_GMK_LOCK_DIR/holder
     : > "$STUB_TERM_MUTEX_GATE"
     sleep 0.05
 fi
+# The first board read a launcher makes once it holds the factory mutex stamps that holder:
+# the observed event the stale-pass case orders its preflight against.
+if [ -n "${STUB_MUTEX_OBSERVATION_LOG:-}" ]; then
+    holder_item=$(grep -oE 'item=[^ ]+' "${STUB_LOCK_DIR:-/nonexistent}/holder" 2>/dev/null | sed -n '1p' | cut -d= -f2)
+    [ -z "$holder_item" ] || printf '%s %s\n' "$(date +%s%N)" "$holder_item" >> "$STUB_MUTEX_OBSERVATION_LOG"
+fi
 # An absent fixture is the unreadable board: non-zero exit, nothing on stdout.
 if [ ! -f "$board" ]; then
     echo "stub fabro: board unreadable" >&2
@@ -229,7 +235,14 @@ for argument in "$@"; do
             ;;
         dod-preflight.sh)
             item=${!#}
-            printf '%s %s\n' "$(date +%s%N)" "$item" >> "$STUB_PREFLIGHT_LOG"
+            stamp=$(date +%s%N)
+            printf '%s %s\n' "$stamp" "$item" >> "$STUB_PREFLIGHT_LOG"
+            # A preflight run while a launcher holds the factory mutex is stamped as that
+            # holder's mutex observation too, at the same instant, so it never reads as earlier.
+            if [ -n "${STUB_MUTEX_OBSERVATION_LOG:-}" ]; then
+                holder_item=$(grep -oE 'item=[^ ]+' "${STUB_LOCK_DIR:-/nonexistent}/holder" 2>/dev/null | sed -n '1p' | cut -d= -f2)
+                [ -z "$holder_item" ] || printf '%s %s\n' "$stamp" "$holder_item" >> "$STUB_MUTEX_OBSERVATION_LOG"
+            fi
             [ -z "${STUB_PREFLIGHT_HEAD_LOG:-}" ] || git rev-parse HEAD >> "$STUB_PREFLIGHT_HEAD_LOG"
             if [ "$item" = "${STUB_PREFLIGHT_SLOW_ITEM:-}" ]; then
                 # HELD until the harness creates the release file (bounded by
@@ -373,7 +386,6 @@ for argument in "$@"; do
                 "${LIVESPEC_DOD_JUDGEMENT_MODEL:-unset}" "${LIVESPEC_DRIFT_JUDGE_MODEL:-unset}" "${LIVESPEC_REFLECTOR_MODEL:-unset}" \
                 "${BEADS_DOLT_PASSWORD:+present}" >> "$STUB_DRIVE_ENV_LOG"
             printf '%s\n' "$item" >> "$STUB_DRIVE_LOG"
-            printf '%s %s\n' "$(date +%s%N)" "$item" >> "$STUB_DRIVE_TIME_LOG"
             if [ -n "${STUB_DRIVE_FAIL_TIMES:-}" ] \
                 && [ "$(grep -cxF -- "$item" "$STUB_DRIVE_LOG")" -le "$STUB_DRIVE_FAIL_TIMES" ]; then
                 # A drive that exits before its run lists, optionally printing a scripted JSON answer.
@@ -577,7 +589,7 @@ write_board() {
 CASE_DIR=""
 CASE_LOG=""
 DRIVE_LOG=""
-DRIVE_TIME_LOG=""
+MUTEX_OBSERVATION_LOG=""
 DRIVE_MUTEX_LOG=""
 FACTORY_READ_WRAPPER_LOG=""
 PREFLIGHT_LOG=""
@@ -602,8 +614,8 @@ new_case() {
     CASE_LOG="$CASE_DIR/launcher.log"
     DRIVE_LOG="$CASE_DIR/drive-log"
     : > "$DRIVE_LOG"
-    DRIVE_TIME_LOG="$CASE_DIR/drive-time-log"
-    : > "$DRIVE_TIME_LOG"
+    MUTEX_OBSERVATION_LOG="$CASE_DIR/mutex-observation-log"
+    : > "$MUTEX_OBSERVATION_LOG"
     DRIVE_MUTEX_LOG="$CASE_DIR/drive-mutex-log"
     : > "$DRIVE_MUTEX_LOG"
     FACTORY_READ_WRAPPER_LOG="$CASE_DIR/factory-read-wrapper-log"
@@ -657,7 +669,7 @@ new_case() {
     export STUB_DRIVE_LISTED_DIR="$CASE_DIR/listed"
     export STUB_RESUMED_DIR="$CASE_DIR/resumed"
     export STUB_DRIVE_LOG="$DRIVE_LOG"
-    export STUB_DRIVE_TIME_LOG="$DRIVE_TIME_LOG"
+    export STUB_MUTEX_OBSERVATION_LOG="$MUTEX_OBSERVATION_LOG"
     export STUB_DRIVE_MUTEX_LOG="$DRIVE_MUTEX_LOG"
     export STUB_FACTORY_READ_WRAPPER_LOG="$FACTORY_READ_WRAPPER_LOG"
     export STUB_PREFLIGHT_LOG="$PREFLIGHT_LOG"
@@ -790,12 +802,13 @@ log_has() { grep -qF -- "$2" "$1"; }
 ps_count() { grep -cxF -- "$1" "$PS_LOG" 2>/dev/null || true; }
 drive_log_items() { tr '\n' ' ' < "$DRIVE_LOG" | sed 's/ *$//'; }
 preflight_count() { grep -c " $1$" "$PREFLIGHT_LOG" 2>/dev/null || true; }
-# first_drive_ns <item>: the nanosecond stamp of the first drive of <item>; empty when it never drove.
-first_drive_ns() {
+# first_mutex_ns <item>: the nanosecond stamp of the first time a stub saw <item>'s launcher holding
+# the factory mutex; empty when no stub ever saw it hold the mutex.
+first_mutex_ns() {
     local stamp name first=""
     while read -r stamp name; do
         if [ "$name" = "$1" ] && { [ -z "$first" ] || [ "$stamp" -lt "$first" ]; }; then first=$stamp; fi
-    done < "$DRIVE_TIME_LOG"
+    done < "$MUTEX_OBSERVATION_LOG"
     printf '%s' "$first"
 }
 # preflight_between <item> <after_ns> <before_ns>: succeed when a preflight of <item> is stamped after
@@ -1440,12 +1453,12 @@ touch "$STUB_PREFLIGHT_RELEASE"
 await_both "$older_pid" "$younger_pid" 90
 # The verdict is the ordering of observed events, not a preflight count: any
 # number of head polls may run, so long as one follows the older release and
-# precedes the younger launcher's drive (taken under the factory mutex).
-younger_drive_ns=$(first_drive_ns bd-ib-stale-younger)
-if [ -n "$younger_drive_ns" ] && preflight_between bd-ib-stale-younger "$release_ns" "$younger_drive_ns"; then
+# precedes the stub's first sight of the younger launcher holding the factory mutex.
+younger_mutex_ns=$(first_mutex_ns bd-ib-stale-younger)
+if [ -n "$younger_mutex_ns" ] && preflight_between bd-ib-stale-younger "$release_ns" "$younger_mutex_ns"; then
     pass "a stale queued pass is re-run at the FIFO head before binding"
 else
-    fail "a stale queued pass was not re-run at the FIFO head (preflights=$(preflight_count bd-ib-stale-younger) release=$release_ns drive=${younger_drive_ns:-none})"
+    fail "a stale queued pass was not re-run at the FIFO head (preflights=$(preflight_count bd-ib-stale-younger) release=$release_ns mutex=${younger_mutex_ns:-none})"
 fi
 
 # A queued preflight failure is terminal for that launcher.  The older ticket
