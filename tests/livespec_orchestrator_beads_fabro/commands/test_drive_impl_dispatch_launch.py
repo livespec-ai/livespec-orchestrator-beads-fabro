@@ -124,6 +124,19 @@ def test_only_the_final_ready_set_refusal_looks_up_a_merged_pull_request(tmp_pat
     )
 
 
+def test_a_merged_ready_set_refusal_is_classified_as_delivery(tmp_path: Path) -> None:
+    assert (
+        delivery.delivered_merged_pull_request(
+            repo=tmp_path,
+            work_item_ref=_ITEM,
+            returncode=3,
+            stderr="ERROR: requested work-item(s) not in the ready set",
+            lookup=lambda _repo, _branch: 4963,
+        )
+        == 4963
+    )
+
+
 def test_a_final_ready_set_refusal_uses_the_default_merged_pull_request_lookup(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
