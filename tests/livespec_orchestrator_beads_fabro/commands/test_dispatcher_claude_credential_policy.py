@@ -366,6 +366,65 @@ def test_a_refusing_policy_assesses_no_slot(
 # --- the downstream consumers ------------------------------------------------
 
 
+def test_the_pre_launch_check_skips_a_numbered_slot_below_the_weekly_reserve(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A launcher re-checks the admission reserve when it has no admission choice."""
+    from livespec_orchestrator_beads_fabro.commands import _dispatcher_credential_env
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential import (
+        ClaudeCredentialStatus,
+    )
+
+    slot = _slot(4)
+    token = "tok-4"
+    config = {
+        _PLUGIN: {
+            "dispatcher": {
+                "claude_credential_policy": _numbered(slot),
+                "session_headroom_weekly_floor_percent": 10,
+            }
+        }
+    }
+    (tmp_path / ".livespec.jsonc").write_text(json.dumps(config), encoding="utf-8")
+    monkeypatch.setenv(slot, token)
+    real_policy = headroom_gate.session_headroom_policy
+
+    def _below_reserve_policy(**kwargs: Any) -> headroom.SessionHeadroomPolicy:
+        def _read(*, token: str | None, observed_at: str) -> headroom.SessionHeadroomReading:
+            return headroom.session_headroom_reading(
+                credential_identity=f"id-{token}",
+                observed_at=observed_at,
+                utilization=5,
+                seven_day=headroom.seven_day_reading(utilization=95, status="allowed_warning"),
+            )
+
+        return real_policy(read=_read, **kwargs)
+
+    monkeypatch.setattr(headroom_gate, "session_headroom_policy", _below_reserve_policy)
+    probe_called: list[bool] = []
+
+    def _probe(*, token: str) -> ClaudeCredentialStatus:
+        _ = token
+        probe_called.append(True)
+        return ClaudeCredentialStatus(
+            condition="usable",
+            present=True,
+            usable=True,
+            http_status=200,
+            error_type=None,
+            input_tokens=None,
+            output_tokens=None,
+            message="usable",
+            remedy="none",
+        )
+
+    checked = _dispatcher_credential_env.checked_credential_env(repo=tmp_path, probe=_probe)
+
+    assert isinstance(checked, str)
+    assert "seven-day-floor" in checked
+    assert probe_called == []
+
+
 def test_claude_cred_status_refuses_a_missing_policy_as_a_precondition(
     capsys: pytest.CaptureFixture[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

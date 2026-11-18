@@ -33,6 +33,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from livespec_orchestrator_beads_fabro.commands import (
+    _dispatcher_session_headroom_gate as headroom_gate,
+)
+from livespec_orchestrator_beads_fabro.commands._acp_session_headroom import (
+    SessionHeadroomPolicy,
+)
+from livespec_orchestrator_beads_fabro.commands._acp_session_headroom_projection import (
+    SEVEN_DAY_FLOOR_SKIP_KIND,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential import (
     ClaudeCredentialStatus,
     absent_claude_credential_status,
@@ -48,8 +57,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_wrapper i
     credential_wrapper_text,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_selector import (
+    admission_slot_chooser_registered,
     select_factory_credential,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_journal_file import utc_now_iso
 
 __all__: list[str] = [
     "CheckedCredentialEnv",
@@ -166,9 +177,23 @@ def checked_credential_env(
     policy (absent or invalid, no declared slot injected, or the admitted slot
     gone) refuses here, before anything is minted.
     """
+    # An admitted launch already has the evaluation's memoized chooser.  Reusing
+    # it avoids a second provider reading; only a bypass launch builds a policy
+    # to apply the same weekly reserve before it chooses a slot.
+    policy = (
+        None
+        if admission_slot_chooser_registered()
+        else headroom_gate.session_headroom_policy(
+            repo=repo, now_iso=utc_now_iso(), journal_path=None
+        )
+    )
     env_name = projected_credential(repo=repo)
     if isinstance(env_name, ClaudeCredentialRefusal):
         return f"C-mode dispatch refused before sandbox launch: {env_name.detail}"
+    if policy is not None:
+        weekly_refusal = _weekly_reserve_refusal(env_name=env_name, policy=policy)
+        if weekly_refusal is not None:
+            return weekly_refusal
     status = assess_resolved_credential(repo=repo, token=os.environ.get(env_name, ""), probe=probe)
     if status.usable:
         return CheckedCredentialEnv(env_name=env_name)
@@ -178,3 +203,24 @@ def checked_credential_env(
         "The dispatch target's credential_wrapper must inject the full "
         f"per-wrapper credential set: {dispatch_required_credentials_text()}."
     )
+
+
+def _weekly_reserve_refusal(*, env_name: str, policy: SessionHeadroomPolicy) -> str | None:
+    """Refuse the selected slot only for the admission policy's weekly floor.
+
+    The pool assessment records the exact skip kind for every numbered slot.
+    Reusing that result keeps the launcher strict below the reserve while
+    preserving admission's equality, absent-weekly-reading and zero-floor
+    behaviour.  The provider-rejection and five-hour arms remain their own
+    launch checks rather than being relabelled as a reserve refusal here.
+    """
+    readings = policy.pool_read() if policy.pool_read is not None else ()
+    for reading in readings:
+        if reading.slot is not None and reading.slot.slot == env_name:
+            if reading.slot.skip_kind == SEVEN_DAY_FLOOR_SKIP_KIND:
+                return (
+                    "C-mode dispatch refused before sandbox launch: selected credential "
+                    f"{env_name} has a seven-day-floor headroom skip."
+                )
+            return None
+    return None

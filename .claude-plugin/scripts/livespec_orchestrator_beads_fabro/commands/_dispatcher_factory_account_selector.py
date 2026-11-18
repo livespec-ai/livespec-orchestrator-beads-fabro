@@ -58,6 +58,7 @@ __all__: list[str] = [
     "SELECTED_ACCOUNT_RECORD_REL",
     "FactoryCredentialChoice",
     "admission_credential_refusal",
+    "admission_slot_chooser_registered",
     "claude_credential_policy_for",
     "factory_credential_env_name",
     "injected_credential_slots",
@@ -178,6 +179,11 @@ def register_admission_slot_chooser(*, chooser: Callable[[], str | None] | None)
         _ADMISSION_CHOOSER.clear()
     else:
         _ADMISSION_CHOOSER["chooser"] = chooser
+
+
+def admission_slot_chooser_registered() -> bool:
+    """Whether this process already holds an admission-selected pool slot."""
+    return "chooser" in _ADMISSION_CHOOSER
 
 
 def selected_account_record_path(*, home: Path) -> Path:
