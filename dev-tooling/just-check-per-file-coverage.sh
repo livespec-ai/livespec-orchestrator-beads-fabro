@@ -41,7 +41,7 @@ fi
 # diagnostics and exit status so check-coverage can consume precisely this
 # verdict rather than re-analysing the same suite data.
 mkdir -p .coverage-gates
-rm -f .coverage-gates/per-file.log .coverage-gates/per-file.status
+rm -f .coverage-gates/per-file.log .coverage-gates/per-file.status .coverage-gates/per-file.provenance
 env -u COVERAGE_FILE uv run python -m livespec_dev_tooling.checks.per_file_coverage \
     2>&1 | tee .coverage-gates/per-file.log
 coverage_rc=${PIPESTATUS[0]}
@@ -54,5 +54,7 @@ fi
 # A pytest failure still makes this producer fail, but it is not a coverage-gate
 # failure and therefore must not turn check-coverage red.
 printf '%s\n' "$coverage_rc" > .coverage-gates/per-file.status
+printf 'commit=%s\nuid=%s\n' "$(git rev-parse HEAD 2>/dev/null || true)" "$(id -u)" \
+    > .coverage-gates/per-file.provenance
 
 exit "$final_rc"

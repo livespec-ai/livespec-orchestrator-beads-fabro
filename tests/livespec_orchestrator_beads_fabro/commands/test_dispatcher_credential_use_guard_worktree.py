@@ -53,9 +53,6 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_use_proje
     credential_use_env_lines,
     credential_use_guard_prepare_steps_block,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_gh_refresh import (
-    DEFAULT_SANDBOX_GH_REFRESH_ROOT,
-)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_helper_registry import (
     GH_REFRESH_ROOT,
     LIVESPEC_ROOT,
@@ -316,9 +313,7 @@ def _run_prepare_step(*, script: str, env: dict[str, str], repo: Path) -> None:
         _ = fetch_helpers(
             roots={
                 PLUGINS_ROOT: repo.parent / "plugins",
-                GH_REFRESH_ROOT: Path(
-                    _rebased(text=DEFAULT_SANDBOX_GH_REFRESH_ROOT, sandbox_root=repo)
-                ),
+                GH_REFRESH_ROOT: repo.parent / "gh-refresh",
                 LIVESPEC_ROOT: Path(_rebased(text=LIVESPEC_SANDBOX_ROOT_PATH, sandbox_root=repo)),
             }
         )
