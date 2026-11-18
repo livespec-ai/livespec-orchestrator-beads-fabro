@@ -72,6 +72,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_publish_branch_prese
 from livespec_orchestrator_beads_fabro.commands._dispatcher_reflection_journal import (
     read_journal_records,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_anchor import published_head
 from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_forge import (
     branch_pull_request,
 )
@@ -99,6 +100,7 @@ PUBLISH_BRANCH_RECLAIM_HELD_STAGE = "publish-branch-reclaim-held"
 # so each reason is defined where the thing it reports on is decided.
 HELD_ORIGIN_UNOBSERVABLE = "origin-unobservable"
 HELD_VERIFIED_PROOF = "verified-proof-on-open-pull-request"
+HELD_PROOF_UNOBSERVABLE = "proof-unobservable"
 
 _GIT_TIMEOUT_SECONDS = 120.0
 
@@ -285,26 +287,11 @@ def reclaim_stale_publish_branch(
             ),
         )
         return
-    if _open_publish_branch_has_verified_proof(
-        runner=runner,
-        repo=repo,
-        branch=surviving.branch,
-        head=surviving.head,
-    ):
-        _held(
-            journal=journal,
-            work_item_id=work_item_id,
-            hold=_Hold(
-                reason=HELD_VERIFIED_PROOF,
-                detail=(
-                    "the open pull request at the surviving publish head carries a verified "
-                    "Proof of Done record, so reclaim leaves the proved branch available for "
-                    "recovery"
-                ),
-                branch=surviving.branch,
-                head=surviving.head,
-            ),
-        )
+    proof_hold = _verified_proof_hold(
+        runner=runner, repo=repo, branch=surviving.branch, head=surviving.head
+    )
+    if proof_hold is not None:
+        _held(journal=journal, work_item_id=work_item_id, hold=proof_hold)
         return
     _record_reclaim(
         runner=runner,
@@ -315,30 +302,58 @@ def reclaim_stale_publish_branch(
     )
 
 
-def _open_publish_branch_has_verified_proof(
+def _verified_proof_hold(
     *, runner: CommandRunner, repo: Path, branch: str, head: str
-) -> bool:
-    """Whether the surviving head's open pull request already carries verified proof.
+) -> _Hold | None:
+    """The hold the surviving head's open pull request earns, or `None` to reclaim.
 
-    The branch reader supplies the forge's open-state and head observation, and
-    the shared proof reader decides whether a comment is a Proof of Done record.
-    A failed or malformed forge read establishes neither fact, so it cannot be
-    mistaken for the positive condition that protects a branch from reclaim.
+    Three answers, never two. A verified Proof of Done record whose own declared
+    publish head IS the surviving head holds the branch for recovery. A forge read
+    that failed, or named a pull request without a head, holds it too under its own
+    reason: neither establishes that no proof exists, so neither may license a
+    deletion that closes the pull request. Only an answered read that shows no open
+    pull request at this head, or no verified record declaring this head, reclaims.
+
+    The branch reader supplies the forge's open-state and head observation, the
+    shared proof reader decides whether a comment is a Proof of Done record, and the
+    resume anchor's parser reads the head that record declares. A verified record for
+    an EARLIER head proves nothing about later work on the branch.
     """
     observed = branch_pull_request(repo=repo, branch=branch, runner=runner)
     pull_request = observed.pull_request
-    return bool(
-        observed.observed
-        and pull_request is not None
-        and pull_request.state == "OPEN"
-        and pull_request.head == head
-        and (
-            records := read_pull_request_records(
-                repo=repo, pr_number=pull_request.number, runner=runner
-            )
-        )
-        is not None
-        and latest_proof_record(records=records, verdict=VERDICT_VERIFIED) is not None
+    if not observed.observed or (pull_request is not None and pull_request.head is None):
+        return _proof_unobservable(branch=branch, head=head, what="the open pull request")
+    if pull_request is None or pull_request.state != "OPEN" or pull_request.head != head:
+        return None
+    records = read_pull_request_records(repo=repo, pr_number=pull_request.number, runner=runner)
+    if records is None:
+        return _proof_unobservable(branch=branch, head=head, what="its Proof of Done records")
+    latest = latest_proof_record(records=records, verdict=VERDICT_VERIFIED)
+    if latest is None or published_head(body=latest.body) != head:
+        return None
+    return _Hold(
+        reason=HELD_VERIFIED_PROOF,
+        detail=(
+            "the open pull request at the surviving publish head carries a verified "
+            "Proof of Done record declaring that head, so reclaim leaves the proved "
+            "branch available for recovery"
+        ),
+        branch=branch,
+        head=head,
+    )
+
+
+def _proof_unobservable(*, branch: str, head: str, what: str) -> _Hold:
+    """The hold for a forge read that could not establish whether proof exists."""
+    return _Hold(
+        reason=HELD_PROOF_UNOBSERVABLE,
+        detail=(
+            f"the forge could not be read for {what} of the surviving publish branch, so "
+            "whether it carries a verified Proof of Done record could not be established "
+            "and the branch is left exactly as it stands"
+        ),
+        branch=branch,
+        head=head,
     )
 
 

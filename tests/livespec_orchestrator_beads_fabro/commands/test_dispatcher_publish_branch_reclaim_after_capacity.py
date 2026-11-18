@@ -124,7 +124,10 @@ class _Runner:
         for needle, result in self.answers.items():
             if needle in joined:
                 return result
-        return CommandResult(exit_code=0, stdout="", stderr="")
+        # An unscripted `gh pr list` answers the forge's own empty array: the listing
+        # always prints a JSON array, so an empty body would be an unreadable read.
+        empty = "[]" if "gh pr list" in joined else ""
+        return CommandResult(exit_code=0, stdout=empty, stderr="")
 
 
 def _runner(*, events: list[str]) -> _Runner:
