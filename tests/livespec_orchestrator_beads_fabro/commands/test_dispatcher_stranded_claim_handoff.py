@@ -55,6 +55,9 @@ _COMMANDS = (
 _RECOVERY_MODULE = (
     "livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_handoff_recovery"
 )
+_SUCCEEDED_RECOVERY_MODULE = (
+    "livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_succeeded_recovery"
+)
 _ITEM_ID = "bd-ib-handoffpass"
 _RUN_ID = "01HANDOFFRUN"
 _OTHER_RUN_ID = "01OTHERRUN"
@@ -261,20 +264,29 @@ def _stored() -> WorkItem:
     return next(iter(read_work_items(path=_config())))
 
 
-def _recovery_module() -> Any:
-    module_path = _COMMANDS / "_dispatcher_stranded_claim_handoff_recovery.py"
+def _recovery_module(*, succeeded: bool = False) -> Any:
+    module_name = (
+        "_dispatcher_stranded_claim_succeeded_recovery.py"
+        if succeeded
+        else "_dispatcher_stranded_claim_handoff_recovery.py"
+    )
+    module_path = _COMMANDS / module_name
     assert module_path.is_file(), f"{module_path} does not exist yet"
-    return importlib.import_module(_RECOVERY_MODULE)
+    return importlib.import_module(_SUCCEEDED_RECOVERY_MODULE if succeeded else _RECOVERY_MODULE)
 
 
-def _stub_reconcile(*, monkeypatch: pytest.MonkeyPatch, exit_code: int) -> list[argparse.Namespace]:
+def _stub_reconcile(
+    *, monkeypatch: pytest.MonkeyPatch, exit_code: int, succeeded: bool = False
+) -> list[argparse.Namespace]:
     calls: list[argparse.Namespace] = []
 
     def _reconcile(*, args: argparse.Namespace) -> int:
         calls.append(args)
         return exit_code
 
-    monkeypatch.setattr(_recovery_module(), "reconcile_merged_for_claim", _reconcile)
+    monkeypatch.setattr(
+        _recovery_module(succeeded=succeeded), "reconcile_merged_for_claim", _reconcile
+    )
     return calls
 
 
@@ -468,7 +480,7 @@ def test_a_succeeded_claim_without_a_handoff_of_its_own_dispatch_is_held_as_befo
 def test_a_succeeded_claim_whose_published_pull_request_merged_is_reconciled_without_a_handoff(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    calls = _stub_reconcile(monkeypatch=monkeypatch, exit_code=0)
+    calls = _stub_reconcile(monkeypatch=monkeypatch, exit_code=0, succeeded=True)
     repo = _repo(tmp_path=tmp_path)
     journal = _journal(repo=repo, rows=[_LAUNCH])
     forge = _Forge(
