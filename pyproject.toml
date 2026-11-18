@@ -438,20 +438,9 @@ delegated_gate = true
 # 30 across two 10-minute windows and is no better than its 2026-11-15 ~06:58Z
 # baseline (research note 004), or if any gates-cq workload waits more than
 # 10 minutes for admission.
-#
-# CPU REQUEST 10 to 9, 2026-11-18 (legacy-coordinator-agent GO, plan
-# gate-job-resources, STRANDED-CAPACITY read on gmktec-xubuntu). gmktec's pod
-# requests read 22.1 of 32 allocatable cpu (7 factory sandboxes at 3 cpu plus
-# 1.1), leaving 9.9, so its gates-flavor sat at 0/10 while the node read 21-34%
-# idle and a 10-cpu gate never fit, by 0.1 cpu. The Job has no CPU limit, so it
-# still bursts: a gate on gamingpc-xubuntu read 11.6 cores on a 10 request, and
-# gate_parallelism stays 10. Lane concurrency does not change: gamingpc (12
-# allocatable) and gmktec (10 quota) admit one gate, poweredge (30 quota)
-# admits three. REVERT to 10 if gate p90 wall time worsens by more than 15% over
-# the next window.
 # Source: livespec-dev-tooling plan gate-job-resources, research notes 003 and
 # 004, epic livespec-dev-tooling-ukoeah, item (i).
-gate_cpu = 9
+gate_cpu = 10
 gate_parallelism = 10
 gate_memory = "8Gi"
 # The dev host delegates a hand commit's aggregate when it can submit a gates
