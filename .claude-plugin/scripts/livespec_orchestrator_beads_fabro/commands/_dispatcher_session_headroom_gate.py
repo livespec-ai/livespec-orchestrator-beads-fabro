@@ -138,6 +138,7 @@ def session_headroom_policy(
     repo: Path,
     now_iso: str,
     journal_path: Path | None,
+    register_chooser: bool = True,
     read: Callable[..., SessionHeadroomReading] = read_projected_session_headroom,
     codex_read: Callable[..., CodexHeadroomReading] = read_projected_codex_headroom,
 ) -> SessionHeadroomPolicy:
@@ -162,6 +163,9 @@ def session_headroom_policy(
     THE MEMO IS THE WHOLE INJECTED SLOT POOL, assessed once and ranked, and the
     slot it chooses is registered as the factory credential every other consumer
     resolves, so one slot is chosen per evaluation and used for the dispatch.
+    A launcher that bypasses admission passes `register_chooser=False`: it
+    reads the pool's assessments to grade the slot ITS path selected, and must
+    not install the admission winner in place of that slot.
     """
     floor = unsafe_perform_io(
         resolve_session_headroom_floor_percent(cwd=repo).value_or(
@@ -202,7 +206,8 @@ def session_headroom_policy(
             )
         return taken[0]
 
-    register_admission_slot_chooser(chooser=lambda: pool_once().chosen_slot)
+    if register_chooser:
+        register_admission_slot_chooser(chooser=lambda: pool_once().chosen_slot)
 
     return SessionHeadroomPolicy(
         floor_percent=floor,

@@ -184,7 +184,7 @@ def checked_credential_env(
         None
         if admission_slot_chooser_registered()
         else headroom_gate.session_headroom_policy(
-            repo=repo, now_iso=utc_now_iso(), journal_path=None
+            repo=repo, now_iso=utc_now_iso(), journal_path=None, register_chooser=False
         )
     )
     env_name = projected_credential(repo=repo)
