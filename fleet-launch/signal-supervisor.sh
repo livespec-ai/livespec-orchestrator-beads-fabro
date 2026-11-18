@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Forward launcher stop signals without making Bash parse a trap action.  This
+# Supervise launcher stop signals without making Bash parse a trap action. This
 # stays a shell file so a launcher copied for an on-disk re-exec carries its
 # supervisor with it.
 export FLEET_LAUNCH_SIGNAL_SUPERVISOR=1
@@ -39,22 +39,28 @@ def main(argv: list[str]) -> int:
         environment["FLEET_LAUNCH_SIGNAL_SUPERVISOR_CHILD"] = "1"
         environment["FLEET_LAUNCH_SIGNAL_CAUSE_FILE"] = str(cause_path)
         worker = subprocess.Popen([launcher, *argv[2:]], env=environment)
-        forwarded = False
+        stop_signal: int | None = None
 
         def forward(signum: int, _frame: object) -> None:
-            nonlocal forwarded
-            if forwarded:
+            nonlocal stop_signal
+            if stop_signal is not None:
                 return
-            forwarded = True
+            stop_signal = signum
             name = signal.Signals(signum).name.removeprefix("SIG")
             write_cause(cause_path, name)
             with suppress(ProcessLookupError):
-                worker.send_signal(signum)
+                # Bash can lose INT or HUP while it waits for its short-lived
+                # hold-poll child.  The worker's default TERM exit is reliable;
+                # its EXIT cleanup reads the original cause above, while this
+                # supervisor preserves the caller-visible original status.
+                worker.send_signal(signal.SIGTERM)
 
         for watched in (signal.SIGINT, signal.SIGHUP, signal.SIGTERM):
             signal.signal(watched, forward)
 
         return_code = worker.wait()
+        if stop_signal is not None:
+            return 128 + stop_signal
     return return_code if return_code >= 0 else 128 - return_code
 
 

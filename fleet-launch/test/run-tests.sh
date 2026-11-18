@@ -2692,24 +2692,15 @@ os.execv(sys.argv[1], sys.argv[1:])' "$launcher" bd-ib-term > "$STUB_RM_PROBE_LO
     signal_during_hold_substitution "$RESUME_LAUNCHER" resume HUP 129
     unset STUB_TERM_SUBSTITUTION_GATE STUB_TERM_SUBSTITUTION_SED_DELAY_S
 
-    # wait_for_signal_exit <pid> <signal> <log>: a directly delivered INT or HUP
-    # is normally handled as soon as the launcher returns from its short
-    # hold-poll sleep. Under CPU saturation, however, one delivery can coincide
-    # with that child exiting and be swallowed. Retry the same signal at most
-    # once a second until cleanup starts, then leave that cleanup alone: another
-    # HUP or INT while its EXIT trap writes the terminal record can interrupt
-    # the record itself. A launcher that still does not exit is stopped and
-    # reported as a failed assertion, never mistaken for a signal attribution.
+    # wait_for_signal_exit <pid> <signal> <log>: one directly delivered signal
+    # must end the launcher. Retrying would conceal the Bash signal-loss race
+    # this Scenario 312 case is meant to reject under CPU contention.
     SIGNAL_EXIT_GRACE_S=${SIGNAL_EXIT_GRACE_S:-5}
     wait_for_signal_exit() {
-        local pid="$1" sig="$2" log="$3" deadline retry_due
+        local pid="$1" sig="$2" log="$3" deadline
+        kill -"$sig" "$pid" 2>/dev/null || return 1
         deadline=$(( $(date +%s) + SIGNAL_EXIT_GRACE_S ))
-        retry_due=$(date +%s)
         while kill -0 "$pid" 2>/dev/null && [ "$(date +%s)" -lt "$deadline" ]; do
-            if ! grep -qF 'terminal:' "$log" && [ "$(date +%s)" -ge "$retry_due" ]; then
-                kill -"$sig" "$pid" 2>/dev/null || true
-                retry_due=$(( $(date +%s) + 1 ))
-            fi
             sleep "$HARNESS_POLL_S"
         done
         if kill -0 "$pid" 2>/dev/null; then
@@ -2760,6 +2751,8 @@ os.execv(sys.argv[1], sys.argv[1:])' "$launcher" bd-ib-term > "$STUB_RM_PROBE_LO
         if [ "$sig_rc" = "$want_rc" ] \
             && [ "$(count_matching "$STUB_RM_PROBE_LOG_SOURCE" 'terminal:')" = 1 ] \
             && line_has_all "$STUB_RM_PROBE_LOG_SOURCE" 'terminal:' 'item=bd-ib-term' 'ticket=' "cause=$want_cause" \
+            && [ -z "$(find "$FLEET_LAUNCH_GMK_QUEUE_DIR" -type f -print -quit)" ] \
+            && [ ! -d "$FLEET_LAUNCH_GMK_LOCK_DIR" ] \
             && ! grep -qF -- 'cause=resume gave up:' "$STUB_RM_PROBE_LOG_SOURCE" \
             && { [ "$sig" = TERM ] || ! grep -qF -- 'cause=signal TERM' "$STUB_RM_PROBE_LOG_SOURCE"; }; then
             pass "$label records a $sig during the repository-hold wait as $want_cause, not as TERM"
@@ -2768,16 +2761,18 @@ os.execv(sys.argv[1], sys.argv[1:])' "$launcher" bd-ib-term > "$STUB_RM_PROBE_LO
             tail -n 4 "$STUB_RM_PROBE_LOG_SOURCE" >&2
         fi
     }
-    # The normal gate samples each signal once.  A focused stability run sets
-    # HARNESS_SIGNAL_HOLD_ATTEMPTS=200 to repeat every launcher/signal case
-    # without multiplying the unrelated Scenario 312 exercises.
+    # The normal gate samples each signal once. The resume INT hold-wait case
+    # is the focused stability proof: it must survive 200 first-delivery
+    # attempts under the CPU contention Scenario 10b leaves active.
     for signal_attempt in $(seq 1 "${HARNESS_SIGNAL_HOLD_ATTEMPTS:-1}"); do
         signal_during_hold "$LAUNCHER" impl INT 130 'signal INT' "$signal_attempt"
         signal_during_hold "$LAUNCHER" impl TERM 143 'signal TERM' "$signal_attempt"
         signal_during_hold "$LAUNCHER" impl HUP 129 'signal HUP' "$signal_attempt"
-        signal_during_hold "$RESUME_LAUNCHER" resume INT 130 'signal INT' "$signal_attempt"
         signal_during_hold "$RESUME_LAUNCHER" resume TERM 143 'signal TERM' "$signal_attempt"
         signal_during_hold "$RESUME_LAUNCHER" resume HUP 129 'signal HUP' "$signal_attempt"
+    done
+    for signal_attempt in $(seq 1 "${HARNESS_RESUME_INT_HOLD_ATTEMPTS:-200}"); do
+        signal_during_hold "$RESUME_LAUNCHER" resume INT 130 'signal INT' "$signal_attempt"
     done
 
     # A separate gate pauses dispatch after it has recorded its mutex holder.
