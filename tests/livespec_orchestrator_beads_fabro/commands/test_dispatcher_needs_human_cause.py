@@ -259,6 +259,36 @@ def test_a_failed_factory_run_records_its_node_visit_signature_and_terminal_reas
     assert "terminal reason: the acceptance assertion failed" in body
 
 
+def test_a_successful_factory_run_records_its_run_id_and_terminal_outcome(tmp_path: Path) -> None:
+    """Every completed run, not only a needs-human ending, is durable on its item."""
+    _write_config(tmp_path)
+    append_work_item(path=_config(), item=_item())
+
+    record_needs_human_cause(
+        repo=tmp_path,
+        item=_item(),
+        outcome=DispatchOutcome(
+            work_item_id=_ITEM,
+            status="green",
+            stage="done",
+            pr_number=7,
+            merge_sha="deadbeef",
+            detail="merged pull request #7",
+            fabro_run_id=_RUN,
+        ),
+        journal=_RecordingJournal(),
+    )
+
+    bodies = [
+        comment.text
+        for comment in read_work_item_comments(path=_config(), work_item_id=_ITEM)
+        if NEEDS_HUMAN_CAUSE_MARKER in comment.text
+    ]
+    assert bodies == [
+        f"{NEEDS_HUMAN_CAUSE_MARKER}\n\nwork-item: {_ITEM}\nrun id: {_RUN}\nterminal outcome: merged pull request #7"
+    ]
+
+
 def test_a_genuine_request_record_claims_no_fault(tmp_path: Path) -> None:
     """The request arm: a question awaits, and nothing is attributed to a stage."""
     _assert_field_exists()
