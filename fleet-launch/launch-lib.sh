@@ -150,8 +150,47 @@ installed_build() {
     printf '%s\n' "$override"
     return 0
   fi
-  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print([e["version"] for e in d["plugins"][sys.argv[2]] if e.get("projectPath")==sys.argv[3]][0])' \
-    "$FLEET_LAUNCH_PLUGIN_REGISTRY" "$FLEET_LAUNCH_PLUGIN_KEY" "$REPO" 2>/dev/null
+  python3 - "$FLEET_LAUNCH_PLUGIN_REGISTRY" "$FLEET_LAUNCH_PLUGIN_KEY" "$REPO" <<'PY'
+import json
+import os
+import sys
+
+registry, plugin_key, repo = sys.argv[1:]
+repo_realpath = os.path.realpath(repo)
+repo_name = os.path.basename(repo_realpath)
+try:
+    with open(registry, encoding="utf-8") as handle:
+        entries = json.load(handle)["plugins"][plugin_key]
+except (OSError, ValueError, KeyError, TypeError) as error:
+    print(f"fleet-launch: installed build refusal: registry '{registry}' plugin key '{plugin_key}' cannot resolve REPO '{repo}' (looked up realpath '{repo_realpath}'): {error}", file=sys.stderr)
+    raise SystemExit(1)
+
+def choose(candidates):
+    builds = [entry.get("version") for entry in candidates if isinstance(entry.get("version"), str) and entry["version"]]
+    if len(candidates) == 1 and len(builds) == 1:
+        print(builds[0])
+        raise SystemExit(0)
+    return len(candidates)
+
+exact = [entry for entry in entries if isinstance(entry, dict) and isinstance(entry.get("projectPath"), str) and os.path.realpath(entry["projectPath"]) == repo_realpath]
+exact_count = choose(exact)
+if exact_count == 0:
+    matches = [entry for entry in entries if isinstance(entry, dict) and isinstance(entry.get("projectPath"), str) and os.path.basename(os.path.normpath(entry["projectPath"])) == repo_name]
+    match_kind, match_count = "basename fallback", choose(matches)
+else:
+    match_kind, match_count = "realpath", exact_count
+print(f"fleet-launch: installed build refusal: registry '{registry}' plugin key '{plugin_key}' has {match_count} {match_kind} match(es) for REPO '{repo}' (looked up realpath '{repo_realpath}'): refusing", file=sys.stderr)
+raise SystemExit(1)
+PY
+}
+
+# The one guard every launcher uses before handing a plugin directory to a
+# helper. It prevents a registry miss from becoming the bare cache directory.
+installed_plugin_dir() {
+  local build
+  build=$(installed_build) || return 1
+  [ -n "$build" ] || { echo "fleet-launch: installed build refusal: registry '$FLEET_LAUNCH_PLUGIN_REGISTRY' plugin key '$FLEET_LAUNCH_PLUGIN_KEY' looked up REPO '$REPO' but produced an empty build: refusing" >&2; return 1; }
+  printf '%s\n' "$FLEET_LAUNCH_PLUGIN_CACHE/$build"
 }
 
 # build_source: where the launch's build came from, for the start line.
@@ -183,7 +222,7 @@ gmk_p1() {
   local out
   if [ -z "${ITEM_P1+x}" ]; then
     ITEM_P1=0
-    [ -n "${plugin:-}" ] || plugin="$FLEET_LAUNCH_PLUGIN_CACHE/$(installed_build)"
+    [ -n "${plugin:-}" ] || plugin=$(installed_plugin_dir) || return 1
     out=$(cd "$REPO" && wrap -- python3 "$FLEET_LAUNCH_DIR/ledger-item.py" priority "$plugin" "$REPO" "$ITEM" 2>/dev/null) || out=""
     out=$(printf '%s\n' "$out" | sed -n 's/^LEDGER-PRIORITY //p' | tail -n 1)
     [ "$out" = 1 ] && ITEM_P1=1

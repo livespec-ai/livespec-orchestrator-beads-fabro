@@ -63,6 +63,10 @@ lock=""
 marker=""
 plugin=""
 FLEET_CAP=0
+# Refuse before taking a ticket when the shared installed-build guard cannot
+# resolve this repository's plugin directory.
+plugin=$(installed_plugin_dir) || exit 70
+build=${plugin##*/}
 # Non-run exit accounting (Scenario 312): a resume launcher that exits before its resume client starts
 # writes one terminal line and, when its item still reads ready, one ledger comment naming the dropped ticket.
 resume_started=0
@@ -162,7 +166,7 @@ write_terminal() {
 # reads ready. The ticket is not re-taken: this launcher is exiting.
 report_dropped_ticket() {
   local status body
-  [ -n "$plugin" ] || plugin="$FLEET_LAUNCH_PLUGIN_CACHE/$(installed_build)"
+  [ -n "$plugin" ] || plugin=$(installed_plugin_dir) || return 1
   status=$(item_status) || status=unreadable
   [ "$status" = ready ] || return 0
   body="Fleet launcher $SEAT exited for $ITEM before its resume started: ticket ${ticket_number:-none} was dropped and not re-taken (cause: $1). This exit was not a run ending, and the item read $status. Remedy: launch the resume again."

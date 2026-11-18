@@ -559,6 +559,8 @@ cat > "$REGISTRY" <<REGISTRY_FIXTURE
   {"version": "$PLUGIN_BUILD", "projectPath": "$TENANT_BROKEN"},
   {"version": "$PLUGIN_BUILD", "projectPath": "$TENANT_DIVERGED"}]}}
 REGISTRY_FIXTURE
+REGISTRY_ORIGINAL="$WORK/plugins/installed_plugins.original.json"
+cp "$REGISTRY" "$REGISTRY_ORIGINAL"
 
 # --- per-case state ----------------------------------------------------------
 # A board fixture holding one live run per line, plus the terminal rows a real
@@ -1066,6 +1068,64 @@ else
     fail "an unmaterialized build override did not refuse cleanly (rc=$RC, dispatches: $(drive_log_items))"
     tail -8 "$CASE_DIR/missing.log" >&2
 fi
+
+# The installed-build guard compares real paths first, then permits exactly one
+# basename fallback for a registry moved independently of the checkout. It must
+# refuse before the credential probe when neither rule identifies one build.
+default_orch=$(env -u FLEET_LAUNCH_ORCH_REPO \
+    FLEET_LAUNCH_PLUGIN_REGISTRY="$REGISTRY" \
+    FLEET_LAUNCH_PLUGIN_CACHE="$PLUGIN_CACHE" \
+    FLEET_LAUNCH_PLUGIN_KEY="$PLUGIN_KEY" \
+    bash -c '. "$1"; printf "%s" "$FLEET_LAUNCH_ORCH_REPO"' bash "$LAUNCH_DIR/config.sh")
+if [ "$default_orch" = "$TENANT" ]; then
+    pass "an unset orchestrator repository defaults from its install record, not a workspace path"
+else
+    fail "an unset orchestrator repository did not use its install record (got '$default_orch')"
+fi
+
+TENANT_SYMLINK="$WORK/tenant-through-symlink"
+ln -s "$TENANT" "$TENANT_SYMLINK"
+new_case installed-build-realpath
+open_boards
+REPO_OVERRIDE="$TENANT_SYMLINK" run_launcher bd-ib-realpath "$CASE_DIR/realpath.log"
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = "bd-ib-realpath" ]; then
+    pass "a registry projectPath resolves through a symlinked REPO realpath"
+else
+    fail "a symlinked repository did not resolve its installed build (rc=$RC, dispatches: $(drive_log_items))"
+    tail -8 "$CASE_DIR/realpath.log" >&2
+fi
+
+cat > "$REGISTRY" <<REGISTRY_FIXTURE
+{"plugins": {"$PLUGIN_KEY": [{"version": "$PLUGIN_BUILD", "projectPath": "$WORK/relocated/${TENANT##*/}"}]}}
+REGISTRY_FIXTURE
+new_case installed-build-basename
+open_boards
+run_launcher bd-ib-basename "$CASE_DIR/basename.log"
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = "bd-ib-basename" ]; then
+    pass "one registry entry with the repository basename is used as the fallback"
+else
+    fail "the one-entry basename fallback did not resolve the installed build (rc=$RC, dispatches: $(drive_log_items))"
+    tail -8 "$CASE_DIR/basename.log" >&2
+fi
+
+cat > "$REGISTRY" <<REGISTRY_FIXTURE
+{"plugins": {"$PLUGIN_KEY": [{"version": "$PLUGIN_BUILD", "projectPath": "$WORK/no-registry-match"}]}}
+REGISTRY_FIXTURE
+new_case installed-build-mismatch
+open_boards
+run_launcher bd-ib-registry-mismatch "$CASE_DIR/mismatch.log"
+if [ "$RC" != 0 ] && [ ! -s "$DRIVE_LOG" ] \
+    && log_has "$CASE_DIR/mismatch.log" "installed build refusal" \
+    && log_has "$CASE_DIR/mismatch.log" "$REGISTRY" \
+    && log_has "$CASE_DIR/mismatch.log" "$PLUGIN_KEY" \
+    && log_has "$CASE_DIR/mismatch.log" "$TENANT" \
+    && ! log_has "$CASE_DIR/mismatch.log" "credential probe NOT usable"; then
+    pass "a registry mismatch refuses loudly before the credential probe or a dispatch"
+else
+    fail "a registry mismatch did not make the shared installed-build refusal (rc=$RC, dispatches: $(drive_log_items))"
+    tail -8 "$CASE_DIR/mismatch.log" >&2
+fi
+cp "$REGISTRY_ORIGINAL" "$REGISTRY"
 
 # --- 3. two queued tickets launch in FIFO order -----------------------------
 # The FIFO order is the TICKET order, not the start order, so the launcher
