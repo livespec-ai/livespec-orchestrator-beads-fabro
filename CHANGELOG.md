@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.342.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.341.1...v0.342.0) (2026-11-18)
+
+
+### Features
+
+* red ([aa63653](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/aa636531e7b4cb81feee3235f219c5ba348d7088))
+* red — per-host shared cache of the full-ledger bd list dump (bd-ib-ayxi2l) ([f8a0ef7](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/f8a0ef7ee19796de9e16141a3e5a1548e647c434))
+
 ## [0.341.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.341.0...v0.341.1) (2026-11-18)
 
 
