@@ -115,10 +115,11 @@ def file_job(  # noqa: PLR0913 - the data is one filing record.
         job_name=name,
         description=description,
     )
-    if not is_successful(capture(path=context.config, item=item, checklist=_CHECKLIST)):
-        return None, f"unfiled {breakage_key}: capture work item was not routed"
+    problem = _capture(capture=capture, config=context.config, item=item)
     if context.client is None:
-        return item.id, None
+        return (None, f"unfiled {breakage_key}: {problem}") if problem else (item.id, None)
+    # Stamp even when capture failed: it may have created the item before failing, and an
+    # unstamped item is invisible to the key scan, so a later pass would file a duplicate.
     try:
         context.client.update_issue(
             issue_id=item.id,
@@ -126,8 +127,20 @@ def file_job(  # noqa: PLR0913 - the data is one filing record.
             metadata={_BREAKAGE_KEY: breakage_key},
         )
     except _LEDGER_ERRORS as error:
-        return None, f"unfiled {breakage_key}: record breakage key: {error}"
-    return item.id, None
+        problems = "; ".join(filter(None, (problem, f"record breakage key: {error}")))
+        return None, f"unfiled {breakage_key}: {problems}"
+    return (None, f"unfiled {breakage_key}: {problem}") if problem else (item.id, None)
+
+
+def _capture(
+    *, capture: Callable[..., IOResult[object, object]], config: StoreConfig, item: WorkItem
+) -> str | None:
+    """Return why capture did not route the item, or None when it did."""
+    try:
+        routed = is_successful(capture(path=config, item=item, checklist=_CHECKLIST))
+    except _LEDGER_ERRORS as error:
+        return f"capture work item: {error}"
+    return None if routed else "capture work item was not routed"
 
 
 def _work_item(*, config: StoreConfig, workflow: str, job_name: str, description: str) -> WorkItem:
