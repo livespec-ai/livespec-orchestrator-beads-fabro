@@ -15,10 +15,11 @@
 # leading flag, or help/version/completion/send-metrics run LOCAL via the real
 # bd (LIVESPEC_BD_REAL, default /usr/local/bin/bd-real).
 #
-# Fallback rule: if ssh itself cannot start the remote call (status 255) the
-# call runs locally and one line is logged to stderr and to the log file. If the
-# remote bd STARTED and returned any other status, that status is returned and
-# the call is NEVER retried locally (a write must never run twice).
+# Fallback rule: before sending, `ssh -O check` must pass; if it fails nothing
+# was sent, so the call runs locally and one line is logged to stderr and to the
+# log file. Once the command is sent it is NEVER re-run locally (a write must
+# never run twice): ssh's status is returned as is, and 255 (a transport failure
+# that may follow the send) prints one error line and exits 255.
 
 set -u
 
@@ -32,14 +33,47 @@ _local() { exec "$REAL" "$@"; }
 case "$1" in
     -* | help | version | completion | send-metrics) _local "$@" ;;
 esac
+
+# VERB ALLOWLIST and FLAG DENYLIST. THESE LISTS MUST MATCH the server wrapper
+# (livespec-dev-tooling ansible/roles/authorized_keys_managed/files/
+# authorized-keys-bd-exec.sh): anything the server denies runs LOCALLY here.
+case "$1" in
+    show | list | comments | comment | update | create | close | reopen | delete | dep \
+        | search | label | tag | children | count | history | ready | duplicate \
+        | duplicates | note | assign | priority | link | query | stale | status \
+        | statuses | types | graph | epic | supersede | todo | q | state | set-state \
+        | lint | promote | find-duplicates | version) ;;
+    config)
+        # Only `config get <key>` (exactly 3 args) for a key that does not look
+        # like a secret; `config list/set`, bare config and secret keys run local.
+        [ "${2:-}" = "get" ] && [ "$#" -eq 3 ] || _local "$@"
+        # shellcheck disable=SC2018,SC2019  # ASCII-only, identical to the server wrapper
+        _ck=$(printf '%s' "$3" | tr 'A-Z' 'a-z')
+        case "$_ck" in
+            *pass* | *token* | *secret* | *key* | *credential* | *auth*) _local "$@" ;;
+        esac
+        ;;
+    *) _local "$@" ;;
+esac
+
+# FLAG DENYLIST by PATTERN, case-insensitive (mirrors the server wrapper): any
+# flag that can name a host path, file, directory, URL, credentials file, the
+# database connection or the shared database, in long form, attached short form
+# (-fX) or short cluster (-vf), and any `@file` value. A lone -n, -q, -d, -v, -5
+# stays allowed.
 for _a in "$@"; do
-    case "$_a" in
-        --db | --db=* | --database | --database=* | --dolt-* | --host | --host=* \
-            | --port | --port=* | --file | --file=* | --body-file | --body-file=* \
-            | --design-file | --design-file=* | -f | --path | --path=* | --dir \
-            | --dir=* | --config | --config=* | --output | --output=* | -o \
-            | --jsonl | --jsonl=*) _local "$@" ;;
+    # shellcheck disable=SC2018,SC2019  # ASCII-only, identical to the server wrapper
+    _l=$(printf '%s' "$_a" | tr 'A-Z' 'a-z')
+    case "$_l" in
+        --db | --db=* | --database* | --dolt-* | --host* | --port* | --global \
+            | --profile* | --config* | --credentials* | --graph* | --from-* \
+            | --*file* | --*path* | --*dir* | --*output* | --*url* | --*jsonl*) _local "$@" ;;
+        --*) ;;
+        -f | -c | -o) _local "$@" ;;
+        -[a-z0-9]?*)
+            case "${_l#-}" in *[fco]*) _local "$@" ;; esac ;;
     esac
+    case "$_l" in @* | *=@*) _local "$@" ;; esac
 done
 
 CONTROL_SOCKET=""
@@ -70,13 +104,47 @@ _b64=$(
 )
 # `shift` above ran in a subshell; the parent's "$@" is intact for fallback.
 
-ssh -S "$CONTROL_SOCKET" -o ControlMaster=no -o BatchMode=yes -o ConnectTimeout=5 \
-    -T "$SSH_TARGET" "in $_repo bd $_b64"
-_rc=$?
-if [ "$_rc" -eq 255 ]; then
-    _msg="livespec bd-remote: ssh could not start the remote call (status 255); falling back to local bd"
+# Liveness check BEFORE sending: if the master is not alive nothing has been
+# sent, so a local run is safe. `-O check` does not read stdin; </dev/null keeps
+# that explicit so the fallback still sees the original stdin.
+if ! ssh -S "$CONTROL_SOCKET" -O check "$SSH_TARGET" >/dev/null 2>&1 </dev/null; then
+    _msg="livespec bd-remote: ssh control master check failed; nothing sent, falling back to local bd"
     printf '%s\n' "$_msg" >&2
     { mkdir -p "$(dirname "$LOG")" && printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_msg" >>"$LOG"; } 2>/dev/null || :
     _local "$@"
+fi
+
+# From here the command may have been sent: NEVER re-run locally (a write must
+# never run twice), with ONE exception below. Return ssh's status as is; 255 is
+# a transport failure that may have happened after the send, so say so and do not
+# retry.
+#
+# Exception: the master's MaxSessions limit refuses the session BEFORE the remote
+# command starts (ssh exits 255 and writes `Session open refused by peer` or
+# `mux_client_request_session: session request failed` as ITS OWN diagnostic), so
+# a local run is safe. ssh's own diagnostics are sent to a private log with
+# `-E`, so they never mix with the remote command's stdout/stderr, which pass
+# untouched to the caller: only the log is searched, never the remote output. The
+# fallback is taken only when stdin is a terminal or /dev/null; with a piped stdin
+# ssh may have consumed part of it, so then we do NOT fall back. When not falling
+# back, the log's content is appended to the caller's stderr.
+_sshlog=$(mktemp 2>/dev/null) || _sshlog=/dev/null
+trap 'rm -f "$_sshlog"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+ssh -E "$_sshlog" -S "$CONTROL_SOCKET" -o ControlMaster=no -o BatchMode=yes -o ConnectTimeout=5 \
+    -T "$SSH_TARGET" "in $_repo bd $_b64"
+_rc=$?
+if [ "$_rc" -eq 255 ] && [ "$_sshlog" != /dev/null ] && { [ -t 0 ] || [ /dev/stdin -ef /dev/null ]; } \
+    && grep -qE 'Session open refused by peer|mux_client_request_session: session request failed' "$_sshlog" 2>/dev/null; then
+    rm -f "$_sshlog"
+    _msg="livespec bd-remote: ssh session refused (MaxSessions) before the command started; falling back to local bd"
+    printf '%s\n' "$_msg" >&2
+    { mkdir -p "$(dirname "$LOG")" && printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_msg" >>"$LOG"; } 2>/dev/null || :
+    _local "$@"
+fi
+[ -s "$_sshlog" ] && [ "$_sshlog" != /dev/null ] && cat "$_sshlog" >&2
+if [ "$_rc" -eq 255 ]; then
+    printf '%s\n' "bd-remote: connection to the VPS failed after the command was sent; not retried" >&2
 fi
 exit "$_rc"

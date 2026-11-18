@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.338.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.338.0...v0.338.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* a Red turn ending with a label no Red edge routes is refused without spending the admission budget (bd-ib-td5prc) ([d26b9d4](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/d26b9d41f7823122f51f74173e5570d22ee2f0bc))
+
 ## [0.338.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.337.0...v0.338.0) (2026-11-17)
 
 
