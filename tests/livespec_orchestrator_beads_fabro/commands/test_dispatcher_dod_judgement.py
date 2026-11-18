@@ -126,6 +126,27 @@ def test_judgement_admission_and_remedies_keep_each_finding_actionable() -> None
     assert judgment_remedy != judgement.first_remedy(findings=("repair the item.",))
 
 
+def test_a_passed_reply_that_says_a_check_could_not_be_verified_holds_the_item() -> None:
+    """An incomplete judgement must not become admission merely by ending in passed."""
+    judgement = importlib.import_module(
+        "livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement"
+    )
+
+    verdict = judgement.parse_judgement_reply(
+        reply=(
+            "Pass, with one caveat. Check 2 could not be verified against the spec files, "
+            "because this call has no tools.\n"
+            '{"outcome": "passed"}'
+        )
+    )
+
+    assert verdict.outcome == judgement.JUDGEMENT_HELD
+    assert verdict.holds
+    assert verdict.findings == (
+        "Check 2 could not be verified against the spec files, because this call has no tools.",
+    )
+
+
 def test_unresolved_and_unreadable_spec_references_stay_distinct_from_no_reference(
     tmp_path: Path,
 ) -> None:

@@ -64,7 +64,10 @@ no rule of its own about how to grade any of them.
 There is no graph to fall through, so end with a JSON object on the LAST line of
 your reply in BOTH directions:
 
-- every check clean: {"outcome": "passed"}
+- every check clean and verified: {"outcome": "passed"}
+- any check could not be verified: {"outcome": "unverified", "failure_reason":
+  "<the unverified checks>"}, one check per line inside `failure_reason`, each
+  naming the check and why it could not be verified.
 - any finding: {"outcome": "failed", "failure_reason": "<the findings>"}, one
   finding per line inside `failure_reason`, each naming the work-item id, the
   offending element quoted verbatim, and the remedy.
