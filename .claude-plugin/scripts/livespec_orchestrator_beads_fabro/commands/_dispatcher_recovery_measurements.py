@@ -49,6 +49,8 @@ __all__: list[str] = [
     "MEASUREMENT_FORGE_PULL_REQUEST_RECORDS",
     "MEASUREMENT_PRESERVED_WORK",
     "MEASUREMENT_PUBLISHING_RUN_UNOBSERVABLE",
+    "MEASUREMENT_SEED_RESEED",
+    "MEASUREMENT_SEED_RESEED_CONFLICT",
     "MEASUREMENT_SEED_RULING_COMMENTS",
     "MEASUREMENT_SEED_RULING_REF",
     "unobservable_measurements",
@@ -71,6 +73,11 @@ MEASUREMENT_PUBLISHING_RUN_UNOBSERVABLE = "publishing-run-unobservable"
 # ruling lives only there and an unread ledger may hold one.
 MEASUREMENT_SEED_RULING_REF = "seed-ruling-ref"
 MEASUREMENT_SEED_RULING_COMMENTS = "seed-ruling-comments"
+# A ruled seed behind the default branch is reseeded onto its tip (Scenario 372). A diff
+# that conflicts holds as `seed-reseed-conflict`; any other refusal or unread fact holds
+# as `seed-reseed`, and neither lays the seed's whole tree over the tip.
+MEASUREMENT_SEED_RESEED = "seed-reseed"
+MEASUREMENT_SEED_RESEED_CONFLICT = "seed-reseed-conflict"
 
 
 def unobservable_measurements(*, observation: ResumeObservation) -> tuple[RecoveryMeasurement, ...]:

@@ -91,9 +91,14 @@ class PublishedReseed:
 
 @dataclass(frozen=True, kw_only=True)
 class ReseedRefusal:
-    """Nothing was published, or the publication could not be confirmed; `detail` says why."""
+    """Nothing was published, or the publication could not be confirmed; `detail` says why.
+
+    `conflicting_paths` is non-empty only for the refusal that says the seed's diff does
+    not apply cleanly onto the tip, so a caller can tell a conflict from an unread fact.
+    """
 
     detail: str
+    conflicting_paths: tuple[str, ...] = ()
 
 
 def reseed_ref(*, work_item_id: str, commit: str) -> str:

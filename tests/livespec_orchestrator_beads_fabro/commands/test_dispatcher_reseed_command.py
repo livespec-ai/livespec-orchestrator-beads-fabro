@@ -71,6 +71,25 @@ class _Runner:
         return self.result
 
 
+class _OriginReads:
+    """Answers the reads `ruled_seed` takes: the ruled ref, the default branch, and ancestry."""
+
+    def __init__(self, *, listing: str) -> None:
+        self.listing = listing
+
+    def run(self, **kwargs: object) -> CommandResult:
+        argv = [str(one) for one in cast("list[object]", kwargs["argv"])]
+        stdout = ""
+        if argv[:3] == ["git", "symbolic-ref", "--short"]:
+            stdout = "origin/master\n"
+        elif argv[:3] == ["git", "ls-remote", "origin"]:
+            stdout = (
+                f"{_TIP}\trefs/heads/master\n" if argv[3] == "refs/heads/master" else self.listing
+            )
+        # `git fetch` and `git merge-base --is-ancestor`: the ruled commit already holds the tip.
+        return CommandResult(exit_code=0, stdout=stdout, stderr="")
+
+
 @pytest.fixture
 def ledger(monkeypatch: pytest.MonkeyPatch) -> FakeBeadsClient:
     monkeypatch.setenv("LIVESPEC_BEADS_FAKE", "1")
@@ -169,7 +188,7 @@ def test_a_published_reseed_is_ruled_so_the_next_dispatch_is_seeded_from_it(
     assert f"RESEEDED  {_ITEM}  {_REF} at {_COMMIT}" in capsys.readouterr().out
     ruling = current_ruling(comments=tuple(comments))
     assert isinstance(ruling, SeedRuling)
-    origin = _Runner(stdout=f"{_COMMIT}\t{_REF}\n")
+    origin = _OriginReads(listing=f"{_COMMIT}\t{_REF}\n")
     seed = ruled_seed(
         runner=origin,
         repo=tmp_path,
