@@ -81,6 +81,11 @@ from livespec_orchestrator_beads_fabro.commands._factory_environment import (
     NO_FACTORY_ENVIRONMENT,
     FactoryEnvironment,
 )
+from livespec_orchestrator_beads_fabro.commands._factory_gates_kubeconfig import (
+    NO_FACTORY_GATES_KUBECONFIG,
+    FactoryGatesKubeconfig,
+    factory_gates_kubeconfig_from_entry,
+)
 from livespec_orchestrator_beads_fabro.commands._factory_github_app import (
     NO_FACTORY_GITHUB_APP,
     FactoryGithubApp,
@@ -123,8 +128,7 @@ _PLUGIN_BLOCK = "livespec-orchestrator-beads-fabro"
 _CONNECTION_KEY = "connection"
 _DISPATCHER_KEY = "dispatcher"
 
-_DEFAULT_SERVER_HOST = "127.0.0.1"
-_DEFAULT_SERVER_PORT = 3307
+_DEFAULT_SERVER_HOST, _DEFAULT_SERVER_PORT = "127.0.0.1", 3307
 _DEFAULT_BD_PATH = "bd"
 _DEFAULT_TENANT = "livespec-orch-beads-fabro"
 
@@ -157,6 +161,10 @@ class FactoryTarget:
     # an absent key and an unusable value must stay distinguishable, and
     # `_dispatcher_factory_environment` owns the grade of the reading.
     environment: FactoryEnvironment = NO_FACTORY_ENVIRONMENT
+    # The optional host path the sandbox mounts at the gate client's credential
+    # location.  The declaration stays structured until the pre-claim grade can
+    # distinguish an absent key from an unusable value.
+    gates_kubeconfig: FactoryGatesKubeconfig = NO_FACTORY_GATES_KUBECONFIG
     # The per-run GitHub App secret names this factory declares.  It remains a
     # structured reading until the pre-claim declaration grade has admitted it.
     github_app: FactoryGithubApp = NO_FACTORY_GITHUB_APP
@@ -487,6 +495,7 @@ def _factory_target_for(*, name: str, block: dict[str, Any]) -> FactoryTarget:
         server=registry.server if registry.declared else _optional_str(value=entry.get("server")),
         fabro_bin=client.fabro_bin,
         environment=client.environment,
+        gates_kubeconfig=factory_gates_kubeconfig_from_entry(entry=entry),
         github_app=factory_github_app_from_entry(entry=entry),
         docker_host=(
             registry.docker_host

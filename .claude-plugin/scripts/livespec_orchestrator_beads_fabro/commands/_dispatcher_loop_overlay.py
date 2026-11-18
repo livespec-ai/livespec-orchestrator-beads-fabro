@@ -201,6 +201,19 @@ def materialize_dispatch_overlay(*, overlay: DispatchOverlay) -> str | None:
         # could key it away from the environment the launch names, and both
         # readings would be well-formed (bd-ib-kyeor4).
         factory_environment=plan.fabro_factory_environment,
+        gates_kubeconfig=getattr(plan, "fabro_factory_gates_kubeconfig", None),
+        warn_gates_kubeconfig_missing=lambda path: overlay.journal.append(
+            record={
+                "stage": "gates-kubeconfig-warn",
+                "work_item_id": overlay.item.id,
+                "factory": plan.fabro_factory_name,
+                "key": f"dispatcher.factories.{plan.fabro_factory_name}.gates_kubeconfig",
+                "path": str(path),
+                "warning": (
+                    "declared gate kubeconfig file is missing; dispatch continues without mount"
+                ),
+            }
+        ),
         github_app=plan.fabro_factory_github_app,
         secret_sink=overlay.secret_sink,
         # WHERE this dispatch's sandbox image comes from, read off the plan's

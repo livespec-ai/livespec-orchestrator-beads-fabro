@@ -119,6 +119,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_tmux_socket_root imp
     tmux_tmpdir_prepare_steps_block,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_toml_read import toml_section_string
+from livespec_orchestrator_beads_fabro.commands._factory_gates_kubeconfig import (
+    render_gates_kubeconfig_mount,
+)
 from livespec_orchestrator_beads_fabro.commands._factory_github_app import (
     NO_FACTORY_GITHUB_APP,
     FactoryGithubApp,
@@ -164,6 +167,7 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
     # posture every dispatch in this fleet carried before the key existed — so
     # a caller that wires nothing keys its env table exactly where it did.
     factory_environment: str | None = None,
+    gates_kubeconfig: Path | None = None,
     github_app: FactoryGithubApp = NO_FACTORY_GITHUB_APP,
     dispatch_id: str | None = None,
     proof_store_env: str = "",
@@ -321,8 +325,7 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
     # dispatch on the pinned engine carries.
     env_environment_id = environment_id if factory_environment is None else factory_environment
     rewritten = substitute_input_tokens(text=rewritten, prepare_inputs=prepare_inputs)
-    token_literal = json.dumps(token)
-    github_token_literal = json.dumps(github_token)
+    token_literal, github_token_literal = json.dumps(token), json.dumps(github_token)
     clones = sandbox_clone_fragments(siblings=siblings)
     currency_gate_env_line = f"{CURRENCY_GATE_ENV_VAR} = {json.dumps(CURRENCY_GATE_ENV_VALUE)}\n"
     otel_env_lines = _otel_env_lines(otel_env=otel_env)
@@ -405,6 +408,7 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
     # uses for the needs_human node's emergency commit (S5 / bd-ib-b4u6b7).
     return (
         rewritten
+        + render_gates_kubeconfig_mount(gates_kubeconfig=gates_kubeconfig)
         + github_app_table(github_app=github_app)
         + helper_fetch_steps
         + dispatch_base_steps

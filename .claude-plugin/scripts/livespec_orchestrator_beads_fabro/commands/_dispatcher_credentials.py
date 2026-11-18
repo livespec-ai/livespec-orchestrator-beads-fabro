@@ -81,6 +81,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_sibling_clones impor
     resolve_sibling_clones,
 )
 from livespec_orchestrator_beads_fabro.commands._fabro_client import overlay_graph_reference
+from livespec_orchestrator_beads_fabro.commands._factory_gates_kubeconfig import (
+    mountable_gates_kubeconfig,
+)
 from livespec_orchestrator_beads_fabro.commands._factory_github_app import (
     NO_FACTORY_GITHUB_APP,
     FactoryGithubApp,
@@ -146,6 +149,8 @@ def materialize_overlay(  # noqa: PLR0911, PLR0913 — kw-only overlay materiali
     # the pinned-engine posture, where the committed `[run.environment]` id is
     # both the committed and the selected environment (bd-ib-kyeor4).
     factory_environment: str | None = None,
+    gates_kubeconfig: Path | None = None,
+    warn_gates_kubeconfig_missing: Callable[[Path], object] | None = None,
     github_app: FactoryGithubApp = NO_FACTORY_GITHUB_APP,
     secret_sink: VaultSecretSink | None = None,
     # WHERE this dispatch's sandbox image comes from, as the plan resolved it.
@@ -321,6 +326,10 @@ def materialize_overlay(  # noqa: PLR0911, PLR0913 — kw-only overlay materiali
     proof_credentials_env = proof_credentials_overlay_env(
         repo=repo, environ=os.environ, minted=minted
     )
+    mounted_gates_kubeconfig = mountable_gates_kubeconfig(
+        gates_kubeconfig=gates_kubeconfig,
+        warn_missing=warn_gates_kubeconfig_missing,
+    )
     rendered = render_run_config_overlay(
         committed_text=committed.read_text(encoding="utf-8"),
         workflow_dir=committed.parent.resolve(),
@@ -344,6 +353,7 @@ def materialize_overlay(  # noqa: PLR0911, PLR0913 — kw-only overlay materiali
         # resolution could key the table away from the environment the launch
         # selected with nothing announcing it (bd-ib-kyeor4).
         factory_environment=factory_environment,
+        gates_kubeconfig=mounted_gates_kubeconfig,
         github_app=github_app,
         # The per-dispatch payload's rendered graph, carrying this dispatch's
         # resolved node timeouts as literal durations, NAMED as the client that

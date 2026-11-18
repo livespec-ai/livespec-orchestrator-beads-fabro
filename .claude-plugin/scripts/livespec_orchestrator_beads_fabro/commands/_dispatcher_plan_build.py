@@ -150,6 +150,7 @@ class DispatchPlan:
     # and the server selects whatever it selects today.
     fabro_factory_environment: str | None = None
     fabro_factory_github_app: FactoryGithubApp = NO_FACTORY_GITHUB_APP
+    fabro_factory_gates_kubeconfig: Path | None = None
     # WHERE this dispatch's sandbox image comes from, decided ONCE from the
     # factory's catalog environment and the repository's configured override.
     # It rides the plan because TWO seams consume it — the launch overlay
@@ -258,6 +259,7 @@ def build_plan(  # noqa: PLR0913 — kw-only plan resolver; each field is an ind
     fabro_factory_dev_token: str | None = None,
     fabro_factory_environment: str | None = None,
     fabro_factory_github_app: object = NO_FACTORY_GITHUB_APP,
+    fabro_factory_gates_kubeconfig: Path | None = None,
     sandbox_image: SandboxImageSource = COMMITTED_RUN_CONFIG_IMAGE,
     janitor: tuple[str, ...] | None,
     janitor_checkout: Path,
@@ -300,6 +302,7 @@ def build_plan(  # noqa: PLR0913 — kw-only plan resolver; each field is an ind
         fabro_factory_dev_token=fabro_factory_dev_token,
         fabro_factory_environment=fabro_factory_environment,
         fabro_factory_github_app=cast("FactoryGithubApp", fabro_factory_github_app),
+        fabro_factory_gates_kubeconfig=fabro_factory_gates_kubeconfig,
         sandbox_image=sandbox_image,
         janitor=janitor_argv(
             check_suite=janitor_check_suite_from_contract(resolved=integration, janitor=janitor)

@@ -55,6 +55,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_image_source
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stall_window import (
     stall_window_from_timeouts,
 )
+from livespec_orchestrator_beads_fabro.commands._factory_gates_kubeconfig import (
+    factory_gates_kubeconfig_path,
+)
 from livespec_orchestrator_beads_fabro.commands._node_timeouts import (
     NodeTimeouts,
     derive_fabro_timeout_seconds,
@@ -135,6 +138,7 @@ def dispatch_plan_for_item(  # noqa: PLR0913 — kw-only plan resolver; each fie
         fabro_factory_dev_token=factory_target.dev_token,
         fabro_factory_environment=factory_environment_id(factory=factory_target),
         fabro_factory_github_app=factory_target.github_app,
+        fabro_factory_gates_kubeconfig=factory_gates_kubeconfig_path(factory=factory_target),
         # WHERE this dispatch's sandbox image comes from, decided ONCE here and
         # projected to both consumers off the plan: the launch overlay renders
         # from it and the dispatch record names it. An unreadable
