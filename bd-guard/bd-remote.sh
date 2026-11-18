@@ -78,6 +78,7 @@ done
 
 CONTROL_SOCKET=""
 SSH_TARGET=""
+REMOTE_TENANTS=""
 [ -r "$CONF" ] || _local "$@"
 # shellcheck disable=SC1090
 . "$CONF"
@@ -93,6 +94,20 @@ case "$_common" in
     *) _repo=$(basename "$_top") ;;
 esac
 [ -n "$_repo" ] || _local "$@"
+
+# TENANT ALLOWLIST (bd-ib-3km22i). The server's exec wrapper runs with the FLEET
+# tenant credential, so only repositories named in REMOTE_TENANTS (space- or
+# comma-separated, whole names, from the conf) are sent. Every other tenant, and
+# every call when REMOTE_TENANTS is unset or empty, runs LOCAL here, before any
+# ssh or control-socket contact and with no log line. The value is only split into
+# words (globbing off) and compared as whole strings; it is never eval'd.
+_listed=0
+set -f
+for _t in $(printf '%s' "$REMOTE_TENANTS" | tr ',' ' '); do
+    [ "$_t" = "$_repo" ] && { _listed=1; break; }
+done
+set +f
+[ "$_listed" -eq 1 ] || _local "$@"
 
 # NUL-join (no trailing NUL: the server appends its own terminator), one line.
 _b64=$(

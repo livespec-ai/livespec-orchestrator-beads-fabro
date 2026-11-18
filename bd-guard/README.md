@@ -369,7 +369,20 @@ runs `bd-remote.sh` (installed beside it by `install.sh`, removed by
 ```sh
 CONTROL_SOCKET=/path/to/ssh-controlmaster.sock
 SSH_TARGET=host-label-matching-the-control-path
+REMOTE_TENANTS="repo-a repo-b"
 ```
+
+`REMOTE_TENANTS` is a space- or comma-separated list of repository names (the
+`<repo>` below). Only a call from a listed repository is sent; names match WHOLE
+(no prefix, suffix, substring or glob match) and the value is never eval'd. A call
+from any other repository runs LOCAL on `bd-real`, before any ssh or control-socket
+contact and with no log line. **Fail-safe default:** if `REMOTE_TENANTS` is unset or
+empty, EVERY call runs local, so a conf written before this setting sends nothing
+remote. List only tenants that use the fleet credential. A tenant with its own
+credential wrapper (`hetzner-xubuntu-info`, `dolt-server`, `homelab`, `openbrain`)
+MUST stay unlisted: the server-side exec wrapper runs with the fleet wrapper's
+credential, so such a call fails with Error 1045, and a sent call is never re-run
+locally.
 
 `bd-remote.sh` sends ONE command over that already-open ControlMaster
 (`ssh -S ... -o ControlMaster=no -o BatchMode=yes -T`), `in <repo> bd <b64>`
