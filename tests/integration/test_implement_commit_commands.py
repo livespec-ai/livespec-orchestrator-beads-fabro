@@ -207,6 +207,54 @@ def test_commit_green_folds_checkpoints_and_amends_the_unpaired_red_with_hooks(
     assert "TDD-Green-Verified-At: green" in message
 
 
+def test_commit_green_rewords_its_current_red_to_the_work_item_title_and_keeps_trailers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The published Green amend describes the item without losing Red provenance."""
+    assert _GREEN.is_file()
+    monkeypatch.setenv("LIVESPEC_PR_TITLE", "fix: retain the factory item's change subject")
+    repo = _initialize_repository(tmp_path=tmp_path)
+    _git(repo=repo, argv=["config", "livespec.factoryRunId", "current-run"])
+    test_file = repo / "tests" / "test_feature.py"
+    test_file.parent.mkdir()
+    _ = test_file.write_text("def test_feature() -> None:\n    assert True\n", encoding="utf-8")
+    _git(repo=repo, argv=["add", "tests/test_feature.py"])
+    _git(
+        repo=repo,
+        argv=[
+            "commit",
+            "--quiet",
+            "-m",
+            "feat: red",
+            "-m",
+            "Factory-Run-Id: current-run",
+            "-m",
+            "TDD-Red-Test-File-Checksum: red",
+        ],
+    )
+    _ = (repo / "implementation.py").write_text("VALUE = 2\n", encoding="utf-8")
+    _checkpoint(repo=repo, name="green")
+    _handoff(repo=repo, text="## green\nImplementation changed.\n")
+    hook = repo / ".git" / "hooks" / "commit-msg"
+    _ = hook.write_text(
+        "#!/bin/sh\ngit interpret-trailers --in-place --trailer "
+        "'TDD-Green-Verified-At: green' \"$1\"\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+
+    completed = _run(repo=repo, argv=["bash", str(_GREEN)], check=False)
+
+    assert completed.returncode == 0, completed.stderr
+    assert _git(repo=repo, argv=["log", "-1", "--format=%s"]) == (
+        "fix: retain the factory item's change subject"
+    )
+    message = _git(repo=repo, argv=["log", "-1", "--format=%B"])
+    assert "Factory-Run-Id: current-run" in message
+    assert "TDD-Red-Test-File-Checksum: red" in message
+    assert "TDD-Green-Verified-At: green" in message
+
+
 def test_commit_green_refuses_a_red_without_current_run_provenance(tmp_path: Path) -> None:
     """Replay trailers alone never authorize an amend of a Fabro checkpoint."""
     repo = _initialize_repository(tmp_path=tmp_path)

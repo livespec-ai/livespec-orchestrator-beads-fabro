@@ -309,6 +309,8 @@ main() {
     local output=""
     local status=0
     local cause=""
+    local title=""
+    local message=""
     handoff="$(git rev-parse --git-path "$HANDOFF_NAME")"
     output="$(git rev-parse --git-path "$OUTPUT_NAME")"
     set +e
@@ -335,10 +337,30 @@ main() {
         append_verdict "$handoff" 0 "$output" "$cause"
         return 0
     fi
-    set +e
-    git commit --amend --no-edit >"$output" 2>&1
-    status=$?
-    set -e
+    title="${LIVESPEC_PR_TITLE:-}"
+    if [[ -n "$title" ]]; then
+        # Keep the complete Red message after its first line.  `-F` then replaces
+        # only the placeholder subject while the commit-msg hook appends Green's
+        # evidence, so the replay trailers remain part of the amended commit.
+        message="$(git rev-parse --git-path livespec-commit-green-message)"
+        {
+            printf '%s\n' "$title"
+            git log -1 --format=%B | sed '1d'
+        } > "$message"
+        set +e
+        git commit --amend -F "$message" >"$output" 2>&1
+        status=$?
+        set -e
+        rm -f "$message"
+    else
+        # Direct command-program fixtures that do not represent a dispatched
+        # work item have no rendered title.  Publication independently refuses
+        # a remaining bare Red subject before it can reach a pull request.
+        set +e
+        git commit --amend --no-edit >"$output" 2>&1
+        status=$?
+        set -e
+    fi
     cat "$output"
     append_verdict "$handoff" "$status" "$output"
     if (( status != 0 )); then
