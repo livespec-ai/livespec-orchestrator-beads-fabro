@@ -6,7 +6,7 @@
 set -u; KEY=$1; REPO=$2; ITEM=$3; SEAT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd); . "$SEAT_DIR/../config.sh"; L=$FLEET_LAUNCH_STATE_DIR; ORCH=$FLEET_LAUNCH_ORCH_REPO
 SCOPE=(); MM=$(cat /etc/livespec/factory-dispatch-loop-memory-max 2>/dev/null)
 if [ -n "$MM" ] && [ "$(systemctl --user show factory-dispatch.slice -p LoadState --value 2>/dev/null)" = loaded ]; then
-  SCOPE=(systemd-run --user --scope --quiet --slice=factory-dispatch.slice -p MemoryMax=$MM -p OOMPolicy=continue --)
+  SCOPE=(systemd-run --user --scope --quiet --slice=factory-dispatch.slice -p "MemoryMax=$MM" -p OOMPolicy=continue --)
 fi
 # dev-host-disk-retention 00:3xZ: HIGH OOM score for dispatcher loops (killed before doltdb -900 or seat sessions);
 # children inherit it; no privilege needed; launch without it if choom is absent.
