@@ -1700,6 +1700,7 @@ while [ "$load_worker" -lt "$load_workers" ]; do
     load_worker=$((load_worker + 1))
 done
 for held_attempt in $(seq 1 "${HARNESS_CASE_10B_ATTEMPTS:-30}"); do
+    scenario_attempt "$held_attempt"
     new_case "direct-release-inflight-counted-$held_attempt"
     # Preserve the board reading taken before launch. The drive then submits and
     # exits while this snapshot remains young, reproducing the loaded-host race.
@@ -1741,7 +1742,10 @@ for held_attempt in $(seq 1 "${HARNESS_CASE_10B_ATTEMPTS:-30}"); do
         tail -8 "$DIRECT_RELEASE_LOG" >&2
     fi
     SECOND_LOG="$CASE_DIR/second-launcher.log"
-    FLEET_LAUNCH_MAX_WAIT_S=4 ONLY_GMK=1 "$LAUNCHER" bd-ib-second > "$SECOND_LOG" 2>&1; second_rc=$?
+    # The launcher always evaluates the cap once before it applies this
+    # deadline, so zero proves the same queued-launcher refusal without a
+    # fixed four-second wait on every attempt.
+    FLEET_LAUNCH_MAX_WAIT_S=0 ONLY_GMK=1 "$LAUNCHER" bd-ib-second > "$SECOND_LOG" 2>&1; second_rc=$?
     if [ "$second_rc" = 75 ] && log_has "$SECOND_LOG" "fleet=8 cap=8" \
         && ! grep -qx 'bd-ib-second' "$DRIVE_LOG"; then
         pass "attempt $held_attempt: a queued launcher counts the held direct release against the cap and starts no drive"
@@ -1750,6 +1754,10 @@ for held_attempt in $(seq 1 "${HARNESS_CASE_10B_ATTEMPTS:-30}"); do
         tail -6 "$SECOND_LOG" >&2
     fi
     : > "$STUB_DRIVE_ADMIT_GATE_FILE"
+    # The held drive has submitted.  Drop the deliberately preserved stale
+    # snapshot so the launcher's next board read lists that submission and
+    # releases the stub by observation, rather than its ten-second fallback.
+    find "$SNAPSHOT_DIR" -type f -name '*.ps' -delete
     wait "$held_release_pid"; held_release_rc=$?
     if [ "$held_release_rc" = 0 ] && [ -z "$(find "$CASE_DIR/inflight" -type f -print -quit)" ]; then
         pass "attempt $held_attempt: the direct release drops its marker once its run lists"

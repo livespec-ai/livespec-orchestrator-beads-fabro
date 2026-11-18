@@ -15,15 +15,32 @@
 SCENARIO_TIMEOUT_S=${HARNESS_SCENARIO_TIMEOUT_S:-900}
 SCENARIO_WATCHDOG_PID=""
 SCENARIO_STATE_FILE=""
+SCENARIO_STARTED=""
+SCENARIO_LABEL=""
+SCENARIO_ATTEMPT=""
 
 _scenario_now() { printf '%(%s)T' -1; }
 
+_scenario_write_state() {
+    [ -n "$SCENARIO_STATE_FILE" ] || return 0
+    printf '%s\t%s\t%s\n' "$SCENARIO_STARTED" "$SCENARIO_LABEL" "$SCENARIO_ATTEMPT" \
+        > "$SCENARIO_STATE_FILE.tmp" \
+        && mv -f "$SCENARIO_STATE_FILE.tmp" "$SCENARIO_STATE_FILE"
+}
+
 scenario() {
     echo "--- $1"
-    if [ -n "$SCENARIO_STATE_FILE" ]; then
-        printf '%s\t%s\n' "$(_scenario_now)" "$1" > "$SCENARIO_STATE_FILE.tmp" \
-            && mv -f "$SCENARIO_STATE_FILE.tmp" "$SCENARIO_STATE_FILE"
-    fi
+    SCENARIO_STARTED=$(_scenario_now)
+    SCENARIO_LABEL=$1
+    SCENARIO_ATTEMPT=""
+    _scenario_write_state
+}
+
+# scenario_attempt <number>: record the currently executing repeated-case
+# attempt without resetting the scenario watchdog's elapsed time.
+scenario_attempt() {
+    SCENARIO_ATTEMPT=$1
+    _scenario_write_state
 }
 
 _scenario_kill_tree() {
@@ -41,11 +58,16 @@ scenario_watchdog_start() {
     (
         while sleep "${HARNESS_WATCHDOG_TICK_S:-2}"; do
             kill -0 "$harness_pid" 2>/dev/null || exit 0
-            IFS=$'\t' read -r started label < "$SCENARIO_STATE_FILE" || continue
+            IFS=$'\t' read -r started label attempt < "$SCENARIO_STATE_FILE" || continue
             [ -n "$started" ] || continue
             if [ $(( $(_scenario_now) - started )) -gt "$SCENARIO_TIMEOUT_S" ]; then
-                printf '  FAIL: scenario "%s" ran longer than %ss; the harness is killed so a stuck scenario cannot stall the gate\n' \
-                    "$label" "$SCENARIO_TIMEOUT_S" >&2
+                if [ -n "$attempt" ]; then
+                    printf '  FAIL: scenario "%s" attempt %s ran longer than %ss; the harness is killed so a stuck scenario cannot stall the gate\n' \
+                        "$label" "$attempt" "$SCENARIO_TIMEOUT_S" >&2
+                else
+                    printf '  FAIL: scenario "%s" ran longer than %ss; the harness is killed so a stuck scenario cannot stall the gate\n' \
+                        "$label" "$SCENARIO_TIMEOUT_S" >&2
+                fi
                 for child in $(pgrep -P "$harness_pid" 2>/dev/null); do
                     [ "$child" = "$BASHPID" ] || _scenario_kill_tree "$child"
                 done
