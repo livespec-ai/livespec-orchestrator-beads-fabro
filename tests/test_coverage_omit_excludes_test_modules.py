@@ -32,8 +32,12 @@ def test_coverage_omits_test_modules(monkeypatch) -> None:
 
 def test_coverage_still_measures_first_party_source(monkeypatch) -> None:
     matcher = _omit_matcher(monkeypatch=monkeypatch)
+    # The preview hook materializes a disposable worktree below /tmp, which the
+    # coverage policy deliberately omits.  A representative checkout path keeps
+    # this assertion about first-party source patterns rather than that venue.
+    checkout = Path("/checkout")
 
     assert not matcher.match(
-        str(_REPO_ROOT / ".claude-plugin" / "scripts" / "bin" / "some_wrapper.py")
+        str(checkout / ".claude-plugin" / "scripts" / "bin" / "some_wrapper.py")
     )
-    assert not matcher.match(str(_REPO_ROOT / "dev-tooling" / "checks" / "some_check.py"))
+    assert not matcher.match(str(checkout / "dev-tooling" / "checks" / "some_check.py"))
