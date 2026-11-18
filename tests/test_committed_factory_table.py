@@ -45,7 +45,7 @@ def _committed_factories() -> dict[str, Any]:
     return factories
 
 
-def test_the_committed_table_declares_exactly_petri_and_candidate() -> None:
+def test_the_committed_table_declares_petri_candidate_and_the_arm64_factory() -> None:
     """The live instances, each named for the instance and not its host.
 
     `petri` is the gmktec-xubuntu :32276 Petri-era server, a name the control
@@ -57,7 +57,7 @@ def test_the_committed_table_declares_exactly_petri_and_candidate() -> None:
     fabro-currency's dogfood factory (maintainer ruling 2026-11-02); it is
     never the default.
     """
-    assert sorted(_committed_factories()) == ["candidate", "petri"]
+    assert sorted(_committed_factories()) == ["candidate", "homelab-worker-arm64", "petri"]
 
 
 def test_every_committed_entry_is_registry_backed_and_names_no_machine() -> None:
