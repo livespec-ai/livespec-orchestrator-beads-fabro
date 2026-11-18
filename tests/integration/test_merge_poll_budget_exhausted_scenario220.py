@@ -124,6 +124,7 @@ def _view(
     failed_check: str | None = None,
     running_check: str | None = None,
     armed: bool = True,
+    merge_queue_entry: dict[str, object] | None = None,
 ) -> str:
     rollup: list[dict[str, object]] = []
     if failed_check is not None:
@@ -135,6 +136,7 @@ def _view(
             "number": 3913,
             "state": state,
             "autoMergeRequest": {"enabledAt": "now"} if armed else None,
+            "mergeQueueEntry": merge_queue_entry,
             "mergeStateStatus": merge_state,
             "mergeCommit": {"oid": "cafe05"} if state == "MERGED" else None,
             "statusCheckRollup": rollup,
@@ -158,6 +160,7 @@ class _Forge:
     failed_required_check: str | None = None
     running_required_check: str | None = None
     armed: bool = True
+    merge_queue_entry: dict[str, object] | None = None
     views: int = 0
     calls: list[list[str]] = field(default_factory=list)
 
@@ -218,6 +221,7 @@ class _Forge:
                 failed_check=self.failed_required_check,
                 running_check=self.running_required_check,
                 armed=self.armed,
+                merge_queue_entry=self.merge_queue_entry,
             ),
             stderr="",
         )
@@ -293,6 +297,36 @@ def test_an_armed_open_pull_request_at_expiry_is_handed_off_and_the_item_stays_a
     rows = [r for r in journal.records if r.get("stage") == "merge-wait-handed-off"]
     assert [r["running_checks"] for r in rows] == [["check-coverage"]]
     assert [r for r in journal.records if r.get("stage") == "needs-human-blocked"] == []
+
+
+def test_an_open_queued_pull_request_with_null_auto_merge_is_handed_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GitHub clears autoMergeRequest while a pull request waits in its merge queue."""
+    monkeypatch.chdir(tmp_path)
+    forge = _Forge(
+        open_reads=99,
+        final_state="OPEN",
+        armed=False,
+        merge_queue_entry={"position": 1, "state": "AWAITING_CHECKS"},
+        running_required_check="check-coverage",
+    )
+
+    outcome, journal = _journey(repo=tmp_path, forge=forge)
+
+    assert (outcome.status, outcome.stage) == ("handed-off", "merge-poll")
+    assert dispatch_exit_code(outcomes=[outcome]) == 0
+    assert (_rested().status, _rested().assignee, _rested().blocked_reason) == (
+        "active",
+        "fabro",
+        None,
+    )
+    comments = read_work_item_comments(path=_store(), work_item_id=_ITEM_ID)
+    assert [comment.text.splitlines()[0] for comment in comments] == [
+        _HANDOFF_MARKER,
+        "livespec-preserved-tree",
+    ]
+    assert [row for row in journal.records if row.get("stage") == "merge-wait-handed-off"]
 
 
 def test_an_open_pull_request_whose_arming_stands_no_longer_rests_the_item_for_resume(

@@ -60,6 +60,10 @@ class PrView:
     differently from the reading beside it, for the same pull request, with
     nothing in the record saying which was read. `None` on the same terms as
     `head`.
+
+    `merge_queue_entry` is true when the forge reports that the pull request is
+    in the merge queue. GitHub clears `autoMergeRequest` once that happens, but
+    the queued pull request remains on the same path to merge.
     """
 
     number: int
@@ -67,6 +71,7 @@ class PrView:
     auto_merge_armed: bool
     merge_state_status: str
     merge_sha: str | None
+    merge_queue_entry: bool = False
     diff_size: int | None = None
     head: str | None = None
     base: str | None = None
@@ -138,6 +143,7 @@ def parse_pr_view(*, stdout: str) -> PrView | None:
         auto_merge_armed=parsed.get("autoMergeRequest") is not None,
         merge_state_status=merge_state_raw if isinstance(merge_state_raw, str) else "UNKNOWN",
         merge_sha=_merge_sha_of(parsed=parsed),
+        merge_queue_entry=parsed.get("mergeQueueEntry") is not None,
         diff_size=pr_diff_size_of(payload=parsed),
         head=head_raw if isinstance(head_raw, str) and head_raw else None,
         base=base_raw if isinstance(base_raw, str) and base_raw else None,

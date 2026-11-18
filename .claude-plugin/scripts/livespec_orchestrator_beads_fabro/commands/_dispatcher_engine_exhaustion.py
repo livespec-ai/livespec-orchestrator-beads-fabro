@@ -8,10 +8,13 @@ MERGED proceeds as a merge observed within the budget. An OPEN pull request not
 in conflict is one of two endings, told apart by whether the forge is still
 going to merge it:
 
-- armed, with no required check failed -> HANDED OFF (Scenario 220). The wait
-  ends without resting the item, because the pull request is going to merge by
-  itself and the budget was only shorter than its CI. Every required check is
-  passing or still running, and the ones still running are named.
+- armed or in the merge queue, with no required check failed -> HANDED OFF
+  (Scenario 220). The wait ends without resting the item, because the pull
+  request is going to merge by itself and the budget was only shorter than its
+  CI. GitHub clears `autoMergeRequest` while a pull request is queued, so the
+  queue entry is the forge's durable evidence of that same merge path. Every
+  required check is passing or still running, and the ones still running are
+  named.
 - anything else -- auto-merge no longer armed, or the required checks cannot be
   read -> RESTED at `blocked / needs-human` with the cause
   `merge-poll-budget-exhausted`, so no claim is left `active` over a run that
@@ -77,7 +80,7 @@ def outcome_at_exhaustion(  # noqa: PLR0913 — kw-only disposition; each field 
     if view is not None and view.state == "MERGED":
         return view
     if view is not None and view.state == "OPEN" and view.merge_state_status != _CONFLICTING:
-        if view.auto_merge_armed:
+        if view.auto_merge_armed or view.merge_queue_entry:
             settled = _armed_ending(
                 outcome_type=outcome_type,
                 plan=plan,
@@ -151,15 +154,20 @@ def _armed_ending(
     """Hand an armed, OPEN pull request off, or say it cannot be (`None`).
 
     `None` is "rest the item", never "hand off anyway": a pull request whose
-    rollup or required-check list cannot be read, or that stopped being armed or
-    open between the two reads, is not one the forge is known to be about to merge.
+    rollup or required-check list cannot be read, or that is neither armed nor
+    in the merge queue, or that stopped being open between the two reads, is not
+    one the forge is known to be about to merge.
     """
     seen = view_pr(plan=plan, runner=runner, journal=journal).view
     if seen is None:
         return None
     if seen.state == "MERGED":
         return seen
-    if seen.state != "OPEN" or not seen.auto_merge_armed or seen.merge_state_status == _CONFLICTING:
+    if (
+        seen.state != "OPEN"
+        or not (seen.auto_merge_armed or seen.merge_queue_entry)
+        or seen.merge_state_status == _CONFLICTING
+    ):
         return None
     required = required_check_names(plan=plan, number=seen.number, runner=runner, journal=journal)
     if required is None:

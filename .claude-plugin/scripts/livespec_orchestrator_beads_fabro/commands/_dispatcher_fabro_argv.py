@@ -81,6 +81,7 @@ _PR_VIEW_FIELDS = (
     "number",
     "state",
     "autoMergeRequest",
+    "mergeQueueEntry",
     "mergeStateStatus",
     "mergeCommit",
     "statusCheckRollup",
