@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import re
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -40,6 +41,17 @@ _FAILURE_LINE = re.compile(r"^(?:FAILED|ERROR)\s+([^\s]+)", re.MULTILINE)
 _workflow_verdict = forge.workflow_verdict
 _failed_jobs = forge.failed_jobs
 _job_log = forge.job_log
+
+
+@dataclass(frozen=True, kw_only=True)
+class _FailedRun:
+    """The observed failed run whose jobs are being filed."""
+
+    workflow: str
+    url: str
+    head_sha: str
+    repo: Path
+    runner: CommandRunner
 
 
 def breakage_key(*, workflow: str, job_name: str, head_sha: str) -> str:
@@ -93,51 +105,47 @@ def breakage_pass(*, repo: Path, runner: CommandRunner) -> int:
     return int(failed)
 
 
-def _watched_workflows(*, repo: Path) -> tuple[str, ...] | None:  # noqa: PLR0911
+def _watched_workflows(*, repo: Path) -> tuple[str, ...] | None:
     path = repo / ".livespec.jsonc"
     if not path.is_file():
         return ()
-    parsed = _jsonc.parse(text=path.read_text(encoding="utf-8"))
-    if not isinstance(parsed, dict):
+    node: object = _jsonc.parse(text=path.read_text(encoding="utf-8"))
+    for name in (_PLUGIN_BLOCK, "dispatcher", "breakage_workflows"):
+        if not isinstance(node, Mapping):
+            return None
+        node = cast("Mapping[str, object]", node).get(name)
+        if node is None:
+            return ()
+    if not isinstance(node, list):
         return None
-    document = cast("dict[str, object]", parsed)
-    plugin = document.get(_PLUGIN_BLOCK)
-    if plugin is None:
-        return ()
-    if not isinstance(plugin, Mapping):
-        return None
-    plugin_block = cast("Mapping[str, object]", plugin)
-    dispatcher = plugin_block.get("dispatcher")
-    if dispatcher is None:
-        return ()
-    if not isinstance(dispatcher, Mapping):
-        return None
-    dispatcher_block = cast("Mapping[str, object]", dispatcher)
-    value = dispatcher_block.get("breakage_workflows")
-    if value is None:
-        return ()
-    if not isinstance(value, list):
-        return None
-    workflows = cast("list[object]", value)
+    workflows = cast("list[object]", node)
     if any(not isinstance(item, str) or not item for item in workflows):
         return None
     return tuple(cast("str", item) for item in workflows)
 
 
-def _emit_outcome(  # noqa: C901, PLR0911, PLR0912, PLR0915 - terminal verdicts are public.
+def _emit_outcome(
     *, workflow: str, outcome: dict[str, object], repo: Path, runner: CommandRunner
 ) -> bool:
     if not outcome:
         _verdict(workflow=workflow, detail="no-completed-run")
         return False
-    conclusion = outcome.get("conclusion")
     url = _string(value=outcome.get("html_url"))
+    conclusion = outcome.get("conclusion")
     if conclusion == "success":
         _verdict(workflow=workflow, detail=f"run={url} green")
         return False
     if conclusion != "failure":
         _verdict(workflow=workflow, detail=f"run={url} not-concluded {conclusion}")
         return False
+    return _handle_failed_run(workflow=workflow, outcome=outcome, repo=repo, runner=runner)
+
+
+def _handle_failed_run(
+    *, workflow: str, outcome: dict[str, object], repo: Path, runner: CommandRunner
+) -> bool:
+    """Return whether a failed run could not be fully observed or filed."""
+    url = _string(value=outcome.get("html_url"))
     run_id = _string(value=outcome.get("id"))
     head_sha = _string(value=outcome.get("head_sha"))
     jobs = forge.failed_jobs(repo=repo, runner=runner, run_id=run_id)
@@ -157,51 +165,66 @@ def _emit_outcome(  # noqa: C901, PLR0911, PLR0912, PLR0915 - terminal verdicts 
             repo=repo,
             runner=runner,
         )
-
+    run = _FailedRun(workflow=workflow, url=url, head_sha=head_sha, repo=repo, runner=runner)
     filed: list[str] = []
     already_filed: list[str] = []
     for job in jobs:
-        job_id = _string(value=job.get("id"))
-        name = _string(value=job.get("name"))
-        if not job_id or not name:
-            _verdict(workflow=workflow, detail="unreadable failed job")
-            return True
-        key = filing.key(workflow=workflow, job_name=name, head_sha=head_sha)
-        prior = context.existing.get(key)
-        if prior is not None:
-            already_filed.append(prior)
-            continue
-        log = forge.job_log(repo=repo, runner=runner, job_id=job_id)
-        if log is None:
-            _verdict(workflow=workflow, detail=f"unreadable job log for {name}")
-            return True
-        item_id, problem = filing.file_job(
-            context=context,
-            workflow=workflow,
-            job=job,
-            url=url,
-            head_sha=head_sha,
-            tests=_failing_tests(log=log),
-            breakage_key=key,
-            capture=file_captured_work_item,
+        problem = _file_failed_job(
+            context=context, run=run, job=job, filed=filed, already_filed=already_filed
         )
         if problem is not None:
-            _verdict(workflow=workflow, detail=f"unreadable {problem}")
+            _verdict(workflow=workflow, detail=problem)
             return True
-        if item_id is not None:
-            filed.append(item_id)
-            context.existing[key] = item_id
-    if filed:
-        _verdict(
-            workflow=workflow,
-            detail=f"run={url} filed {', '.join(filed)}",
-        )
-    elif already_filed:
-        _verdict(
-            workflow=workflow,
-            detail=f"run={url} already-filed {', '.join(already_filed)}",
-        )
+    _verdict_filing(workflow=workflow, url=url, filed=filed, already_filed=already_filed)
     return False
+
+
+def _file_failed_job(
+    *,
+    context: filing.FilingContext,
+    run: _FailedRun,
+    job: dict[str, object],
+    filed: list[str],
+    already_filed: list[str],
+) -> str | None:
+    """File one failed job unless its key is known; return a verdict detail on a problem."""
+    job_id = _string(value=job.get("id"))
+    name = _string(value=job.get("name"))
+    if not job_id or not name:
+        return "unreadable failed job"
+    key = filing.key(workflow=run.workflow, job_name=name, head_sha=run.head_sha)
+    prior = context.existing.get(key)
+    if prior is not None:
+        already_filed.append(prior)
+        return None
+    log = forge.job_log(repo=run.repo, runner=run.runner, job_id=job_id)
+    if log is None:
+        return f"unreadable job log for {name}"
+    item_id, problem = filing.file_job(
+        context=context,
+        record=filing.FilingRecord(
+            workflow=run.workflow,
+            job=job,
+            url=run.url,
+            head_sha=run.head_sha,
+            tests=_failing_tests(log=log),
+            breakage_key=key,
+        ),
+        capture=file_captured_work_item,
+    )
+    if problem is not None:
+        return f"unreadable {problem}"
+    if item_id is not None:
+        filed.append(item_id)
+        context.existing[key] = item_id
+    return None
+
+
+def _verdict_filing(*, workflow: str, url: str, filed: list[str], already_filed: list[str]) -> None:
+    if filed:
+        _verdict(workflow=workflow, detail=f"run={url} filed {', '.join(filed)}")
+    elif already_filed:
+        _verdict(workflow=workflow, detail=f"run={url} already-filed {', '.join(already_filed)}")
 
 
 def _preview_failed_jobs(

@@ -43,12 +43,14 @@ def _context(*, client: _Client | None = None) -> filing.FilingContext:
 def _file_job(**kwargs: object) -> tuple[str | None, str | None]:
     return filing.file_job(
         context=kwargs["context"],  # type: ignore[arg-type]
-        workflow="nightly.yml",
-        job=kwargs.get("job", {"name": "tests", "steps": []}),  # type: ignore[arg-type]
-        url="https://run",
-        head_sha="abc",
-        tests=(),
-        breakage_key="nightly.yml:tests:abc",
+        record=filing.FilingRecord(
+            workflow="nightly.yml",
+            job=kwargs.get("job", {"name": "tests", "steps": []}),  # type: ignore[arg-type]
+            url="https://run",
+            head_sha="abc",
+            tests=(),
+            breakage_key="nightly.yml:tests:abc",
+        ),
         capture=kwargs.get("capture", lambda **_: IOSuccess("ready")),  # type: ignore[arg-type]
     )
 
@@ -213,7 +215,9 @@ def test_pass_covers_filing_terminal_paths_and_registration(
         "failed_jobs",
         lambda **_: [{"id": 1, "name": "first"}, {"id": 2, "name": "second"}],
     )
-    monkeypatch.setattr(passed.filing, "file_job", lambda **kwargs: (kwargs["job"]["name"], None))
+    monkeypatch.setattr(
+        passed.filing, "file_job", lambda **kwargs: (kwargs["record"].job["name"], None)
+    )
     assert not passed._emit_outcome(
         workflow="nightly.yml", outcome=outcome, repo=tmp_path, runner=object()
     )
