@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -70,6 +71,10 @@ ReplyShape = Literal["verdict", "item_class"]
 
 DRIFT_JUDGE_TIMEOUT_ENV = "LIVESPEC_DRIFT_JUDGE_TIMEOUT_SECONDS"
 DEFAULT_DRIFT_JUDGE_TIMEOUT_SECONDS = 600.0
+
+_FENCED_SPEC_STATED_VERDICT = re.compile(
+    r"\A```(?:json)?\r?\n(?P<verdict>.*)\r?\n```\r?\n?\Z", re.DOTALL
+)
 
 
 @dataclass(kw_only=True)
@@ -156,7 +161,8 @@ def _judged(
     Each candidate the chain ran is reported on standard error, because a drift
     pass and a governing-heading read write no ledger record of their own.
     """
-    is_reply = _looks_like_item_class if reply == "item_class" else _looks_like_spec_stated_verdict
+    is_reply = _looks_like_item_class if reply == "item_class" else _is_spec_stated_verdict_reply
+    normalize_reply = _identity if reply == "item_class" else _unwrap_spec_stated_verdict_fence
     chain = run_candidate_chain(
         prompt=prompt,
         cwd=cwd,
@@ -168,7 +174,27 @@ def _judged(
     )
     for ran in chain.attempts:
         _ = sys.stderr.write(f"{candidate_report(attempt=ran)}\n")
-    return chain.reply or "", chain.cause
+    return normalize_reply(text=chain.reply or ""), chain.cause
+
+
+def _identity(*, text: str) -> str:
+    return text
+
+
+def _unwrap_spec_stated_verdict_fence(*, text: str) -> str:
+    """Remove the one Markdown fence permitted around a verdict reply.
+
+    The candidate chain must make its parseability decision over the same text
+    passed to the shared parser.  A full-text match admits one ordinary
+    backtick fence only; prose, a second object, and truncated JSON remain for
+    that parser to refuse.
+    """
+    matched = _FENCED_SPEC_STATED_VERDICT.fullmatch(text)
+    return matched.group("verdict") if matched is not None else text
+
+
+def _is_spec_stated_verdict_reply(*, text: str) -> bool:
+    return _looks_like_spec_stated_verdict(text=_unwrap_spec_stated_verdict_fence(text=text))
 
 
 def _looks_like_item_class(*, text: str) -> bool:
