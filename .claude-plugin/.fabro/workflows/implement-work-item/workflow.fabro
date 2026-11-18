@@ -419,6 +419,20 @@ chmod 755 \"$runner\""
         prompt="@prompts/red.md"
     ]
 
+    // An unlabelled Red ordinarily reaches commit_red. A carried seed which
+    // already contains the complete change can instead leave a latest Red
+    // section with no test file; commit_red can only refuse that empty Red.
+    // Carry that exact shape to Green, while every other ordinary Red still
+    // takes the command-node fallthrough. Successful exits emit directives
+    // because this routing-schema node requires one.
+    red_unlabelled_seed_route [
+        label="Unlabelled Red: carry a seeded no-test tree to Green"
+        shape=parallelogram
+        timeout="1800s"
+        output_schema="routing"
+        script="handoff=$(git rev-parse --git-path livespec-implement-handoff.md) || exit $?; base_ref=\"origin/{{ inputs.default_branch }}\"; if ! test -f \"$handoff\"; then echo \"LIVESPEC_RED_UNLABELLED_HANDOFF_UNREADABLE: $handoff is absent, so the latest Red section cannot be classified\" >&2; exit 1; fi; if ! git rev-parse --verify --quiet \"$base_ref\" >/dev/null; then echo \"LIVESPEC_RED_UNLABELLED_BASE_UNREADABLE: $base_ref does not resolve, so the dispatch base cannot be compared\" >&2; exit 1; fi; red_section=$(awk '/^## red$/{text=\"\"; found=1; next} found && /^## /{found=0} found{text=text $0 ORS} END{printf \"%s\", text}' \"$handoff\") || exit $?; git diff --quiet \"$base_ref...HEAD\"; status=$?; if test \"$status\" -eq 1 && ! printf %s \"$red_section\" | grep -qE '^(Red )?Test file: [^[:space:]]'; then echo \"LIVESPEC_RED_UNLABELLED_SEEDED_NO_TEST: the tree differs from $base_ref and the latest Red section names no test file, so carry the seed to Green instead of refusing an empty Red commit\" >&2; printf '%s\\n' '{\"preferred_next_label\":\"carried\"}'; exit 0; fi; if test \"$status\" -ne 0 && test \"$status\" -ne 1; then echo \"LIVESPEC_RED_UNLABELLED_BASE_UNREADABLE: git diff against $base_ref exited $status, so the dispatch base cannot be compared\" >&2; exit 1; fi; printf '%s\\n' '{\"preferred_next_label\":\"commit\"}'"
+    ]
+
     // Implement-completion gate (SPECIFICATION/contracts.md §"Self-contained
     // plugin dispatch" -> "An implement turn that ends incomplete does not
     // succeed", ratified v165; Scenario 204; work-item bd-ib-ahxcjx). The
@@ -2648,7 +2662,9 @@ script="cut_root=$(printenv LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT || true); if te
     red -> green_admission [label="seeded Red already passes", condition="preferred_label=seeded-red-passes"]
     red -> red_needs_human_route [label="needs-human label", condition="preferred_label=needs-human"]
     red -> red_unknown_label_route [label="unrouted label", condition="preferred_label && preferred_label != seeded-open-red && preferred_label != seeded-red-passes && preferred_label != already-satisfied && preferred_label != needs-human"]
-    red -> commit_red
+    red -> red_unlabelled_seed_route
+    red_unlabelled_seed_route -> green_admission [label="carried seeded Red", condition="preferred_label=carried"]
+    red_unlabelled_seed_route -> commit_red
     already_satisfied_route -> red_admission [label="carried changes", condition="preferred_label=carried"]
     already_satisfied_route -> already_satisfied
     red_unknown_label_route -> red [label="label refused", condition="outcome=failed"]

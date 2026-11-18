@@ -106,6 +106,39 @@ def _tree_equals_the_dispatch_base(*, checkout: Path, scratch: Path) -> _Lap:
     return _Lap()
 
 
+def _unlabelled_red_with_a_test(*, checkout: Path, scratch: Path) -> _Lap:
+    """An ordinary Red has a named test, so the recovery node reaches commit_red."""
+    lap = _tree_equals_the_dispatch_base(checkout=checkout, scratch=scratch)
+    handoff = checkout / ".git" / "livespec-implement-handoff.md"
+    _ = handoff.write_text("## red\nRed test file: tests/test_feature.py\n", encoding="utf-8")
+    return lap
+
+
+def _unlabelled_seeded_red_without_a_test(*, checkout: Path, scratch: Path) -> _Lap:
+    """A carried tree and its latest Red section deliberately name no test file."""
+    lap = _tree_equals_the_dispatch_base(checkout=checkout, scratch=scratch)
+    _ = (checkout / "seeded.py").write_text("COMPLETE = True\n", encoding="utf-8")
+    _ = _git(repo=checkout, argv=("add", "seeded.py"))
+    _ = _git(
+        repo=checkout,
+        argv=(
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "feat: carried seed",
+        ),
+    )
+    handoff = checkout / ".git" / "livespec-implement-handoff.md"
+    _ = handoff.write_text(
+        "## red\nThe carried seed already satisfies the Definition of Done.\n", encoding="utf-8"
+    )
+    return lap
+
+
 def _no_setup(*, checkout: Path, scratch: Path) -> _Lap:
     """A lap that needs only an initialized repository."""
     del checkout, scratch
@@ -167,6 +200,7 @@ def _absent_runner(*, checkout: Path, scratch: Path) -> _Lap:
 _ORDINARY_LAPS: dict[tuple[str, str], tuple[Callable[..., _Lap], str]] = {
     # The split graph commits a complete Green turn before the diff breaker.
     (_IMPLEMENT, "already_satisfied_route"): (_tree_equals_the_dispatch_base, "already_satisfied"),
+    (_IMPLEMENT, "red_unlabelled_seed_route"): (_unlabelled_red_with_a_test, "commit_red"),
     (_IMPLEMENT, "implement_completion"): (_complete_turn, "commit_green"),
     (_IMPLEMENT, "fix_commit_settle"): (_passed_fix_commit, "fix_open_red_route"),
     (_IMPLEMENT, "fix_open_red_route"): (_no_setup, "janitor_admission"),
@@ -312,3 +346,34 @@ def test_the_ordinary_lap_exits_zero_with_a_routing_directive(
     assert (
         _destination(graph_path=graph_path, source=node, preferred_label=label) == successor
     ), label
+
+
+def test_an_unlabelled_seeded_red_without_a_test_file_routes_to_green_admission(
+    *, tmp_path: Path
+) -> None:
+    """The shipped recovery node bypasses commit_red for the measured no-test seed."""
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    _ = _git(repo=checkout, argv=("init", "--quiet", "-b", "master"))
+    lap = _unlabelled_seeded_red_without_a_test(checkout=checkout, scratch=tmp_path)
+    graph = parse_dot_graph(text=(_REPO_ROOT / _IMPLEMENT).read_text(encoding="utf-8"))
+    assert not isinstance(graph, str), graph
+    script = _DEFAULT_BRANCH_TEMPLATE.sub("master", graph.nodes["red_unlabelled_seed_route"]["script"])
+
+    result = subprocess.run(
+        ("sh", "-c", script),
+        cwd=checkout,
+        check=False,
+        capture_output=True,
+        text=True,
+        input=lap.stdin,
+        env={**_clean_environment(), **lap.environment},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "LIVESPEC_RED_UNLABELLED_SEEDED_NO_TEST" in result.stderr
+    label = _directive_label(stdout=result.stdout, stderr=result.stderr)
+    assert label == "carried"
+    assert _destination(
+        graph_path=_IMPLEMENT, source="red_unlabelled_seed_route", preferred_label=label
+    ) == "green_admission"

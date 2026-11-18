@@ -246,7 +246,9 @@ def test_seeded_routes_and_prompts_direct_the_open_red_path() -> None:
     assert "Red test file: <path>" in red
     assert "seeded-open-red" in red
     assert "seeded-open-red" in green
-    assert "never declare `already-satisfied` for such a seed" in " ".join(red.lower().split())
+    assert "already satisfies the work item's entire Definition of Done" in " ".join(red.split())
+    assert '{"preferred_next_label": "already-satisfied"}' in red
+    assert "do not write a test, publish a branch, or open a pull request" in red
     assert "dispatch base" in red
 
 

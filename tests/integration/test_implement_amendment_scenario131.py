@@ -382,7 +382,7 @@ def test_an_implement_amendment_rests_the_item_at_blocked_needs_human_and_publis
             " && preferred_label != seeded-red-passes"
             " && preferred_label != already-satisfied && preferred_label != needs-human"
         ),
-        "commit_red": "",
+        "red_unlabelled_seed_route": "",
     }
     assert _edge_conditions(source="implement_amendment_route") == {
         "needs_human": "outcome=failed",
