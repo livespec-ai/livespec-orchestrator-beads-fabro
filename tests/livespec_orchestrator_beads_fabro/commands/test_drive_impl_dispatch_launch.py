@@ -73,3 +73,33 @@ def test_a_fault_writing_the_launch_record_does_not_fail_the_dispatch(tmp_path: 
     assert len(runner.calls) == 1
     assert result["status"] == "green"
     assert result["launch"] == "unscoped"
+
+
+def test_a_final_ready_set_refusal_after_a_merged_pull_request_reports_delivery(
+    tmp_path: Path,
+) -> None:
+    class _RefusingRunner:
+        def __call__(self, *, argv: tuple[str, ...], cwd: Path | None = None) -> CommandRun:
+            del argv, cwd
+            return CommandRun(
+                argv=("dispatcher.py",),
+                returncode=3,
+                stdout="",
+                stderr="ERROR: requested work-item(s) not in the ready set: bd-ib-szbxu7\n",
+            )
+
+    result = run_impl_dispatch(
+        repo=tmp_path,
+        work_item_ref=_ITEM,
+        runner=_RefusingRunner(),
+        dispatcher_bin=tmp_path / "dispatcher.py",
+        acp_nodes=(),
+        workflow_name=None,
+        identity=None,
+        merged_pull_request_lookup=lambda _repo, _branch: 4963,
+    )
+
+    assert result["summary"] == (
+        "Dispatcher delivered bd-ib-szbxu7: merged pull request #4963 landed before its final "
+        "ready-set refusal."
+    )

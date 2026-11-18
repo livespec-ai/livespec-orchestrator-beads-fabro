@@ -16,7 +16,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Callable, Protocol, cast
 
 from livespec_orchestrator_beads_fabro.commands import _drive_impl_scope as scope
 from livespec_orchestrator_beads_fabro.commands._dispatcher_invoker import (
@@ -56,6 +56,9 @@ class CommandRunner(Protocol):
         ...
 
 
+MergedPullRequestLookup = Callable[[Path, str], int | None]
+
+
 def run_impl_dispatch(  # noqa: PLR0913 — kw-only transport; `workflow_name` is one more independent per-dispatch input forwarded verbatim, not a coupled one.
     *,
     repo: Path,
@@ -65,6 +68,7 @@ def run_impl_dispatch(  # noqa: PLR0913 — kw-only transport; `workflow_name` i
     acp_nodes: tuple[str, ...],
     workflow_name: str | None,
     identity: InvokerIdentity | None,
+    merged_pull_request_lookup: MergedPullRequestLookup | None = None,
 ) -> dict[str, Any]:
     """Run one `impl:<id>` action as a `dispatcher.py loop` subprocess."""
     resolved_runner = _SubprocessRunner() if runner is None else runner
@@ -106,6 +110,12 @@ def run_impl_dispatch(  # noqa: PLR0913 — kw-only transport; `workflow_name` i
     parsed = _parse_json_object_or_array(text=result.stdout)
     status = _dispatch_status(returncode=result.returncode, parsed=parsed)
     goal_template_refusal = _goal_template_refusal(parsed=parsed)
+    merged_pull_request = _delivered_merged_pull_request(
+        repo=repo,
+        work_item_ref=work_item_ref,
+        result=result,
+        lookup=merged_pull_request_lookup,
+    )
     return {
         "action_id": f"impl:{work_item_ref}",
         "kind": "impl",
@@ -123,6 +133,7 @@ def run_impl_dispatch(  # noqa: PLR0913 — kw-only transport; `workflow_name` i
             status=status,
             work_item_ref=work_item_ref,
             goal_template_refusal=goal_template_refusal,
+            merged_pull_request=merged_pull_request,
         ),
         "goal_template_refusal": goal_template_refusal,
     }
@@ -241,7 +252,13 @@ def _dispatch_status(*, returncode: int, parsed: object) -> str:
     return "failed"
 
 
-def _dispatch_summary(*, status: str, work_item_ref: str, goal_template_refusal: str | None) -> str:
+def _dispatch_summary(
+    *,
+    status: str,
+    work_item_ref: str,
+    goal_template_refusal: str | None,
+    merged_pull_request: int | None,
+) -> str:
     if status == "green":
         return f"Dispatcher reported green for {work_item_ref}."
     if status == HANDED_OFF_STATUS:
@@ -253,7 +270,60 @@ def _dispatch_summary(*, status: str, work_item_ref: str, goal_template_refusal:
         return f"Dispatcher reported a human-gated blocked run for {work_item_ref}."
     if goal_template_refusal is not None:
         return f"Dispatcher refused at goal-minijinja-preflight: {goal_template_refusal}."
+    if merged_pull_request is not None:
+        return (
+            f"Dispatcher delivered {work_item_ref}: merged pull request #{merged_pull_request} "
+            "landed before its final ready-set refusal."
+        )
     return f"Dispatcher did not report green for {work_item_ref}."
+
+
+def _delivered_merged_pull_request(
+    *,
+    repo: Path,
+    work_item_ref: str,
+    result: CommandRun,
+    lookup: MergedPullRequestLookup | None,
+) -> int | None:
+    """Return a merged PR only for the Dispatcher ending that can follow delivery."""
+    if result.returncode != 3 or "requested work-item(s) not in the ready set" not in result.stderr:
+        return None
+    resolver = _merged_pull_request_number if lookup is None else lookup
+    return resolver(repo, f"feat/{work_item_ref}")
+
+
+def _merged_pull_request_number(repo: Path, branch: str) -> int | None:
+    """Read the newest merged pull request for one canonical publish branch."""
+    completed = subprocess.run(
+        [
+            "gh",
+            "pr",
+            "list",
+            "--head",
+            branch,
+            "--state",
+            "merged",
+            "--json",
+            "number",
+            "--limit",
+            "20",
+        ],
+        check=False,
+        cwd=repo,
+        text=True,
+        capture_output=True,
+    )
+    if completed.returncode != 0:
+        return None
+    parsed = _parse_json_object_or_array(text=completed.stdout)
+    if not isinstance(parsed, list):
+        return None
+    numbers = [
+        entry.get("number")
+        for entry in parsed
+        if isinstance(entry, dict) and isinstance(entry.get("number"), int) and entry["number"] > 0
+    ]
+    return max(numbers, default=None)
 
 
 def _goal_template_refusal(*, parsed: object) -> str | None:
