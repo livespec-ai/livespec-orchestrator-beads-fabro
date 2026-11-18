@@ -160,6 +160,7 @@ class _Forge:
     """A forge whose one pull request changes state between the dispatch and the pass."""
 
     state: str = "OPEN"
+    queued: bool = False
     check: dict[str, object] = field(
         default_factory=lambda: {
             "name": "check-coverage",
@@ -190,7 +191,12 @@ class _Forge:
                 {
                     "number": 4615,
                     "state": self.state,
-                    "autoMergeRequest": None if self.state == "MERGED" else {"enabledAt": "now"},
+                    "autoMergeRequest": (
+                        None if self.state == "MERGED" or self.queued else {"enabledAt": "now"}
+                    ),
+                    "mergeQueueEntry": (
+                        {"position": 1, "state": "AWAITING_CHECKS"} if self.queued else None
+                    ),
                     "mergeStateStatus": "BLOCKED",
                     "mergeCommit": {"oid": "cafe05"} if self.state == "MERGED" else None,
                     "headRefOid": "8ad6cd7b2",
@@ -292,6 +298,8 @@ def test_a_handed_off_pull_request_that_merges_is_accepted_by_the_next_pass(
     assert (outcome.status, dispatch_exit_code(outcomes=[outcome])) == ("handed-off", 0)
     assert (_stored().status, _stored().assignee) == ("active", "fabro")
 
+    # GitHub clears autoMergeRequest while the pull request waits in the queue.
+    forge.queued = True
     still_open = _next_pass(repo=tmp_path, journal=journal, forge=forge)
 
     assert still_open.recovered == ()

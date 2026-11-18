@@ -354,7 +354,7 @@ def test_the_fallback_arming_never_fires_for_a_held_pull_request(tmp_path: Path)
             # `headRefOid,baseRefOid` ride it for the same reason and for the
             # overtaken-arming record, which names the head that was armed and
             # the default-branch tip that overtook it (`bd-ib-3hpdvm`).
-            "number,state,autoMergeRequest,mergeStateStatus,mergeCommit,"
+            "number,state,autoMergeRequest,mergeQueueEntry,mergeStateStatus,mergeCommit,"
             "additions,deletions,headRefOid,baseRefOid",
         ]
     ]

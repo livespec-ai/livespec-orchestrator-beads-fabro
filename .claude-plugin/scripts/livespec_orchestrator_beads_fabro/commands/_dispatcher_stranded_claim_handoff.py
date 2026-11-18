@@ -98,7 +98,7 @@ def handed_off_hold_detail(*, reading: HandoffReading) -> str:
             f"#{reading.pr_number} could not be read"
         )
     return (
-        f"{HANDED_OFF_HOLD_DETAIL}: pull request #{reading.pr_number} is armed and its "
+        f"{HANDED_OFF_HOLD_DETAIL}: pull request #{reading.pr_number} is armed or queued and its "
         "required checks are passing or still running"
     )
 
@@ -182,7 +182,9 @@ def observe_handoff(
             pr_head=view.head,
             merge_sha=view.merge_sha,
         )
-    if view.state == "CLOSED" or (view.state == "OPEN" and not view.auto_merge_armed):
+    if view.state == "CLOSED" or (
+        view.state == "OPEN" and not (view.auto_merge_armed or view.merge_queue_entry)
+    ):
         return HandoffReading(
             kind=HANDOFF_ENDED,
             plan=plan,
