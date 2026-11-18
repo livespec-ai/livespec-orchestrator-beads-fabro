@@ -56,6 +56,7 @@ from livespec_runtime.spec_stated import ItemClass, SpecStatedVerdict, StatedKin
 from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done import (
     PROOF_MODE_FACTORY_CAPTURED,
     REASON_PREFIX,
+    REFERENCES_PREFIX,
     declared_proof_mode,
     definition_of_done_source,
 )
@@ -194,11 +195,18 @@ def asked_for_behaviour(*, item: WorkItem) -> str:
     an assertion is proved and not WHAT the item asks for, so a move between the
     factory-captured list and a sub-heading must not change the judge's input.
     """
+    return _asked_for_behaviour_statement(
+        item=item, description=_without_proof_mode_partition(text=item.description)
+    )
+
+
+def _asked_for_behaviour_statement(*, item: WorkItem, description: str) -> str:
+    """Render the statement used by the tier judge and its reuse identity."""
     return "\n\n".join(
         [
             f"Work item {item.id}",
             f"Title: {_recorded(value=item.title)}",
-            f"Description: {_recorded(value=_without_proof_mode_partition(text=item.description))}",
+            f"Description: {_recorded(value=description)}",
             f"Acceptance criteria: {_recorded(value=item.acceptance_criteria)}",
         ]
     )
@@ -213,9 +221,18 @@ def behaviour_digest(*, item: WorkItem) -> str:
     text rather than over the fields it is assembled from. A digest of the
     fields would disagree with the statement the moment the renderer changed,
     and the disagreement would be invisible: every verdict would read as
-    reusable against a statement nobody had judged.
+    reusable against a statement nobody had judged. A Definition-of-Done
+    `References:` line is omitted from that identity: it locates governing text
+    for the condenser but does not change what the item asks for.
     """
-    return hashlib.sha256(asked_for_behaviour(item=item).encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        _asked_for_behaviour_statement(
+            item=item,
+            description=_without_definition_of_done_references(
+                text=_without_proof_mode_partition(text=item.description)
+            ),
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def decide_spec_change_tier(
@@ -341,6 +358,17 @@ def _without_proof_mode_partition(*, text: str) -> str:
             after.extend(kept)
     rendered = [heading, *before, *(f"- {bullet}" for bullet in sorted(bullets)), *after]
     return text.replace(section, "\n".join(rendered), 1)
+
+
+def _without_definition_of_done_references(*, text: str) -> str:
+    """Omit standalone References lines from a Definition-of-Done identity."""
+    section = definition_of_done_source(description=text)
+    if not section:
+        return text
+    rendered = "\n".join(
+        line for line in section.splitlines() if not line.startswith(REFERENCES_PREFIX)
+    )
+    return text.replace(section, rendered, 1)
 
 
 def _sub_heading_segments(*, body: list[str]) -> list[tuple[str | None, list[str]]]:
