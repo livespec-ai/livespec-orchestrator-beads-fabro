@@ -134,6 +134,29 @@ def test_lloc_and_coverage_events_are_read_only_for_their_own_failed_targets(
     assert all(facts), (section, other, bare)
 
 
+def test_a_non_coverage_target_lists_its_diagnostic_rows_in_output_order(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    diagnostics = "".join(
+        f"pkg/lint_{index:02d}.py:{index + 1}:1: E402 import must be at the top\n"
+        for index in range(43)
+    )
+    output = diagnostics + "Failed targets (1):\n  - check-lint\n"
+
+    section = _refusal_section(capsys=capsys, tmp_path=tmp_path, output=output)
+
+    listed = [line for line in section.splitlines() if line.startswith("- ")]
+    facts = [
+        "failed targets: check-lint" in section,
+        len(listed) == 40,
+        listed[0] == "- pkg/lint_00.py:1:1: E402 import must be at the top",
+        listed[-1] == "- pkg/lint_39.py:40:1: E402 import must be at the top",
+        "failing files (43):" in section,
+        section.endswith("3 further files omitted\n"),
+    ]
+    assert all(facts), section
+
+
 def test_an_unreadable_output_file_prints_an_empty_section(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -170,6 +170,14 @@ COVERAGE_ROW = re.compile(
     r"^(?P<name>\S+)\s+\d+\s+\d+(?:\s+\d+\s+\d+)?\s+(?P<cover>\d+(?:\.\d+)?)%"
     r"(?:\s+(?P<missing>\S.*?))?\s*$"
 )
+# A conventional diagnostic, such as Ruff's ``path:line:column: rule message``
+# or Pyright's ``path:line:column - error: message``.  ``name`` is deliberately
+# non-greedy: a literal shell expansion can contain a colon (``${ROOT:-...}``),
+# which is part of its path rather than its location delimiter.
+DIAGNOSTIC_ROW = re.compile(
+    r"^(?P<name>.+?):(?P<line>\d+)(?::(?P<column>\d+))?(?:\s*:\s*|\s+-\s+)"
+    r"(?P<message>\S.*)$"
+)
 BELOW_COVERAGE_EVENT = "file below 100% coverage"
 LLOC_EVENT_PREFIX = "file LLOC exceeds"
 
@@ -719,21 +727,37 @@ def event_file(event, coverage, lloc):
     return None
 
 
+def diagnostic_row_file(line):
+    """A conventional non-coverage diagnostic as (file-and-location, message)."""
+    row = DIAGNOSTIC_ROW.match(line)
+    if row is None:
+        return None
+    location = row.group("name") + ":" + row.group("line")
+    column = row.group("column")
+    if column is not None:
+        location += ":" + column
+    return location, row.group("message")
+
+
 def failing_files(text, targets):
     """Each failing file the failed targets' own reports name, first mention first.
 
     Only a failed target's kind of report is read, so a coverage table printed by a
     target that passed is never named; a table row's uncovered lines refine the
-    per-file coverage check's count for the same file.
+    per-file coverage check's count for the same file.  Every other failed target
+    reads its conventional path-and-location diagnostics.
     """
     coverage = bool(COVERAGE_TARGETS.intersection(targets))
     lloc = bool(LLOC_TARGETS.intersection(targets))
+    diagnostics = bool(set(targets).difference(COVERAGE_TARGETS | LLOC_TARGETS))
     found = {}
     for line in text.splitlines():
         row = coverage_row_file(line) if coverage else None
         if row is None:
             event = structured_event(line)
             row = None if event is None else event_file(event, coverage, lloc)
+        if row is None and diagnostics:
+            row = diagnostic_row_file(line)
         if row is None:
             continue
         name = row[0][2:] if row[0].startswith("./") else row[0]
