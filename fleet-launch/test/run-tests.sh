@@ -4231,9 +4231,11 @@ export FLEET_LAUNCH_MAX_WAIT_S=120
 refusal="credential_wrapper could not run in this environment (required secret env var(s) ['BEADS_DOLT_PASSWORD', 'GITHUB_APP_ID'])"
 parent_out=$(STUB_CRED_REFUSAL="$refusal" ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-probestderr 2>&1)
 parent_rc=$?
-if [ "$parent_rc" = 75 ] && printf '%s' "$parent_out" | grep -q "credential probe NOT usable (rc=3)" \
-    && printf '%s' "$parent_out" | grep -qF "required secret env var(s) ['BEADS_DOLT_PASSWORD', 'GITHUB_APP_ID']" \
-    && [ -z "$(drive_log_items)" ]; then
+probe_held=no
+case $parent_out in
+    *"credential probe NOT usable (rc=3)"*"required secret env var(s) ['BEADS_DOLT_PASSWORD', 'GITHUB_APP_ID']"*) probe_held=yes ;;
+esac
+if [ "$parent_rc" = 75 ] && [ "$probe_held" = yes ] && [ -z "$(drive_log_items)" ]; then
     pass "a credential probe refused by the wrapper holds the launch (exit 75) and the launcher log carries the refusal text naming the missing variables"
 else
     fail "the probe refusal was swallowed or the launch was not held (rc=$parent_rc): $(printf '%s' "$parent_out" | tail -5)"
