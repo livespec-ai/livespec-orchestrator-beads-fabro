@@ -3325,5 +3325,13 @@
     "test": "TODO",
     "work_item": "bd-ib-nr53me",
     "reason": "A real test at the integration tier or above is owed for this heading: the dispatch sandbox configuration driven with a factory declaring gates_kubeconfig for an existing file, a missing file and an invalid value, asserting the read-only mount, the journaled warning that never refuses, the before-claim refusal naming the key, and that no record carries the file contents. The code sibling filed under bd-ib-nr53me owns it."
+  },
+  {
+    "heading": "## Scenario 382 — A credential re-exec passes the child's exit code and stderr through",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-32jkpv",
+    "reason": "A real test at the integration tier or above is owed for this heading: a bin entry point whose required secrets are absent, re-execed through a credential_wrapper that delivers them to a child exiting non-zero with only a stderr refusal, asserting the child's exit code and stderr pass through unrelabelled, plus the arm where the wrapper fails to start or delivers no secret and the diagnostic names the wrapper and the missing secret names without a value. bd-ib-32jkpv owns it."
   }
 ]
