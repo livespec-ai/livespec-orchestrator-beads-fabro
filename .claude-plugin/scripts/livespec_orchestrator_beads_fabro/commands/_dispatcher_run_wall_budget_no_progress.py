@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_runs_export import (
@@ -41,6 +42,7 @@ __all__: list[str] = [
     "EMPTY_DIFF_MARKER_MAX_BYTES",
     "NO_PROGRESS_CONSECUTIVE_STAGE_COUNT",
     "NO_PROGRESS_TIME_FLOOR_SECONDS",
+    "NoProgressSpan",
     "cancel_run_for_no_progress",
     "no_progress_pointer_suffix",
     "stage_diffs_from_run_record",
@@ -56,6 +58,31 @@ _NO_PROGRESS_STAGE_BASES: Final = frozenset(
 _NUMBERED_STAGE_PREFIX = re.compile(r"^\d+-")
 _NO_PROGRESS_START = RunWallStart(epoch=0.0, source="no-progress-cut")
 _INSPECT_TIMEOUT_SECONDS = 60.0
+
+
+@dataclass(kw_only=True)
+class NoProgressSpan:
+    """How long the run's trailing empty-diff sequence has been observed.
+
+    The time floor guards against cutting a run on a transient reading, so it
+    must measure the sequence itself rather than the slot's age: a run that made
+    real progress for an hour and then emits K marker-sized diffs seconds apart
+    has a span of seconds. The run-state projection carries no per-stage
+    instant, so the span runs from the first poll that saw the sequence,
+    which can only make it shorter than the true span and so cut later. Any
+    reading without a trailing empty sequence ends it.
+    """
+
+    since_epoch: float | None = None
+
+    def observe(self, *, stages: tuple[str, ...] | None, now_epoch: float) -> float | None:
+        """This poll's span in seconds, or None when no empty sequence is trailing."""
+        if stages is None:
+            self.since_epoch = None
+            return None
+        if self.since_epoch is None:
+            self.since_epoch = now_epoch
+        return now_epoch - self.since_epoch
 
 
 def cancel_run_for_no_progress(  # noqa: PLR0913 -- the shared preservation seams are independent.

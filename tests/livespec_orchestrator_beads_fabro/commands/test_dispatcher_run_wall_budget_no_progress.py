@@ -113,6 +113,21 @@ def test_no_progress_holds_when_the_preservation_pointer_is_unavailable(
     assert held["failed_measurement"] == "export unread"
 
 
+def test_cancel_for_no_progress_leaves_a_run_with_changing_diffs_within_budget() -> None:
+    verdict = _dispatcher_run_wall_budget_no_progress.cancel_run_for_no_progress(
+        dispatch_id="dispatch-01",
+        plan=SimpleNamespace(),
+        port=object(),
+        runner=object(),
+        journal=object(),
+        run_id="01RUN",
+        ledger=None,
+        stage_diffs={"green@1": "a" * 200, "commit_green@1": "", "fix@1": ""},
+    )
+
+    assert verdict is _dispatcher_run_wall_budget_watch.RunWallVerdict.WITHIN
+
+
 def test_nonpositive_k_never_matches_empty_stage_diffs() -> None:
     cut = _dispatcher_run_wall_budget_no_progress.trailing_empty_implementation_stages(
         stage_diffs={"green@1": ""},
@@ -133,19 +148,26 @@ def test_watch_returns_the_no_progress_verdict_before_consulting_the_budget(
     monkeypatch.setattr(
         _dispatcher_run_wall_budget_watch,
         "stage_diffs_from_run_record",
-        lambda **_: {},
+        lambda **_: {"green@1": "", "commit_green@1": "", "fix@1": ""},
+    )
+    monkeypatch.setattr(
+        _dispatcher_run_wall_budget_watch,
+        "cancel_run_past_budget",
+        lambda **_: _dispatcher_run_wall_budget_watch.RunWallVerdict.WITHIN,
     )
     watch = _dispatcher_run_wall_budget_watch.RunWallBudgetWatch(ledger=None)
 
-    verdict = watch.verdict(
-        dispatch_id="dispatch-01",
-        plan=SimpleNamespace(),
-        port=object(),
-        runner=object(),
-        journal=object(),
-        run_id="01RUN",
-        recorded_epoch=0.0,
-        now_epoch=3600.0,
-    )
+    verdict = None
+    for now_epoch in (3600.0, 7200.0):
+        verdict = watch.verdict(
+            dispatch_id="dispatch-01",
+            plan=SimpleNamespace(),
+            port=object(),
+            runner=object(),
+            journal=object(),
+            run_id="01RUN",
+            recorded_epoch=0.0,
+            now_epoch=now_epoch,
+        )
 
     assert verdict is _dispatcher_run_wall_budget_watch.RunWallVerdict.CANCELLED
