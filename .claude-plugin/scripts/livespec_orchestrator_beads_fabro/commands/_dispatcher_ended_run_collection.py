@@ -1,4 +1,4 @@
-"""Collect ended, owned runs only after their work-item has closed.
+"""Collect ended, owned runs once their work-item has closed, or is back at ready or backlog.
 
 The normal reconciliation join deliberately considers non-terminal runs: its
 job is to release active scheduler slots.  A terminal run carries no slot, but
@@ -6,6 +6,12 @@ its Petri sandbox is only stopped, not deleted.  This separate collector owns
 that retention boundary.  It reads the same recorded attribution as the run
 reconciler, so clearance, availability-probe, and item-less runs cannot become
 collectable merely because they appear in a shared factory inventory.
+
+A run whose item rests at `ready` or `backlog` is collected too, but only when origin holds the
+run's committed tree (bd-ib-jshkjz): its pod otherwise held a reservation for as long as the item
+waited. Such a run keeps its preservation refs, because a re-dispatch seeds from them, and a run
+whose tree origin does not hold, or whose record cannot say, keeps its sandbox and is journaled as
+retained for unpublished work. An item at `blocked`, `needs-human` or in flight keeps its sandbox.
 
 The collector serves ONE dispatching repository per call: `repo` is the
 repository whose journal and ledger the inventory was attributed against, which
@@ -47,6 +53,11 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_runs_attri
     FactoryRunInventory,
     attributed_runs,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_refs import (
+    VerifiedPreservationRef,
+    committed_tip,
+    verified_preservation_ref,
+)
 from livespec_orchestrator_beads_fabro.commands._fabro_port import FabroPort
 
 __all__: list[str] = [
@@ -56,6 +67,7 @@ __all__: list[str] = [
 ]
 
 _CLOSED_ITEM_STATUSES = frozenset({"closed", "done"})
+_PUBLISHED_ITEM_STATUSES = frozenset({"ready", "backlog"})
 _ENDED_STATUS_KINDS = frozenset({"canceled", "cancelled", "dead", "failed", "succeeded"})
 _COLLECTION_STAGE = "ended-run-collected"
 _EXPORTED_STAGE = "ended-run-exported"
@@ -64,6 +76,8 @@ _EXPORT_SKIPPED_STAGE = "ended-run-export-skipped-disk-pressure"
 JOURNAL_STAGE_COLLECTION_REFUSED = "ended-run-collection-refused"
 _REASON_NOT_CLOSED = "item-not-closed"
 _REASON_NO_STATUS = "item-status-unreadable"
+_REASON_UNPUBLISHED = "retained-for-unpublished-work"
+_INSPECT_TIMEOUT_SECONDS = 120.0
 _RM_TIMEOUT_SECONDS = 120.0
 _RM_OUTPUT_EXCERPT_CHARS = 2000
 
@@ -77,7 +91,8 @@ def collect_closed_ended_runs(
     journal: JournalWriter,
     dry_run: bool,
 ) -> None:
-    """Delete ended sandboxes whose recorded work-item is now closed.
+    """Delete ended sandboxes whose recorded work-item is closed, or at ready or backlog with
+    its run's committed tree held on origin.
 
     The run's preservation refs are deleted from origin FIRST: once the item is
     closed and the run has ended nothing can push to them or seed from them. A
@@ -107,18 +122,23 @@ def collect_closed_ended_runs(
             continue
         if row.run.status_kind not in _ENDED_STATUS_KINDS or dry_run:
             continue
-        if row.work_item_status not in _CLOSED_ITEM_STATUSES:
-            if (row.run.run_id, row.work_item_status) not in inventory.refused_before:
-                _journal_refusal(inventory=inventory, repo=repo, journal=journal, row=row)
-            continue
-        if not delete_ended_run_refs(
-            runner=runner,
-            repo=repo,
-            journal=journal,
-            work_item_id=row.work_item_id,
-            run_id=row.run.run_id,
-        ):
-            continue
+        if row.work_item_status in _CLOSED_ITEM_STATUSES:
+            if not delete_ended_run_refs(
+                runner=runner,
+                repo=repo,
+                journal=journal,
+                work_item_id=row.work_item_id,
+                run_id=row.run.run_id,
+            ):
+                continue
+        else:
+            kept = _retention(port=port, runner=runner, repo=repo, row=row)
+            if kept is not None:
+                if (row.run.run_id, row.work_item_status) not in inventory.refused_before:
+                    _journal_refusal(
+                        inventory=inventory, repo=repo, journal=journal, row=row, kept=kept
+                    )
+                continue
         _journal_export(inventory=inventory, port=port, repo=repo, journal=journal, row=row)
         removed = port.rm(
             run_id=row.run.run_id,
@@ -205,13 +225,44 @@ def journaled_refusals(*, journal_path: Path | None) -> frozenset[tuple[str, str
     return frozenset(refused)
 
 
+def _retention(
+    *, port: FabroPort, runner: CommandRunner, repo: Path, row: AttributedRun
+) -> tuple[str, str | None] | None:
+    """Why this run's sandbox stays, as (reason, detail), or None when it is collectable.
+
+    An item at ready or backlog is collectable only while origin holds the run's committed
+    tree; a record that names no tip, or a listing that cannot answer, retains the sandbox.
+    """
+    status = row.work_item_status
+    if status is None:
+        return _REASON_NO_STATUS, None
+    if status not in _PUBLISHED_ITEM_STATUSES:
+        return _REASON_NOT_CLOSED, None
+    inspected = port.inspect(run_id=row.run.run_id, timeout_seconds=_INSPECT_TIMEOUT_SECONDS)
+    tip = committed_tip(record=inspected.payload)
+    if tip is None:
+        return _REASON_UNPUBLISHED, "the run's record names no committed tip"
+    held = verified_preservation_ref(
+        runner=runner,
+        repo=repo,
+        work_item_id=row.work_item_id,
+        run_id=row.run.run_id,
+        tip_commit=tip,
+    )
+    if isinstance(held, VerifiedPreservationRef):
+        return None
+    return _REASON_UNPUBLISHED, None if held is None else held.detail
+
+
 def _journal_refusal(
     *,
     inventory: FactoryRunInventory,
     repo: Path,
     journal: JournalWriter,
     row: AttributedRun,
+    kept: tuple[str, str | None],
 ) -> None:
+    reason, detail = kept
     journal.append(
         record={
             "stage": JOURNAL_STAGE_COLLECTION_REFUSED,
@@ -221,6 +272,7 @@ def _journal_refusal(
             "dispatching_repository": repo.name,
             "work_item_id": row.work_item_id,
             "work_item_status": row.work_item_status,
-            "reason": _REASON_NO_STATUS if row.work_item_status is None else _REASON_NOT_CLOSED,
+            "reason": reason,
+            **({} if detail is None else {"detail": detail}),
         }
     )
