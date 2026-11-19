@@ -10,6 +10,7 @@ import pytest
 from livespec_orchestrator_beads_fabro.commands import (
     _dispatcher_definition_of_done_setting_checks as setting_checks,
 )
+from livespec_orchestrator_beads_fabro.commands._config import dispatcher_block
 from livespec_orchestrator_beads_fabro.commands._dispatcher_acceptance_eligibility import (
     pre_dispatch_criteria_refusal,
 )
@@ -55,6 +56,7 @@ def _repo(*, tmp_path: Path, command: list[str], aliases: dict[str, str] | None 
         "tool": "ansible-core",
         "version": "2.21.4",
         "settings_listing_command": command,
+        "setting_prefixes": ["ANSIBLE_", "DEFAULT_"],
     }
     if aliases is not None:
         check["setting_aliases"] = aliases
@@ -216,3 +218,70 @@ def test_an_exception_running_the_pinned_listing_is_recorded_as_unavailable(
             tool="ansible-core", version="2.21.4", detail=str(failure)
         ),
     )
+
+
+def test_each_pinned_tool_screens_only_the_settings_it_declares(tmp_path: Path) -> None:
+    repo = _repo(
+        tmp_path=tmp_path,
+        command=_listing(tmp_path=tmp_path, output="ANSIBLE_PIPELINING(default) = False"),
+    )
+    other_dir = tmp_path / "other"
+    other_dir.mkdir()
+    config_path = repo / ".livespec.jsonc"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    checks = config["livespec-orchestrator-beads-fabro"]["dispatcher"][
+        "definition_of_done_setting_checks"
+    ]
+    checks.append(
+        {
+            "tool": "other-tool",
+            "version": "1.0.0",
+            "settings_listing_command": _listing(tmp_path=other_dir, output="OTHER_MODE = on"),
+            "setting_prefixes": ["OTHER_"],
+        }
+    )
+    _ = config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    result = named_setting_checks(
+        item=_item(assertion="ANSIBLE_PIPELINING and OTHER_MODE are both set."), cwd=repo
+    )
+
+    assert result.findings == ()
+    assert result.unavailable == ()
+
+
+def test_a_setting_outside_every_declared_prefix_is_not_screened_or_run(tmp_path: Path) -> None:
+    repo = _repo(tmp_path=tmp_path, command=["not-run"])
+    config_path = repo / ".livespec.jsonc"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    del config["livespec-orchestrator-beads-fabro"]["dispatcher"][
+        "definition_of_done_setting_checks"
+    ][0]["setting_prefixes"]
+    _ = config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    result = named_setting_checks(
+        item=_item(assertion="DEFAULT_PIPELINING keeps the target secret off disk."), cwd=repo
+    )
+
+    assert result.findings == ()
+    assert result.unavailable == ()
+
+
+def test_the_committed_configuration_declares_the_pinned_ansible_core_listing() -> None:
+    root = Path(__file__).resolve().parents[3]
+
+    raw = dispatcher_block(cwd=root)["definition_of_done_setting_checks"]
+
+    ansible = [check for check in raw if check["tool"] == "ansible-core"]
+    assert len(ansible) == 1
+    check = ansible[0]
+    assert check["version"] == "2.21.4"
+    assert check["settings_listing_command"] == [
+        "uvx",
+        "--from",
+        "ansible-core==2.21.4",
+        "ansible-config",
+        "dump",
+    ]
+    assert "DEFAULT_" in check["setting_prefixes"]
+    assert check["setting_aliases"] == {"pipelining": "ANSIBLE_PIPELINING"}

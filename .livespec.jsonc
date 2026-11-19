@@ -300,6 +300,24 @@
       // files one MANUAL-admission item. ci.yml is the most-watched default-branch CI
       // (bd-ib-voazyv, coordinator ruling R301 2026-11-18). Hand edit only (see the note above).
       "breakage_workflows": ["ci.yml"],
+      // Pinned-tool setting screen (bd-ib-mgmpfr). A Definition-of-Done assertion that names
+      // a setting the pinned tool version does not define is held before admission and refused
+      // before any claim. Each entry declares: `tool`, `version` (the pin), `settings_listing_command`
+      // (argv of the tool's own FULL settings listing at that pin, never an only-changed dump),
+      // `setting_prefixes` (uppercase name prefixes this tool owns; a candidate is judged only
+      // against the tool that owns it) and optional `setting_aliases` (an ini key or prose name
+      // mapped to the name the listing shows, e.g. pipelining -> ANSIBLE_PIPELINING). Measured
+      // on ansible-core 2.21.4: DEFAULT_PIPELINING is not defined; ANSIBLE_PIPELINING is.
+      // Hand edit only (see the note above).
+      "definition_of_done_setting_checks": [
+        {
+          "tool": "ansible-core",
+          "version": "2.21.4",
+          "settings_listing_command": ["uvx", "--from", "ansible-core==2.21.4", "ansible-config", "dump"],
+          "setting_prefixes": ["ANSIBLE_", "DEFAULT_"],
+          "setting_aliases": { "pipelining": "ANSIBLE_PIPELINING" }
+        }
+      ],
       "implement": { "mechanical_targets": ["check-check-coverage-incremental", "check-file-lloc", "check-format", "check-keyword-only-args", "check-lint", "check-no-lloc-soft-warnings", "check-per-file-coverage"] },
       // CUTOVER (2026-11-06, bd-ib-4eeefv, S5 of bd-ib-jjws2). With this key true every
       // claim writer of this tenant (every Dispatcher, intake, the human valves and
