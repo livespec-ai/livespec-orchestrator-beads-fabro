@@ -267,6 +267,12 @@ question of fact — the spec tree above all.
    - declare it `human_attested` only when no agent session, in a sandbox or
      on an operator host, can exercise the proof at all.
 
+   When the proof surface is **the released-build effects of a prompt or
+   workflow file the item itself changes**, the finding also names **the
+   released-build requirement**: such a file takes effect only in a later run
+   of the released build, so the run that carries the change cannot exercise it
+   and the proof is owed after the release.
+
    When the capability set is UNKNOWN, **withhold this finding and only this
    one** — every other check in this list still applies in full, including
    check 3's refusal of a weaker mode, which rests on your reading of the
