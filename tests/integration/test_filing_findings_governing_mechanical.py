@@ -166,17 +166,6 @@ def _route_intake(*, repo: Path, reference: str) -> str:
     )
 
 
-def _stored(*, repo: Path) -> WorkItem:
-    return materialize_work_items(records=read_work_items(path=_config(repo=repo)))[_ITEM_ID]
-
-
-def _comments(*, repo: Path) -> str:
-    return "\n".join(
-        comment.text
-        for comment in read_work_item_comments(path=_config(repo=repo), work_item_id=_ITEM_ID)
-    )
-
-
 def test_a_citation_the_judgement_did_not_return_is_a_mechanical_finding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

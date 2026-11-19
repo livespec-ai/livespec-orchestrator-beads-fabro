@@ -258,14 +258,16 @@ def _release(
     )
 
 
-def _held(*, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **overrides: object) -> Path:
+def _held(
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    replies: tuple[str, ...] = ("feature", _unstated(), "feature", _unstated()),
+    **overrides: object,
+) -> Path:
     """A repository holding one filed feature held for its linked proposal."""
     repo = _repo(tmp_path=tmp_path)
-    _install_judge(
-        tmp_path=tmp_path,
-        monkeypatch=monkeypatch,
-        replies=("feature", _unstated(), "feature", _unstated()),
-    )
+    _install_judge(tmp_path=tmp_path, monkeypatch=monkeypatch, replies=replies)
     append_work_item(path=_config(repo=repo), item=_item(**overrides))
     assert _route(repo=repo) == "pending-approval"
     assert _wall(repo=repo, tmp_path=tmp_path) == EXIT_UNGRADEABLE_CRITERIA
@@ -477,7 +479,14 @@ def test_an_action_id_without_a_heading_is_not_a_valve_action(tmp_path: Path, ac
 def test_an_attestation_survives_a_rejected_proposal_and_voids_on_a_changed_clause(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    repo = _held(tmp_path=tmp_path, monkeypatch=monkeypatch)
+    # The release routes the item to `ready`, and the filing findings take the
+    # governing-heading judgement for it: that taking is the THIRD reply, ahead of
+    # the replies the fresh classification below reads.
+    repo = _held(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        replies=("feature", _unstated(), _unstated(), "feature", "feature", _unstated()),
+    )
     assert _release(repo=repo)["status"] == "green"
 
     # A later revision that rejects the linked proposal and touches no cited clause.
