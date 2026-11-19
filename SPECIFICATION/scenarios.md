@@ -11480,6 +11480,23 @@ Feature: In-turn commits pay the scoped gate, and the full aggregate runs once p
     Then the gate accepts the commit because the staged test fails, without demanding passing tests or coverage
     When commit_green stages the implementation and amends to Green
     Then the commit hook runs the affected-tests gate and requires the scoped tests to pass and every changed line to be executed by the widened set
+
+  Scenario: A change to a module the dispatcher's hub modules import selects only the tests that executed it
+    Given a recorded coverage-execution map whose recorded default-branch commit is an ancestor of the commit being made
+    And the map names the test modules that executed the changed product module
+    When the affected-tests gate selects the tests for a commit that changes only that module
+    Then the selected test modules are those the map names, the module's mirror-paired test module and its siblings, widened as the clause requires
+    And the selection does not include a test module that reaches the module only through another module's imports
+
+  Scenario: A module the recorded map does not cover keeps the import-graph selection
+    Given a changed product module that no recorded coverage-execution map covers
+    When the affected-tests gate selects the tests for a commit that changes only that module
+    Then the selected test modules are every test module that imports the module directly or transitively
+
+  Scenario: A map recorded on a commit that is not an ancestor is not used
+    Given a recorded coverage-execution map whose recorded default-branch commit is not an ancestor of the commit being made
+    When the affected-tests gate selects the tests for a commit that changes a product module the map names
+    Then the selected test modules are every test module that imports the module directly or transitively
 ```
 
 ## Scenario 256 — A publication that already landed is finished at publish_draft, not a failure
