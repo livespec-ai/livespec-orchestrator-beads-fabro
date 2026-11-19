@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.343.8](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.7...v0.343.8) (2026-11-19)
+
+
+### Bug Fixes
+
+* the pull-request read asks gh only for fields it lists and reads queue membership through graphql (bd-ib-o657q3) ([2919105](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/2919105a3875f41166057a2682664b4286116bf2))
+
 ## [0.343.7](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.6...v0.343.7) (2026-11-19)
 
 
