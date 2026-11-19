@@ -36,6 +36,16 @@ A REMOVAL IS `content is None`, WHICH IS NOT EMPTY CONTENT. A run that truncated
 a file reports zero bytes and a run that deleted it reports no content at all;
 the tree entry each produces is different (a blob against a JSON null), so
 collapsing the two would publish the deleted file as an empty one.
+
+A FINAL-PATCH READ WITH NULL CONTENTS IS THE NORMAL, SUPPORTED INPUT, NOT AN ERROR CASE. The Petri
+engine releases a run's sandbox at run finish and the publish step then reopens a NEW same-named
+pod with no workspace (measured on the petri factory, 2026-11-19: `run finished status=success
+released_count=1`, pod killed in the same second), so every publish that runs after finish reads
+`meta.source = "final_patch"` (`degraded_reason = "sandbox_gone"`) with `new_file.contents = null`
+on every entry and the change only in `unified_patch`. Such an entry is read as a `RunFile`
+carrying its `patch`, and the publication builds the bytes from it over the run's base commit;
+only a patch that does not apply, or an entry carrying neither content nor a patch, stays refused.
+A null-contents entry in any OTHER read keeps its refusal.
 """
 
 from __future__ import annotations
@@ -84,6 +94,9 @@ _NESTED_CONTENT_KEY = "contents"
 _META_KEY = "meta"
 _META_SCOPE_KEY = "scope"
 _META_SOURCE_KEY = "source"
+_FINAL_PATCH_SOURCE = "final_patch"
+_PATCH_KEY = "unified_patch"
+_ADDED = "added"
 
 _READ_TIMEOUT_SECONDS = 300.0
 
@@ -95,6 +108,11 @@ class RunFile:
     path: str
     content: bytes | None
     mode: str
+    # Set only for a null-contents entry of a final-patch read: the change, as the factory's own
+    # unified patch, still to be applied. `base_path` is the file it applies to at the run's base
+    # commit, or None for an added file, whose patch carries all of its text.
+    patch: str | None = None
+    base_path: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -113,6 +131,9 @@ class RunFiles:
     files: tuple[RunFile, ...]
     scope: str | None
     source: str | None
+    # The server's own `meta.degraded_reason` when it served a degraded read (for example
+    # `sandbox_gone`), else None. Optional because only a degraded read states one.
+    degraded_reason: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -156,14 +177,19 @@ def run_files_from_payload(*, payload: object) -> RunFiles | RunFilesUnreadable:
                 f" under any of {', '.join(_CONTAINER_KEYS)} or at its top level"
             )
         )
+    scope, source = _served(payload=payload)
     files: list[RunFile] = []
     for entry in entries:
-        read = _run_file(entry=entry)
+        read = _run_file(entry=entry, patch_allowed=source == _FINAL_PATCH_SOURCE)
         if isinstance(read, RunFilesUnreadable):
             return read
         files.append(read)
-    scope, source = _served(payload=payload)
-    return RunFiles(files=tuple(files), scope=scope, source=source)
+    return RunFiles(
+        files=tuple(files),
+        scope=scope,
+        source=source,
+        degraded_reason=_degraded_reason(payload=payload),
+    )
 
 
 def _served(*, payload: object) -> tuple[str | None, str | None]:
@@ -186,6 +212,19 @@ def _served(*, payload: object) -> tuple[str | None, str | None]:
     )
 
 
+def _degraded_reason(*, payload: object) -> str | None:
+    """The reason a degraded read names, only when the response says it is degraded."""
+    if not isinstance(payload, dict):
+        return None
+    held = cast("dict[object, object]", payload).get(_META_KEY)
+    if not isinstance(held, dict):
+        return None
+    meta = cast("dict[object, object]", held)
+    if meta.get("degraded") is not True:
+        return None
+    return _first_string(mapping=meta, keys=("degraded_reason",))
+
+
 def _entries(*, payload: object) -> tuple[object, ...] | None:
     """The response's list of changed files, however it chose to carry it."""
     if isinstance(payload, list):
@@ -200,7 +239,7 @@ def _entries(*, payload: object) -> tuple[object, ...] | None:
     return None
 
 
-def _run_file(*, entry: object) -> RunFile | RunFilesUnreadable:
+def _run_file(*, entry: object, patch_allowed: bool) -> RunFile | RunFilesUnreadable:
     """One entry read as a changed file, or the reason it could not be."""
     if not isinstance(entry, dict):
         return RunFilesUnreadable(
@@ -219,7 +258,7 @@ def _run_file(*, entry: object) -> RunFile | RunFilesUnreadable:
     mode = _mode(mapping=mapping)
     if _removed(mapping=mapping):
         return RunFile(path=path, content=None, mode=mode)
-    return _with_content(mapping=mapping, path=path, mode=mode)
+    return _with_content(mapping=mapping, path=path, mode=mode, patch_allowed=patch_allowed)
 
 
 def _path(*, mapping: dict[object, object]) -> str | None:
@@ -245,10 +284,19 @@ def _nested_string(*, mapping: dict[object, object], key: str, field: str) -> st
 
 
 def _with_content(
-    *, mapping: dict[object, object], path: str, mode: str
+    *, mapping: dict[object, object], path: str, mode: str, patch_allowed: bool
 ) -> RunFile | RunFilesUnreadable:
     """Decode the bytes one entry reports for `path`."""
     held = _content_text(mapping=mapping)
+    patch = mapping.get(_PATCH_KEY)
+    if held is None and patch_allowed and isinstance(patch, str) and patch:
+        return RunFile(
+            path=path,
+            content=None,
+            mode=mode,
+            patch=patch,
+            base_path=_base_path(mapping=mapping, path=path),
+        )
     if held is None:
         return RunFilesUnreadable(
             detail=(
@@ -268,6 +316,13 @@ def _with_content(
             detail=f"the run-files entry for {path} declared base64 content that does not decode"
         )
     return RunFile(path=path, content=decoded, mode=mode)
+
+
+def _base_path(*, mapping: dict[object, object], path: str) -> str | None:
+    """The file a patch applies to at the base commit: None if added, else its old name."""
+    if mapping.get("change_kind") == _ADDED:
+        return None
+    return _nested_string(mapping=mapping, key=_OLD_FILE, field=_NESTED_PATH_KEY) or path
 
 
 def _content_text(*, mapping: dict[object, object]) -> str | None:

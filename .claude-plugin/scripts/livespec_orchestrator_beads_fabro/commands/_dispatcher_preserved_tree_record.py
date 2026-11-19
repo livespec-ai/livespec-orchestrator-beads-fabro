@@ -121,6 +121,11 @@ def preserved_tree_body(
     say what this ref CONTAINS, the factory prunes the run that could be asked
     again, and this comment is the only record that outlives it.
     """
+    degraded = (
+        [f"served degraded reason: {preserved.degraded_reason}"]
+        if preserved.degraded_reason
+        else []
+    )
     return "\n".join(
         [
             PRESERVED_TREE_MARKER,
@@ -134,6 +139,7 @@ def preserved_tree_body(
             f"changed files published: {preserved.file_count}",
             f"served scope: {_served(reading=preserved.scope)}",
             f"served source: {_served(reading=preserved.source)}",
+            *degraded,
             "",
             _SERVED_PROSE,
             "",
