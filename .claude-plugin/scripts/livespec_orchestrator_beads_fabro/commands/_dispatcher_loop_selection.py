@@ -9,6 +9,7 @@ are unchanged.
 from __future__ import annotations
 
 import argparse
+import inspect
 from collections.abc import Callable
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -249,12 +250,23 @@ def post_run_dispositions(  # noqa: PLR0913 — kw-only post-run stage; each fie
     # it never rests at needs-human and the steps below belong to the resumed
     # dispatch, which runs them for its own terminal.
     if resume is not None:
+        # Test and integration seams historically accept only ``work_item_id``.
+        # The production automatic-resume callable accepts the overtaking
+        # measurement so that its refusal can leave the same durable record.
+        # Preserve both contracts: do not make an eligible ordinary seam fail
+        # merely because it has no need for the extra measurement.
+        resume_parameters = inspect.signature(resume).parameters
+        resume_with_measurement = (
+            partial(resume, base_advanced=outcome.base_advanced)
+            if "base_advanced" in resume_parameters
+            else resume
+        )
         resumed = resume_overtaken_record_files(
             outcome=outcome,
             config_text=livespec_config_text(repo=repo),
             journal=journal,
             resolve_ready=partial(_release_for_resume, repo=repo, outcome=outcome, journal=journal),
-            resume=resume,
+            resume=resume_with_measurement,
         )
         if resumed is not None:
             return resumed

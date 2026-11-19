@@ -120,6 +120,12 @@ class BaseAdvancedAfterArming:
     conflicted_paths: tuple[str, ...] | None = None
     cause: str = BASE_ADVANCED_AFTER_ARMING
     conflict_measurement_failure: str | None = None
+    # A record-file-only overtaking may resolve the item and enter the normal
+    # resume path before that path refuses it.  The terminal disposition still
+    # owns this measurement's durable comment, so carry the already-rendered
+    # refusal back with the measurement rather than asking that later writer to
+    # recover it from outcome detail prose.
+    resume_refusals: tuple[str, ...] = ()
 
 
 def base_advanced_detail(*, work_item_id: str) -> str:

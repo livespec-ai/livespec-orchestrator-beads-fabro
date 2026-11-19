@@ -110,6 +110,10 @@ def _commit_green(
     *, repo: Path, script: Path, resume_head: str | None
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
+    # This fixture exercises the command outside a dispatched work item.  A
+    # live factory run supplies a title, which production correctly installs as
+    # the Green commit subject; retain the fixture's seeded-Red subject instead.
+    env.pop("LIVESPEC_PR_TITLE", None)
     if resume_head is not None:
         env["LIVESPEC_RESUME_PUBLISHED_HEAD"] = resume_head
     return subprocess.run(
