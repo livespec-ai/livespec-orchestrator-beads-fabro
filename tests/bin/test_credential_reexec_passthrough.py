@@ -23,6 +23,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Protocol, cast
 
 import pytest
 from livespec_runtime.credentials import CREDENTIAL_REEXEC_SENTINEL, Reexec
@@ -59,11 +60,17 @@ def _write_target(*, root: Path, credential_wrapper: list[str]) -> None:
     )
 
 
-def _import_bootstrap() -> object:
+class _BootstrapEntryPoint(Protocol):
+    """The public surface of ``_bootstrap`` that every bin wrapper calls."""
+
+    def bootstrap(self) -> None: ...
+
+
+def _import_bootstrap() -> _BootstrapEntryPoint:
     if str(_BIN_DIR) not in sys.path:
         sys.path.insert(0, str(_BIN_DIR))
     sys.modules.pop("_bootstrap", None)
-    return importlib.import_module("_bootstrap")
+    return cast("_BootstrapEntryPoint", importlib.import_module("_bootstrap"))
 
 
 def _run_dispatcher(*, cwd: Path, environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -143,7 +150,7 @@ def test_reexec_wrapper_startup_error_reports_configured_diagnostic(
 
     bootstrap_module = _import_bootstrap()
     with pytest.raises(SystemExit) as excinfo:
-        bootstrap_module._self_heal_credentials()  # type: ignore[attr-defined]  # noqa: SLF001
+        bootstrap_module.bootstrap()
 
     assert excinfo.value.code == 3
     captured = capsys.readouterr()
