@@ -10660,6 +10660,49 @@ Feature: A Definition of Done passed before dispatch is graded in-run by the sam
     Given an item listed as unpreflightable
     When a later host taking of its judgement runs a judge
     Then needs-attention no longer lists the item as unpreflightable
+
+  Scenario Outline: A recorded internal ruling makes the nearest cited heading coherent for every taking
+    Given an item whose References line names heading H and whose newest livespec-spec-change-tier record is still current, records tier none, and names H as its generalization-target
+    And no part of H's whole section states or derives the item's assertions
+    When the <taking> judgement is taken
+    Then check 4 reports no coherence finding for the item's assertions on the ground that H does not govern them
+    And a reference line naming a heading that does not resolve to an H2 is still refused
+
+    Examples:
+      | taking                   |
+      | repository preflight     |
+      | pre-admission            |
+      | pre-dispatch             |
+
+  Scenario: Without a recorded internal ruling a non-governing reference is still incoherent
+    Given an item whose References line names heading H and whose ledger carries no livespec-spec-change-tier record of tier none naming H
+    And no part of H's whole section states or derives the item's assertions
+    When the pre-dispatch judgement is taken
+    Then check 4 reports the assertions incoherent and names the heading that governs them when the spec-stated judgement returns one
+    And the same finding is reported when the item's newest record is of tier spec-change or is unavailable
+
+  Scenario: A governing-heading verdict of kind unstated is not licence to pass an assertion
+    Given an item with no recorded internal ruling and an assertion naming repository state an engineer could check without the specification
+    And the assertion's governing-heading verdict is of kind unstated and H's whole section, nested headings included, neither states nor derives it
+    When the repository preflight judgement and the pre-dispatch judgement are each taken on the unchanged bytes
+    Then both report the assertion incoherent
+    And neither passes it on the ground that the verdict is unstated
+
+  Scenario: The host judgement and the in-run node read check 4 the same way
+    Given an item whose References heading H does not govern its assertions and whose ledger carries no livespec-spec-change-tier record of tier none naming H
+    When the pre-dispatch host judgement and the in-run dod_gate node each grade check 4 on the unchanged item
+    Then both report the same check-4 verdict for each assertion
+    And the host judgement does not admit on check 4 an item that the node refuses on check 4
+
+  Scenario: Both readers accept the same recorded internal ruling
+    Given an item whose newest livespec-spec-change-tier record is still current, records tier none, and names the References heading H as its generalization-target
+    When the pre-dispatch host judgement and the in-run dod_gate node each grade check 4
+    Then both accept the reference as coherent
+
+  Scenario: A newer record of another tier replaces an older internal ruling
+    Given an item whose older record is tier none naming H and whose newer record is tier spec-change
+    When the pre-dispatch judgement is taken
+    Then check 4 treats the item as having no recorded internal ruling
 ```
 
 ## Scenario 240 — A recorded Definition-of-Done verdict binds every host taking on identical digests, and opposite verdicts are journaled
