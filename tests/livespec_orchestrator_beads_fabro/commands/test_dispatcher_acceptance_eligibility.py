@@ -280,6 +280,7 @@ def test_the_pre_admission_wall_holds_an_assertion_for_an_undefined_pinned_setti
                             "ansible-config",
                             "dump",
                         ],
+                        "setting_prefixes": ["ANSIBLE_", "DEFAULT_"],
                     }
                 ]
             },

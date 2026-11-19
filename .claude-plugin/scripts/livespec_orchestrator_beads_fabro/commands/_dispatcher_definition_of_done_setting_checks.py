@@ -4,6 +4,12 @@ The check is deliberately configured by the governed repository.  A tool's
 configuration vocabulary is its own authority, and the command below is run at
 the version that repository pins rather than inferred from a specification
 heading or from the host's installed version.
+
+Each ``dispatcher.definition_of_done_setting_checks`` entry in ``.livespec.jsonc``
+declares one pinned tool: ``tool``, ``version``, ``settings_listing_command``
+(argv of the tool's own full settings listing, run at the pinned version),
+``setting_prefixes`` (the uppercase name prefixes this tool owns) and optional
+``setting_aliases`` (prose or ini key to the name the listing shows).
 """
 
 from __future__ import annotations
@@ -70,9 +76,9 @@ def named_setting_checks(*, item: WorkItem, cwd: Path) -> NamedSettingCheckResul
         check = _check_definition(raw_check=raw_check)
         if check is None:
             continue
-        tool, version, command, aliases = check
+        tool, version, command, aliases, prefixes = check
         selected = _selected_candidates(
-            candidates=candidates, aliases=aliases, assertions=assertions
+            candidates=candidates, aliases=aliases, prefixes=prefixes, assertions=assertions
         )
         if not selected:
             continue
@@ -109,7 +115,7 @@ def _configured_checks(*, cwd: Path) -> tuple[dict[str, object], ...]:
 
 def _check_definition(
     *, raw_check: dict[str, object]
-) -> tuple[str, str, list[str], dict[str, str]] | None:
+) -> tuple[str, str, list[str], dict[str, str], tuple[str, ...]] | None:
     tool = raw_check.get("tool")
     version = raw_check.get("version")
     command = raw_check.get("settings_listing_command")
@@ -121,7 +127,15 @@ def _check_definition(
     if not all(isinstance(part, str) and part for part in command_parts):
         return None
     aliases = _aliases(raw=raw_check.get("setting_aliases"))
-    return tool, version, cast("list[str]", command_parts), aliases
+    prefixes = _prefixes(raw=raw_check.get("setting_prefixes"))
+    return tool, version, cast("list[str]", command_parts), aliases, prefixes
+
+
+def _prefixes(*, raw: object) -> tuple[str, ...]:
+    if not isinstance(raw, list):
+        return ()
+    entries = cast("list[object]", raw)
+    return tuple(entry for entry in entries if isinstance(entry, str) and entry)
 
 
 def _aliases(*, raw: object) -> dict[str, str]:
@@ -148,8 +162,16 @@ def _assertion_setting_candidates(*, assertions: tuple[str, ...]) -> frozenset[s
 
 
 def _selected_candidates(
-    *, candidates: frozenset[str], aliases: dict[str, str], assertions: tuple[str, ...]
+    *,
+    candidates: frozenset[str],
+    aliases: dict[str, str],
+    prefixes: tuple[str, ...],
+    assertions: tuple[str, ...],
 ) -> tuple[str, ...]:
+    # A candidate is judged only against the tool that declares it, by a
+    # `setting_prefixes` entry it starts with or a `setting_aliases` key; with
+    # several pinned tools, another tool's listing must never hold it.  A check
+    # declaring neither screens nothing.
     # Aliases let a repository declare, for example, that prose's `pipelining`
     # means Ansible's displayed `ANSIBLE_PIPELINING`; the assertion scanner only
     # needs to recognise the spelling that is actually written in the item.
@@ -165,7 +187,12 @@ def _selected_candidates(
             for text in assertions
         )
     }
-    return tuple(sorted(candidates | named_aliases))
+    owned = {
+        candidate
+        for candidate in candidates
+        if candidate.startswith(prefixes) or candidate in aliases
+    }
+    return tuple(sorted(owned | named_aliases))
 
 
 def _listing(*, command: list[str], cwd: Path) -> tuple[bool, str]:
