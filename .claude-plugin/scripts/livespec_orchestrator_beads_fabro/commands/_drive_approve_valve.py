@@ -21,6 +21,9 @@ from returns.pipeline import is_successful
 from returns.unsafe import unsafe_perform_io
 
 from livespec_orchestrator_beads_fabro import store
+from livespec_orchestrator_beads_fabro.commands import (
+    _dispatcher_definition_of_done_setting_checks as setting_checks,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_acceptance_eligibility import (
     acceptance_eligibility,
 )
@@ -38,6 +41,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_size_gate im
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_filing_display import (
     MECHANICAL_FINDING_PREFIX,
+)
+from livespec_orchestrator_beads_fabro.commands._dod_unavailable_record import (
+    named_setting_check_did_not_run_comment,
 )
 from livespec_orchestrator_beads_fabro.commands._drive_valve_result import (
     invalid_source_state,
@@ -117,6 +123,12 @@ def _definition_of_done_refusal(
         )
     if eligibility.variant.exempt:
         return None
+    _record_unavailable_setting_checks(
+        config=config,
+        item=item,
+        stage=STAGE_PRE_ADMISSION,
+        checks=eligibility.unavailable_setting_checks,
+    )
     judgement = judge_item_definition_of_done(
         item=item, repo=repo, path=config, stage=STAGE_PRE_ADMISSION
     )
@@ -144,6 +156,28 @@ def _record_mechanical_findings(
             path=config,
             work_item_id=item.id,
             body=f"{MECHANICAL_FINDING_PREFIX} {finding}",
+        )
+
+
+def _record_unavailable_setting_checks(
+    *,
+    config: StoreConfig,
+    item: WorkItem,
+    stage: str,
+    checks: tuple[setting_checks.NamedSettingCheck, ...],
+) -> None:
+    """Leave an actionable receipt without turning an unavailable tool into a hold."""
+    for check in checks:
+        store.append_work_item_comment(
+            path=config,
+            work_item_id=item.id,
+            body=named_setting_check_did_not_run_comment(
+                item_id=item.id,
+                stage=stage,
+                tool=check.tool,
+                version=check.version,
+                detail=check.detail,
+            ),
         )
 
 

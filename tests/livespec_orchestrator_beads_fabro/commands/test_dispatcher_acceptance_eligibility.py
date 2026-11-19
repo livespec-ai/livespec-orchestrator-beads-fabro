@@ -22,6 +22,7 @@ absent, precisely because a human accepts AGAINST a stated definition.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -246,6 +247,59 @@ def test_a_human_only_item_carrying_a_section_is_eligible(tmp_path: Path) -> Non
     item = _item(acceptance_policy="human-only", description=_SECTION)
 
     assert acceptance_eligibility(item=item, cwd=repo).eligible is True
+
+
+def test_the_pre_admission_wall_holds_an_assertion_for_an_undefined_pinned_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The listing is authoritative even when its defined name differs from the ini key."""
+    repo = _valve_repo(tmp_path=tmp_path)
+    tool_bin = tmp_path / "bin"
+    tool_bin.mkdir()
+    listing = tool_bin / "uvx"
+    _ = listing.write_text(
+        "#!/bin/sh\n"
+        'test "$*" = "--from ansible-core==2.21.4 ansible-config dump"\n'
+        "printf '%s\\n' 'ANSIBLE_PIPELINING(default) = False'\n",
+        encoding="utf-8",
+    )
+    listing.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tool_bin))
+    config = {
+        "livespec-orchestrator-beads-fabro": {
+            "connection": {"prefix": "bd-ib", "fake": True},
+            "dispatcher": {
+                "definition_of_done_setting_checks": [
+                    {
+                        "tool": "ansible-core",
+                        "version": "2.21.4",
+                        "settings_listing_command": [
+                            "uvx",
+                            "--from",
+                            "ansible-core==2.21.4",
+                            "ansible-config",
+                            "dump",
+                        ],
+                    }
+                ]
+            },
+        }
+    }
+    _ = (repo / ".livespec.jsonc").write_text(json.dumps(config), encoding="utf-8")
+    item = _item(
+        description=(
+            "## Definition of Done\n\n"
+            "- DEFAULT_PIPELINING keeps the target secret off disk.\n\n"
+            f"References: {_SPEC_HEADING}\n"
+        )
+    )
+
+    decision = acceptance_eligibility(item=item, cwd=repo)
+
+    assert decision.eligible is False
+    assert decision.refusal is not None
+    assert "DEFAULT_PIPELINING" in decision.refusal
+    assert "ansible-core 2.21.4" in decision.refusal
 
 
 def test_the_decision_still_refuses_an_ai_dispositive_item_with_no_gradeable_criteria(
