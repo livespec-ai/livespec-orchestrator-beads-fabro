@@ -52,6 +52,24 @@ Before every Green commit or Green amend, run every test file the change touches
 
 A change to a stage prompt file or `_dispatcher_overlay.py` must update the test that pins it in the same commit.
 
+## A janitor failure in another item's test rests at needs-human
+
+Never edit a test merely to clear an accepted review finding or a janitor
+failure. Before editing a test in this repair turn, establish that this item's
+already-recorded branch change touched it: run `git diff --name-only
+origin/{{ inputs.default_branch }}...HEAD -- tests/` before staging the repair.
+The staged edit itself is not ownership evidence.
+
+When a failed test is absent from that list, preserve it unchanged. Identify
+the owning work item from the latest default-branch commit that changed it
+(`git log -1 origin/{{ inputs.default_branch }} --format='%h %s' -- <test>`),
+and end with the needs-human protocol. Your failure reason must name both the
+failing test and that commit's work-item identifier; do not guess an owner. If
+the default-branch history names no work-item identifier, say that ownership
+could not be established and ask a human to assign it. The commit hook refuses
+such an edit before recording it; do not retry by weakening, replacing, or
+restaging the other item's test.
+
 ## When the previous review-fix turn left an open Red commit
 
 A review-fix turn that ends with its last commit carrying `TDD-Red-*` trailers
