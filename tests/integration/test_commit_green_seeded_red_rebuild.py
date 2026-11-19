@@ -38,6 +38,10 @@ _RED_SUBJECT = "feat: red"
 @pytest.fixture(autouse=True)
 def _current_fabro_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FABRO_RUN_ID", "run")
+    # These direct command fixtures deliberately do not model a dispatched
+    # work item.  A factory-provided PR title would otherwise make the command
+    # replace the fixture's Red subject during its Green amend.
+    monkeypatch.delenv("LIVESPEC_PR_TITLE", raising=False)
 
 
 def _git(*, repo: Path, argv: list[str]) -> str:
