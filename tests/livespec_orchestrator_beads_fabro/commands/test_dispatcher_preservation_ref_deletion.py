@@ -14,6 +14,7 @@ from pathlib import Path
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
 from livespec_orchestrator_beads_fabro.commands._dispatcher_preservation_ref_deletion import (
+    RefListingCache,
     delete_closed_item_refs,
     delete_ended_run_refs,
 )
@@ -181,3 +182,32 @@ def test_a_listing_the_forge_refuses_is_journaled_and_nothing_is_deleted(tmp_pat
         "refs/livespec/preserved-publish/bd-ib-a/",
     ]
     assert {record["operation"] for record in journal.records} == {"list"}
+
+
+def test_a_failed_listing_is_remembered_for_the_rest_of_a_collection_pass(
+    tmp_path: Path,
+) -> None:
+    forge = _Forge(refuse_list=True)
+    cache = RefListingCache()
+
+    first = delete_ended_run_refs(
+        runner=forge,
+        repo=tmp_path,
+        journal=_Journal(),
+        work_item_id="bd-ib-a",
+        run_id="RUN1",
+        listing_cache=cache,
+    )
+    second = delete_ended_run_refs(
+        runner=forge,
+        repo=tmp_path,
+        journal=_Journal(),
+        work_item_id="bd-ib-a",
+        run_id="RUN2",
+        listing_cache=cache,
+    )
+
+    assert (first, second) == (False, False)
+    shared_namespace = f"{_MATCHING}livespec/preserved-publish/bd-ib-a/"
+    assert sum(call[3] == shared_namespace for call in forge.calls) == 1
+    assert all(call[-4:] == ["--cache", "1h", "--jq", ".[].ref"] for call in forge.calls)

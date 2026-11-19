@@ -231,12 +231,30 @@ def test_a_closed_items_ended_run_is_removed_through_its_factory_without_force(
     assert [call[1:] for call in runner.calls] == [
         ["ps", "-a", "--json", "--server", _HP],
         # The run's preservation refs are listed on origin BEFORE the run is removed.
-        ["api", "--paginate", f"{matching}/wip/bd-ib-1/01DONE/", "--jq", ".[].ref"],
-        ["api", "--paginate", f"{matching}/preserved-publish/bd-ib-1/", "--jq", ".[].ref"],
+        [
+            "api",
+            "--paginate",
+            f"{matching}/wip/bd-ib-1/01DONE/",
+            "--cache",
+            "1h",
+            "--jq",
+            ".[].ref",
+        ],
+        [
+            "api",
+            "--paginate",
+            f"{matching}/preserved-publish/bd-ib-1/",
+            "--cache",
+            "1h",
+            "--jq",
+            ".[].ref",
+        ],
         [
             "api",
             "--paginate",
             "/repos/{owner}/{repo}/git/matching-refs/heads/needs-human/01DONE",
+            "--cache",
+            "1h",
             "--jq",
             ".[].ref",
         ],
