@@ -225,6 +225,34 @@ def test_a_fix_turn_cannot_commit_a_test_its_item_did_not_touch(
     assert foreign_test in done.stderr
 
 
+@pytest.mark.parametrize("stage", ["fix", "review_fix"])
+@pytest.mark.parametrize("removal", ["delete", "rename"])
+def test_a_fix_turn_cannot_remove_a_test_its_item_did_not_touch(
+    *, tmp_path: Path, stage: str, removal: str
+) -> None:
+    """Deleting or renaming away another item's test is an edit of it, and the hook refuses it."""
+    foreign_test = "tests/test_another_items_contract.py"
+    repo, environment, _ = _repository(tmp_path=tmp_path)
+    _stage(
+        repo=repo, path=foreign_test, text="def test_another_items_contract() -> None:\n    pass\n"
+    )
+    _git(repo=repo, arguments=["commit", "--quiet", "-m", "another item's test"])
+    if removal == "delete":
+        _git(repo=repo, arguments=["rm", "--quiet", foreign_test])
+    else:
+        _git(repo=repo, arguments=["mv", foreign_test, "tests/test_renamed_contract.py"])
+
+    done = _run(
+        argv=["bash", str(_PRE_COMMIT)],
+        cwd=repo,
+        env={**environment, "LIVESPEC_AUTHORING_TURN": stage},
+    )
+
+    assert done.returncode != 0
+    assert "LIVESPEC_FOREIGN_REPAIR_TEST" in done.stderr
+    assert foreign_test in done.stderr
+
+
 def test_a_workflow_graph_change_runs_the_doc_only_gates_then_the_graph_reading_tests(
     *, tmp_path: Path
 ) -> None:

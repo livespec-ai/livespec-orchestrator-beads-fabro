@@ -142,7 +142,13 @@ impl_count=0
 # any test merely by staging it.  `check-changed` below needs the same
 # `origin/master` comparison, so a missing or unreadable base fails closed here
 # as an empty owned-test set rather than granting the Red fast path.
-if [[ "${LIVESPEC_AUTHORING_TURN:-}" =~ ^(fix|review_fix)$ ]] && [[ -n "$test_staged" ]]; then
+#
+# Removing a test is an edit of it, so the guard reads deletions as well, and a
+# rename (read as a deletion of its source plus an addition) cannot carry another
+# item's test away.  `test_staged` above stays added-or-modified for the Red shape.
+repair_test_staged=$(git diff --cached --name-only --no-renames --diff-filter=ADM \
+    | grep -E '^tests/.*\.py$' || true)
+if [[ "${LIVESPEC_AUTHORING_TURN:-}" =~ ^(fix|review_fix)$ ]] && [[ -n "$repair_test_staged" ]]; then
     owned_tests=$(git diff --name-only origin/master...HEAD -- tests/ 2>/dev/null || true)
     # A newly-added test is part of this item's own change, rather than a
     # pre-existing test a janitor failure might tempt the repair to weaken.
@@ -154,9 +160,9 @@ if [[ "${LIVESPEC_AUTHORING_TURN:-}" =~ ^(fix|review_fix)$ ]] && [[ -n "$test_st
             if git cat-file -e "origin/master:$test_path" 2>/dev/null; then
                 printf '%s\n' "$test_path"
             fi
-        done <<<"$test_staged")
+        done <<<"$repair_test_staged")
     else
-        existing_default_tests=$test_staged
+        existing_default_tests=$repair_test_staged
     fi
     foreign_tests=$(comm -23 \
         <(printf '%s\n' "$existing_default_tests" | sed '/^$/d' | sort -u) \
