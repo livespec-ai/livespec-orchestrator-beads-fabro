@@ -70,7 +70,6 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_grade
     ACTION_HANDOFF_RECONCILE_MERGED,
     ACTION_HANDOFF_REFRESH_RELEASE,
     ACTION_HANDOFF_REQUIRED_CHECK_FAILED,
-    ACTION_SUCCEEDED_RUN_RECONCILE_MERGED,
     HOLD_CLAIM_CHANGED,
     HOLD_EFFECT_UNOBSERVABLE,
     HOLD_RUN_SUCCEEDED,
@@ -98,10 +97,8 @@ from livespec_orchestrator_beads_fabro.types import WorkItem
 __all__: list[str] = [
     "REFRESH_RELEASE_COMMENT_MARKER",
     "HandoffRecoveryRequest",
-    "SucceededRunRecoveryRequest",
     "reconcile_merged_for_claim",
     "recover_handed_off_claim",
-    "recover_succeeded_merged_claim",
 ]
 
 _ACTIVE_STATUS = "active"
@@ -124,17 +121,6 @@ class HandoffRecoveryRequest:
     reading: HandoffReading
 
 
-@dataclass(frozen=True, kw_only=True)
-class SucceededRunRecoveryRequest:
-    """A succeeded claim whose independently published PR has merged."""
-
-    item: WorkItem
-    run_id: str
-    factory_name: str
-    factory_server_url: str | None
-    action: str = ACTION_SUCCEEDED_RUN_RECONCILE_MERGED
-
-
 def reconcile_merged_for_claim(*, args: argparse.Namespace) -> int:
     """Drive the reconcile valve, imported here for the cycle reason the host-record CLI records."""
     from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_merged import (
@@ -152,71 +138,36 @@ def recover_handed_off_claim(
     now_iso: str,
 ) -> RecoveredClaim | HeldClaim:
     """Complete this handed-off claim under the primary checkout's lock."""
-    return _recover_merged_claim(repo=repo, journal=journal, request=request, now_iso=now_iso)
-
-
-def recover_succeeded_merged_claim(
-    *,
-    repo: Path,
-    journal: JournalFile,
-    request: SucceededRunRecoveryRequest,
-    now_iso: str,
-) -> RecoveredClaim | HeldClaim:
-    """Drive the ordinary acceptance valve for a succeeded run's merged PR."""
-    return _recover_merged_claim(repo=repo, journal=journal, request=request, now_iso=now_iso)
-
-
-def _recover_merged_claim(
-    *,
-    repo: Path,
-    journal: JournalFile,
-    request: HandoffRecoveryRequest | SucceededRunRecoveryRequest,
-    now_iso: str,
-) -> RecoveredClaim | HeldClaim:
-    """Fence and reconcile either kind of succeeded claim that proved merged."""
     with claim_recovery_fence(
         repo=repo, work_item_id=request.item.id, run_id=request.run_id
     ) as fenced:
         if not fenced:
             return _held(request=request, reason=HOLD_EFFECT_UNOBSERVABLE)
-        return _recover_fenced_merged_claim(
-            repo=repo, journal=journal, request=request, now_iso=now_iso
+        row = claim_row(repo=repo, work_item_id=request.item.id)
+        if row is None:
+            return _held(request=request, reason=HOLD_EFFECT_UNOBSERVABLE)
+        if not claim_unchanged(row=row, run_id=request.run_id):
+            return _held(request=request, reason=HOLD_CLAIM_CHANGED)
+        journal.append(
+            record=recovery_journal_record(
+                stage=STRANDED_CLAIM_HANDOFF_STAGE,
+                recovered=_recovered(
+                    request=request, status=row.status or _ACTIVE_STATUS, effects=()
+                ),
+            )
         )
-
-
-def _recover_fenced_merged_claim(
-    *,
-    repo: Path,
-    journal: JournalFile,
-    request: HandoffRecoveryRequest | SucceededRunRecoveryRequest,
-    now_iso: str,
-) -> RecoveredClaim | HeldClaim:
-    """Apply the observed route after the claim fence has established ownership."""
-    row = claim_row(repo=repo, work_item_id=request.item.id)
-    if row is None:
-        return _held(request=request, reason=HOLD_EFFECT_UNOBSERVABLE)
-    if not claim_unchanged(row=row, run_id=request.run_id):
-        return _held(request=request, reason=HOLD_CLAIM_CHANGED)
-    journal.append(
-        record=recovery_journal_record(
-            stage=STRANDED_CLAIM_HANDOFF_STAGE,
-            recovered=_recovered(request=request, status=row.status or _ACTIVE_STATUS, effects=()),
-        )
-    )
-    if isinstance(request, SucceededRunRecoveryRequest):
-        return _reconcile(repo=repo, journal=journal, request=request)
-    if request.action == ACTION_HANDOFF_RECONCILE_MERGED:
-        return _reconcile(repo=repo, journal=journal, request=request)
-    if request.action == ACTION_HANDOFF_REFRESH_RELEASE:
-        return _release_for_refresh(repo=repo, request=request)
-    return _rest(repo=repo, journal=journal, request=request, now_iso=now_iso)
+        if request.action == ACTION_HANDOFF_RECONCILE_MERGED:
+            return _reconcile(repo=repo, journal=journal, request=request)
+        if request.action == ACTION_HANDOFF_REFRESH_RELEASE:
+            return _release_for_refresh(repo=repo, request=request)
+        return _rest(repo=repo, journal=journal, request=request, now_iso=now_iso)
 
 
 def _reconcile(
     *,
     repo: Path,
     journal: JournalFile,
-    request: HandoffRecoveryRequest | SucceededRunRecoveryRequest,
+    request: HandoffRecoveryRequest,
 ) -> RecoveredClaim | HeldClaim:
     """Perform `reconcile-merged`; a refusal holds the claim naming the exit code."""
     identity = journal.identity
@@ -234,16 +185,12 @@ def _reconcile(
         )
     )
     if exit_code != 0:
-        merged_detail = (
-            f"{HANDED_OFF_HOLD_DETAIL}: pull request #{request.reading.pr_number} merged"
-            if isinstance(request, HandoffRecoveryRequest)
-            else "a pull request matching the item merged"
-        )
         return _held(
             request=request,
             reason=HOLD_RUN_SUCCEEDED,
             detail=(
-                f"{merged_detail} but reconcile-merged did not complete (exit {exit_code}); "
+                f"{HANDED_OFF_HOLD_DETAIL}: pull request #{request.reading.pr_number} merged but "
+                f"reconcile-merged did not complete (exit {exit_code}); "
                 "read its stderr"
             ),
         )
@@ -335,7 +282,7 @@ def _outcome(*, request: HandoffRecoveryRequest) -> DispatchOutcome:
 
 def _recovered(
     *,
-    request: HandoffRecoveryRequest | SucceededRunRecoveryRequest,
+    request: HandoffRecoveryRequest,
     status: str,
     effects: tuple[str, ...],
 ) -> RecoveredClaim:
@@ -346,7 +293,6 @@ def _recovered(
         factory_server_url=request.factory_server_url,
         reason={
             ACTION_HANDOFF_RECONCILE_MERGED: _REASON_RECONCILED,
-            ACTION_SUCCEEDED_RUN_RECONCILE_MERGED: _REASON_RECONCILED,
             ACTION_HANDOFF_REQUIRED_CHECK_FAILED: _REASON_REQUIRED_CHECK_FAILED,
             ACTION_HANDOFF_REFRESH_RELEASE: _REASON_BEHIND,
         }.get(request.action, _REASON_NOT_MERGEABLE),
@@ -358,7 +304,7 @@ def _recovered(
 
 def _held(
     *,
-    request: HandoffRecoveryRequest | SucceededRunRecoveryRequest,
+    request: HandoffRecoveryRequest,
     reason: str,
     detail: str | None = None,
 ) -> HeldClaim:

@@ -48,6 +48,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from livespec_orchestrator_beads_fabro._store_dispatch_claim import ClaimStamp
+from livespec_orchestrator_beads_fabro.commands import (
+    _dispatcher_stranded_claim_succeeded_recovery as succeeded_recovery,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_current_merge_hold import (
     memoized_current_merge_hold,
 )
@@ -77,9 +80,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_hando
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_handoff_recovery import (
     HandoffRecoveryRequest,
-    SucceededRunRecoveryRequest,
     recover_handed_off_claim,
-    recover_succeeded_merged_claim,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_measure import (
     ClaimReadInputs,
@@ -258,10 +259,10 @@ def _measure_and_act(
             now_iso=inputs.now_iso,
         )
     if graded.action == ACTION_SUCCEEDED_RUN_RECONCILE_MERGED:
-        return recover_succeeded_merged_claim(
+        return succeeded_recovery.recover_succeeded_merged_claim(
             repo=inputs.repo,
             journal=inputs.journal,
-            request=SucceededRunRecoveryRequest(
+            request=succeeded_recovery.SucceededRunRecoveryRequest(
                 item=item,
                 run_id=attributed.run_id,
                 factory_name=inventory.name,

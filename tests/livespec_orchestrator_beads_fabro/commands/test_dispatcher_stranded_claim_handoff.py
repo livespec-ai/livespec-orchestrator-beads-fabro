@@ -480,6 +480,8 @@ def test_a_succeeded_claim_without_a_handoff_of_its_own_dispatch_is_held_as_befo
 def test_a_succeeded_claim_whose_published_pull_request_merged_is_reconciled_without_a_handoff(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The succeeded-run route owns its own module so the handed-off recovery
+    # remains beneath the repository's per-file ceiling.
     calls = _stub_reconcile(monkeypatch=monkeypatch, exit_code=0, succeeded=True)
     repo = _repo(tmp_path=tmp_path)
     journal = _journal(repo=repo, rows=[_LAUNCH])
