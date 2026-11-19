@@ -731,9 +731,8 @@ def test_a_refusal_that_is_still_pending_says_the_press_already_waited() -> None
         "move refused: the claim-token protocol reported claim-transition-pending, "
         "after this press waited out the takeover wait and tried once more; "
         f"nothing was written to {_ITEM_ID}. "
-        f"Remedy: wait for or trigger a Dispatcher pass on {_ITEM_ID}. A Dispatcher loop keeps "
-        "its first sighting of an unapplied transition from one pass to the next, and takes the "
-        "transition over on a pass made after the takeover wait."
+        "Remedy: run `dispatcher.py reconcile-runs --repo <repository>` to finish the "
+        f"closed-token transition for {_ITEM_ID}. This cleanup command never launches a factory run."
     )
 
 
@@ -781,7 +780,6 @@ def test_an_intake_refusal_prints_as_a_sentence_and_names_the_remedy_only_when_p
         "intake (route:backlog) refused: the claim-token protocol reported "
         "claim-transition-pending, after this call waited out the takeover wait and tried "
         f"once more; the status and claim of {_ITEM_ID} were not written. "
-        f"Remedy: wait for or trigger a Dispatcher pass on {_ITEM_ID}. A Dispatcher loop keeps "
-        "its first sighting of an unapplied transition from one pass to the next, and takes the "
-        "transition over on a pass made after the takeover wait."
+        "Remedy: run `dispatcher.py reconcile-runs --repo <repository>` to finish the "
+        f"closed-token transition for {_ITEM_ID}. This cleanup command never launches a factory run."
     )
