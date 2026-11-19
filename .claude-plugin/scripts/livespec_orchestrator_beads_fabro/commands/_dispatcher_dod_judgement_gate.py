@@ -24,7 +24,6 @@ a listing into a fleet of model calls.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from livespec_orchestrator_beads_fabro._store_comments import append_work_item_comment
@@ -38,15 +37,17 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_governing_reuse 
     with_governing_findings,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement import (
-    JUDGEMENT_HELD,
     JUDGEMENT_UNAVAILABLE,
-    first_remedy,
     judgement_subject,
     judgement_subject_digest,
     rubric_digest,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_comments import (
     judgement_comment_bodies,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_decision import (
+    DodJudgementDecision,
+    unavailable_decision,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_held import held_judgement
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_markers import (
@@ -58,8 +59,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_prefli
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_record import (
     GoverningHeadingReceipt,
-    did_not_run_comment,
-    recorded_did_not_run_causes,
+    recorded_reuse_digests,
     verdict_comment,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_run import (
@@ -67,8 +67,8 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_run im
     judgement_rubric,
     run_dod_judgement,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_spec_identity import (
-    SpecIdentity,
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_workflow_digest import (
+    workflow_graph_digest,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import ShellCommandRunner
 from livespec_orchestrator_beads_fabro.commands._dod_governing_heading_judge import (
@@ -80,9 +80,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
 
-    from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_candidate_attempt import (
-        CandidateAttempt,
-    )
     from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandRunner
     from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 
@@ -103,32 +100,6 @@ __all__: list[str] = [
 UNREADABLE_RUBRIC_DIGEST = "unreadable"
 
 
-@dataclass(frozen=True, kw_only=True)
-class DodJudgementDecision:
-    """What one call site learned, and whether anything was spent learning it.
-
-    `reused` is reported rather than inferred from `findings`, because a reused
-    verdict and a freshly-taken identical one are indistinguishable by outcome —
-    and the two caps the clause states are about the SPEND, not the answer.
-    """
-
-    work_item_id: str
-    outcome: str
-    findings: tuple[str, ...] = ()
-    reused: bool = False
-    spec_identity: SpecIdentity | None = None
-
-    @property
-    def holds(self) -> bool:
-        """Whether this decision rests the item at needs-human."""
-        return self.outcome == JUDGEMENT_HELD
-
-    @property
-    def first_remedy(self) -> str | None:
-        """The remedy a refusal and a hygiene fact name."""
-        return first_remedy(findings=self.findings)
-
-
 def judge_definition_of_done(  # noqa: PLR0913 - each argument is an independent seam input.
     *,
     item: WorkItem,
@@ -140,6 +111,7 @@ def judge_definition_of_done(  # noqa: PLR0913 - each argument is an independent
     payload_root: Path | None = None,
     governing_heading: GoverningHeadingReader | None = None,
     release_of_held_spec_tier: bool | None = None,
+    workflow_name: str | None = None,
 ) -> DodJudgementDecision:
     """Reuse the recorded verdict, else take the judgement and record it.
 
@@ -178,7 +150,7 @@ def judge_definition_of_done(  # noqa: PLR0913 - each argument is an independent
         UNREADABLE_RUBRIC_DIGEST if rubric is None else rubric_digest(rubric=rubric)
     )
     if rubric is None:
-        return _unavailable(
+        return unavailable_decision(
             item=item,
             stage=stage,
             digest=judgement_subject_digest(item=item, cwd=repo, comments=comments),
@@ -186,6 +158,8 @@ def judge_definition_of_done(  # noqa: PLR0913 - each argument is an independent
             cause=CAUSE_PROMPT_UNREADABLE,
             comments=comments,
             append=append,
+            recorded_spec_identity=None,
+            recorded_workflow_graph_digest=None,
         )
     governing = reusable_governing_heading_verdict(item=item, repo=repo, comments=comments)
     if governing is None:
@@ -202,11 +176,21 @@ def judge_definition_of_done(  # noqa: PLR0913 - each argument is an independent
         governing=governing,
         release_of_held_spec_tier=release_of_held_spec_tier,
     )
+    graph_digest = workflow_graph_digest(repo=repo, item_id=item.id, workflow_name=workflow_name)
+    recorded_spec, recorded_graph = recorded_reuse_digests(comments=comments)
     digest = judgement_subject_digest(
-        item=item, cwd=repo, comments=comments, spec_identity=identity.value
+        item=item,
+        cwd=repo,
+        comments=comments,
+        spec_identity=identity.value,
+        workflow_graph_digest=graph_digest,
     )
     reused = reusable_verdict_for_identity(
-        comments=comments, digest=digest, rubric_digest=rubric_bytes_digest, identity=identity
+        comments=comments,
+        digest=digest,
+        rubric_digest=rubric_bytes_digest,
+        identity=identity,
+        workflow_graph_digest=graph_digest,
     )
     if reused is not None:
         return DodJudgementDecision(
@@ -215,6 +199,7 @@ def judge_definition_of_done(  # noqa: PLR0913 - each argument is an independent
             findings=reused.findings,
             reused=True,
             spec_identity=identity,
+            workflow_graph_digest=graph_digest,
         )
     verdict = with_governing_findings(
         item=item,
@@ -231,7 +216,7 @@ def judge_definition_of_done(  # noqa: PLR0913 - each argument is an independent
         governing=governing,
     )
     if verdict.outcome == JUDGEMENT_UNAVAILABLE:
-        return _unavailable(
+        return unavailable_decision(
             item=item,
             stage=stage,
             digest=digest,
@@ -245,6 +230,10 @@ def judge_definition_of_done(  # noqa: PLR0913 - each argument is an independent
                 judgement_subject(item=item, cwd=repo, comments=comments, governing=governing)
             ),
             carried_rider_count=sum(not is_receipt_comment(body=comment) for comment in comments),
+            spec_identity=identity,
+            workflow_graph_digest=graph_digest,
+            recorded_spec_identity=recorded_spec,
+            recorded_workflow_graph_digest=recorded_graph,
         )
     append(
         body=verdict_comment(
@@ -254,6 +243,7 @@ def judge_definition_of_done(  # noqa: PLR0913 - each argument is an independent
             rubric_digest=rubric_bytes_digest,
             judgement=verdict,
             spec_identity=identity,
+            workflow_graph_digest=graph_digest,
             governing=(
                 GoverningHeadingReceipt(
                     verdict=governing,
@@ -269,6 +259,7 @@ def judge_definition_of_done(  # noqa: PLR0913 - each argument is an independent
         outcome=verdict.outcome,
         findings=verdict.findings,
         spec_identity=identity,
+        workflow_graph_digest=graph_digest,
     )
 
 
@@ -281,6 +272,7 @@ def judge_item_definition_of_done(  # noqa: PLR0913 - each argument is an indepe
     runner: CommandRunner | None = None,
     payload_root: Path | None = None,
     governing_heading: GoverningHeadingReader | None = None,
+    workflow_name: str | None = None,
 ) -> DodJudgementDecision:
     """The decision above, bound to this item's own ledger comment sidecar.
 
@@ -309,6 +301,7 @@ def judge_item_definition_of_done(  # noqa: PLR0913 - each argument is an indepe
         runner=runner,
         payload_root=payload_root,
         governing_heading=governing_heading,
+        workflow_name=workflow_name,
     )
     # A verdict recorded before the marker existed is found here and never
     # rewritten, so this is the only pass that can give it the label the held
@@ -317,46 +310,3 @@ def judge_item_definition_of_done(  # noqa: PLR0913 - each argument is an indepe
         mark=mark_work_item_dod_judgement_recorded, path=path, item_id=item.id, when=decision.reused
     )
     return decision
-
-
-def _unavailable(  # noqa: PLR0913 - each argument is one field of the record it writes.
-    *,
-    item: WorkItem,
-    stage: str,
-    digest: str,
-    rubric: str,
-    cause: str | None,
-    comments: Sequence[str],
-    append: Callable[..., None],
-    bound_ended_candidates: Sequence[str] = (),
-    attempts: Sequence[CandidateAttempt] = (),
-    subject_characters: int | None = None,
-    carried_rider_count: int | None = None,
-) -> DodJudgementDecision:
-    """Record that the judgement did not run, unless this cause already stands.
-
-    `cause` is typed optional because `DodJudgement` carries it only on the
-    unavailable outcome; an unavailable verdict with no cause would be a bug in
-    the layer above, and recording "it did not run, reason unstated" is worse
-    than recording nothing — it is a row an operator cannot act on.
-
-    It returns the DECISION as well as writing, because both of the gate's two
-    unavailable arms owe the identical answer and one of them is reached before
-    any rubric exists. Two call sites each composing the write and the return was
-    how the second arm came to record nothing at all.
-    """
-    if cause is not None and cause not in recorded_did_not_run_causes(comments=comments):
-        append(
-            body=did_not_run_comment(
-                item_id=item.id,
-                stage=stage,
-                digest=digest,
-                rubric_digest=rubric,
-                cause=cause,
-                subject_characters=subject_characters,
-                carried_rider_count=carried_rider_count,
-                bound_ended_candidates=bound_ended_candidates,
-                attempts=attempts,
-            )
-        )
-    return DodJudgementDecision(work_item_id=item.id, outcome=JUDGEMENT_UNAVAILABLE)

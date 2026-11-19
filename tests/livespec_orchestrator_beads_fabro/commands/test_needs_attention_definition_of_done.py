@@ -57,6 +57,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_run im
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_spec_identity import (
     whole_tree_identity,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_workflow_digest import (
+    workflow_graph_digest,
+)
 from livespec_orchestrator_beads_fabro.store import append_work_item
 from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 
@@ -298,15 +301,23 @@ def test_the_held_lane_reads_comments_only_for_items_a_judgement_was_recorded_ag
     ]
     for item in (judged, *unjudged):
         append_work_item(path=config, item=item)
+    identity = whole_tree_identity(cwd=repo)
+    graph_digest = workflow_graph_digest(repo=repo, item_id=judged.id)
     append_work_item_comment(
         path=config,
         work_item_id=judged.id,
         body=verdict_comment(
             item_id=judged.id,
             stage=STAGE_PRE_DISPATCH,
-            digest=judgement_subject_digest(item=judged, cwd=repo),
+            digest=judgement_subject_digest(
+                item=judged,
+                cwd=repo,
+                spec_identity=identity.value,
+                workflow_graph_digest=graph_digest,
+            ),
             rubric_digest=_executing_rubric_digest(),
-            spec_identity=whole_tree_identity(cwd=repo),
+            spec_identity=identity,
+            workflow_graph_digest=graph_digest,
             judgement=DodJudgement(
                 outcome=JUDGEMENT_HELD,
                 findings=("bd-ib-judged: restate assertion 1 as behaviour.",),
@@ -369,15 +380,23 @@ def test_the_held_lane_reports_nothing_when_no_ledger_connection_resolves(
         repo_root=connected,
     )
     append_work_item(path=config, item=item)
+    identity = whole_tree_identity(cwd=connected)
+    graph_digest = workflow_graph_digest(repo=connected, item_id=item.id)
     append_work_item_comment(
         path=config,
         work_item_id=item.id,
         body=verdict_comment(
             item_id=item.id,
             stage=STAGE_PRE_DISPATCH,
-            digest=judgement_subject_digest(item=item, cwd=connected),
+            digest=judgement_subject_digest(
+                item=item,
+                cwd=connected,
+                spec_identity=identity.value,
+                workflow_graph_digest=graph_digest,
+            ),
             rubric_digest=_executing_rubric_digest(),
-            spec_identity=whole_tree_identity(cwd=connected),
+            spec_identity=identity,
+            workflow_graph_digest=graph_digest,
             judgement=DodJudgement(
                 outcome=JUDGEMENT_HELD,
                 findings=("bd-ib-advisory: restate assertion 1 as behaviour.",),

@@ -71,6 +71,12 @@ seeded_open_red_declared() {
     grep -q '^##[[:space:]]\+seeded-open-red\([[:space:]]\|$\)' "$handoff"
 }
 
+preserve_rebuilt_seed_red_subject() {
+    [[ -n "${LIVESPEC_RESUME_PUBLISHED_HEAD:-}" ]] \
+        && seeded_open_red_declared \
+        && open_seed_red HEAD
+}
+
 seed_red_commit() {
     # The resumed seed's own open Red: the first commit under the seed head that is
     # not an engine checkpoint. It must carry TDD-Red trailers and no Green trailer,
@@ -373,7 +379,7 @@ main() {
         return "$status"
     fi
     title="${LIVESPEC_PR_TITLE:-}"
-    if [[ -n "$title" ]]; then
+    if [[ -n "$title" ]] && ! preserve_rebuilt_seed_red_subject; then
         # Keep the complete Red message after its first line.  `-F` then replaces
         # only the placeholder subject while the commit-msg hook appends Green's
         # evidence, so the replay trailers remain part of the amended commit.

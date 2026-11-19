@@ -41,6 +41,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_gate i
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_record import (
     STAGE_PRE_ADMISSION,
     STAGE_PRE_DISPATCH,
+    reusable_verdict,
     verdict_comment,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_run import (
@@ -51,6 +52,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_wall i
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_spec_identity import (
     whole_tree_identity,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_workflow_digest import (
+    workflow_graph_digest,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
 from livespec_orchestrator_beads_fabro.commands._dod_governing_heading_judge import (
@@ -70,6 +74,37 @@ _RIDER = "EVIDENCE: the preflight and the in-run gate disagreed on these same by
 # A rubric digest no build could produce, which is what a verdict taken under an
 # EARLIER release looks like from here.
 _FOREIGN_RUBRIC_DIGEST = "0" * 64
+
+
+def test_a_receipt_cannot_reuse_across_workflow_graph_digests() -> None:
+    """The graph is a cache-key input even when the other two digests match."""
+    receipt = verdict_comment(
+        item_id="bd-ib-gmukke",
+        stage=STAGE_PRE_DISPATCH,
+        digest="subject",
+        rubric_digest="rubric",
+        workflow_graph_digest="recorded-graph",
+        judgement=DodJudgement(outcome=JUDGEMENT_HELD, findings=(_FINDING,)),
+    )
+
+    assert (
+        reusable_verdict(
+            comments=(receipt,),
+            digest="subject",
+            rubric_digest="rubric",
+            workflow_graph_digest="current-graph",
+        )
+        is None
+    )
+    reusable = reusable_verdict(
+        comments=(receipt,),
+        digest="subject",
+        rubric_digest="rubric",
+        workflow_graph_digest="recorded-graph",
+    )
+
+    assert reusable is not None
+    assert reusable.workflow_graph_digest == "recorded-graph"
 
 
 @pytest.fixture(autouse=True)
@@ -211,6 +246,8 @@ def _stand_a_refusal(
 ) -> None:
     """Record a refusing verdict against this item under the named digests."""
     config = _config(repo=repo)
+    identity = whole_tree_identity(cwd=repo)
+    graph_digest = workflow_graph_digest(repo=repo, item_id=item.id)
     append_work_item(path=config, item=item)
     append_work_item_comment(
         path=config,
@@ -218,9 +255,19 @@ def _stand_a_refusal(
         body=verdict_comment(
             item_id=item.id,
             stage=STAGE_PRE_DISPATCH,
-            digest=judgement_subject_digest(item=item, cwd=repo) if subject is None else subject,
+            digest=(
+                judgement_subject_digest(
+                    item=item,
+                    cwd=repo,
+                    spec_identity=identity.value,
+                    workflow_graph_digest=graph_digest,
+                )
+                if subject is None
+                else subject
+            ),
             rubric_digest=rubric,
-            spec_identity=whole_tree_identity(cwd=repo),
+            spec_identity=identity,
+            workflow_graph_digest=graph_digest,
             judgement=DodJudgement(outcome=JUDGEMENT_HELD, findings=(_FINDING,)),
         ),
     )

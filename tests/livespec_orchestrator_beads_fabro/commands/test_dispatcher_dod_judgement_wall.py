@@ -50,10 +50,14 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_run im
     judgement_rubric,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_wall import (
+    dod_judgement_refusal,
     dod_unrefused_candidates,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_spec_identity import (
     whole_tree_identity,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_workflow_digest import (
+    workflow_graph_digest,
 )
 from livespec_orchestrator_beads_fabro.store import append_work_item
 from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
@@ -188,6 +192,8 @@ def _executing_rubric_digest() -> str:
 def _record_held_verdict(*, repo: Path, item: WorkItem) -> None:
     """Stand a refusing verdict against this item's current bytes and rubric."""
     config = _config(repo=repo)
+    identity = whole_tree_identity(cwd=repo)
+    graph_digest = workflow_graph_digest(repo=repo, item_id=item.id)
     append_work_item(path=config, item=item)
     append_work_item_comment(
         path=config,
@@ -195,9 +201,15 @@ def _record_held_verdict(*, repo: Path, item: WorkItem) -> None:
         body=verdict_comment(
             item_id=item.id,
             stage=STAGE_PRE_DISPATCH,
-            digest=judgement_subject_digest(item=item, cwd=repo),
+            digest=judgement_subject_digest(
+                item=item,
+                cwd=repo,
+                spec_identity=identity.value,
+                workflow_graph_digest=graph_digest,
+            ),
             rubric_digest=_executing_rubric_digest(),
-            spec_identity=whole_tree_identity(cwd=repo),
+            spec_identity=identity,
+            workflow_graph_digest=graph_digest,
             judgement=DodJudgement(outcome=JUDGEMENT_HELD, findings=(_FINDING,)),
         ),
     )
@@ -255,3 +267,34 @@ def test_an_unresolvable_connection_preserves_the_callers_order(tmp_path: Path) 
     assert (
         dod_unrefused_candidates(items=ranked, repo=_unresolvable_repo(tmp_path=tmp_path)) == ranked
     )
+
+
+def test_a_stale_verdict_that_cannot_be_rejudged_refuses_with_both_digest_pairs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unavailable rejudge is never permission to spend a launcher slot."""
+    from livespec_orchestrator_beads_fabro.commands import _dispatcher_dod_judgement_wall as wall
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement import (
+        JUDGEMENT_UNAVAILABLE,
+    )
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_gate import (
+        DodJudgementDecision,
+    )
+
+    repo = _connected_repo(tmp_path=tmp_path)
+    decision = DodJudgementDecision(
+        work_item_id=_item().id,
+        outcome=JUDGEMENT_UNAVAILABLE,
+        spec_identity=whole_tree_identity(cwd=repo),
+        workflow_graph_digest="current-graph",
+        recorded_spec_identity="tree:recorded-spec",
+        recorded_workflow_graph_digest="recorded-graph",
+    )
+    monkeypatch.setattr(wall, "judge_item_definition_of_done", lambda **_kwargs: decision)
+
+    refusal = dod_judgement_refusal(repo=repo, items=[_item()])
+
+    assert refusal is not None
+    assert "could not re-judge" in refusal
+    assert "recorded spec digest: tree:recorded-spec" in refusal
+    assert "current workflow graph digest: current-graph" in refusal

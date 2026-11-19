@@ -57,6 +57,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_wall i
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_spec_identity import (
     whole_tree_identity,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_workflow_digest import (
+    workflow_graph_digest,
+)
 from livespec_orchestrator_beads_fabro.store import append_work_item
 from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 
@@ -191,15 +194,23 @@ def _stand_a_refusal(*, repo: Path) -> None:
     append_work_item(path=config, item=item)
     rubric = judgement_rubric()
     assert rubric is not None
+    identity = whole_tree_identity(cwd=repo)
+    graph_digest = workflow_graph_digest(repo=repo, item_id=item.id)
     append_work_item_comment(
         path=config,
         work_item_id=_ITEM_ID,
         body=verdict_comment(
             item_id=_ITEM_ID,
             stage=STAGE_PRE_ADMISSION,
-            digest=judgement_subject_digest(item=item, cwd=repo),
+            digest=judgement_subject_digest(
+                item=item,
+                cwd=repo,
+                spec_identity=identity.value,
+                workflow_graph_digest=graph_digest,
+            ),
             rubric_digest=rubric_digest(rubric=rubric),
-            spec_identity=whole_tree_identity(cwd=repo),
+            spec_identity=identity,
+            workflow_graph_digest=graph_digest,
             judgement=DodJudgement(outcome=JUDGEMENT_HELD, findings=(_REFUSAL,)),
         ),
     )

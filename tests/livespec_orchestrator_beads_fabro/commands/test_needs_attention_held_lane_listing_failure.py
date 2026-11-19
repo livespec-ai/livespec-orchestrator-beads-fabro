@@ -43,6 +43,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_run im
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_spec_identity import (
     whole_tree_identity,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_workflow_digest import (
+    workflow_graph_digest,
+)
 from livespec_orchestrator_beads_fabro.errors import BeadsCommandError
 from livespec_orchestrator_beads_fabro.store import append_work_item
 from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
@@ -106,15 +109,23 @@ def _held_fixture(*, tmp_path: Path) -> tuple[Path, WorkItem]:
     append_work_item(path=config, item=item)
     rubric = judgement_rubric()
     assert rubric is not None
+    identity = whole_tree_identity(cwd=repo)
+    graph_digest = workflow_graph_digest(repo=repo, item_id=item.id)
     append_work_item_comment(
         path=config,
         work_item_id=item.id,
         body=verdict_comment(
             item_id=item.id,
             stage=STAGE_PRE_DISPATCH,
-            digest=judgement_subject_digest(item=item, cwd=repo),
+            digest=judgement_subject_digest(
+                item=item,
+                cwd=repo,
+                spec_identity=identity.value,
+                workflow_graph_digest=graph_digest,
+            ),
             rubric_digest=rubric_digest(rubric=rubric),
-            spec_identity=whole_tree_identity(cwd=repo),
+            spec_identity=identity,
+            workflow_graph_digest=graph_digest,
             judgement=DodJudgement(outcome=JUDGEMENT_HELD, findings=("bd-ib-held: fix it.",)),
         ),
     )

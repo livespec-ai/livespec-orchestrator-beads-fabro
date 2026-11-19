@@ -65,13 +65,21 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement import
     first_remedy,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_input_record import (
-    BOUND_ENDED_CANDIDATE_FIELD,
     input_usage_lines,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_markers import (
     JUDGEMENT_COMMENT_MARKER,
     UNAVAILABLE_COMMENT_MARKER,
     comment_marker,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_record_fields import (
+    FIELD_SEPARATOR as _FIELD_SEPARATOR,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_record_fields import (
+    fields_of as _fields_of,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_record_fields import (
+    repeated as _repeated,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_spec_identity import (
     SpecIdentity,
@@ -100,6 +108,7 @@ __all__: list[str] = [
     "did_not_run_comment",
     "recorded_did_not_run_causes",
     "recorded_governing_heading",
+    "recorded_reuse_digests",
     "reusable_governing_heading",
     "reusable_verdict",
     "verdict_comment",
@@ -114,6 +123,7 @@ _DIGEST_FIELD = "subject-digest"
 # because the two change for unrelated reasons and a reader of the record has to
 # be able to say which one retired a verdict: an item edit, or a plugin release.
 _RUBRIC_DIGEST_FIELD = "rubric-digest"
+_WORKFLOW_GRAPH_DIGEST_FIELD = "workflow-graph-digest"
 _FINDING_FIELD = "finding"
 _REMEDY_FIELD = "first-remedy"
 # Deliberately NOT the bare `cause`. The did-not-run scan below walks back over
@@ -123,19 +133,6 @@ _REMEDY_FIELD = "first-remedy"
 # behind a comment that has nothing to do with the judgement. The field name is
 # the discriminator, so it has to be one nothing else writes.
 _CAUSE_FIELD = "judgement-unavailable-cause"
-_FIELD_SEPARATOR = ": "
-# Every key a record may carry more than once, which the field map must leave
-# to the repeated-value reader rather than collapsing to its last occurrence.
-_REPEATED_FIELDS = frozenset(
-    {
-        _FINDING_FIELD,
-        GOVERNING_HEADING_FIELD,
-        GOVERNING_EVIDENCE_FIELD,
-        GOVERNING_SELECTED_CLAUSE_FIELD,
-        GOVERNING_NAMED_CLAUSE_FIELD,
-        BOUND_ENDED_CANDIDATE_FIELD,
-    }
-)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -146,6 +143,8 @@ class RecordedJudgement:
     digest: str
     rubric_digest: str
     findings: tuple[str, ...] = ()
+    workflow_graph_digest: str | None = None
+    spec_identity: str | None = None
 
     @property
     def first_remedy(self) -> str | None:
@@ -162,6 +161,7 @@ def verdict_comment(  # noqa: PLR0913 - each argument is one field of the record
     judgement: DodJudgement,
     governing: GoverningHeadingReceipt | None = None,
     spec_identity: SpecIdentity | None = None,
+    workflow_graph_digest: str | None = None,
 ) -> str:
     """The ledger comment recording one taken verdict, findings and all.
 
@@ -191,6 +191,8 @@ def verdict_comment(  # noqa: PLR0913 - each argument is one field of the record
     lines.extend(input_usage_lines(judgement=judgement))
     if spec_identity is not None:
         lines.extend(spec_identity_lines(identity=spec_identity))
+    if workflow_graph_digest is not None:
+        lines.append(f"{_WORKFLOW_GRAPH_DIGEST_FIELD}{_FIELD_SEPARATOR}{workflow_graph_digest}")
     if governing is not None:
         lines.extend(governing_record_lines(governing=governing))
     lines.extend(f"{_FINDING_FIELD}{_FIELD_SEPARATOR}{finding}" for finding in judgement.findings)
@@ -288,6 +290,7 @@ def reusable_verdict(
     digest: str,
     rubric_digest: str,
     spec_identity: SpecIdentity | None = None,
+    workflow_graph_digest: str | None = None,
 ) -> RecordedJudgement | None:
     """The EARLIEST TAKEN verdict whose two digests both equal these.
 
@@ -335,13 +338,34 @@ def reusable_verdict(
             != (spec_identity.form, spec_identity.value)
         ):
             continue
+        if (
+            workflow_graph_digest is not None
+            and fields.get(_WORKFLOW_GRAPH_DIGEST_FIELD) != workflow_graph_digest
+        ):
+            continue
         return RecordedJudgement(
             outcome=outcome,
             digest=recorded,
             rubric_digest=recorded_rubric,
             findings=_repeated(body=body, key=_FINDING_FIELD),
+            workflow_graph_digest=fields.get(_WORKFLOW_GRAPH_DIGEST_FIELD),
+            spec_identity=None if recorded_identity is None else recorded_identity.value,
         )
     return None
+
+
+def recorded_reuse_digests(*, comments: Sequence[str]) -> tuple[str | None, str | None]:
+    """The newest receipt's spec and graph digests for an actionable refusal."""
+    for body in reversed(tuple(comments)):
+        if comment_marker(body=body) != JUDGEMENT_COMMENT_MARKER:
+            continue
+        fields = _fields_of(body=body)
+        identity = recorded_spec_identity(comments=(body,))
+        return (
+            None if identity is None else identity.value,
+            fields.get(_WORKFLOW_GRAPH_DIGEST_FIELD),
+        )
+    return (None, None)
 
 
 def recorded_did_not_run_causes(*, comments: Sequence[str]) -> frozenset[str]:
@@ -359,27 +383,3 @@ def recorded_did_not_run_causes(*, comments: Sequence[str]) -> frozenset[str]:
             break
         causes.add(_fields_of(body=body).get(_CAUSE_FIELD, ""))
     return frozenset(causes - {""})
-
-
-def _fields_of(*, body: str) -> dict[str, str]:
-    """Every `key: value` line of one record, LAST occurrence winning.
-
-    The REPEATED keys are read separately, because a last-wins map would keep
-    only the final one of each — which is the opposite of what "with each
-    remedy" asks the record to carry, and would reduce a multi-clause governing
-    verdict to whichever heading the renderer happened to write last.
-    """
-    fields: dict[str, str] = {}
-    for raw in body.splitlines():
-        key, separator, value = raw.strip().partition(_FIELD_SEPARATOR)
-        if separator and key not in _REPEATED_FIELDS:
-            fields[key] = value
-    return fields
-
-
-def _repeated(*, body: str, key: str) -> tuple[str, ...]:
-    """Every value one repeated key carries, in the order the record wrote them."""
-    prefix = f"{key}{_FIELD_SEPARATOR}"
-    return tuple(
-        raw.strip()[len(prefix) :] for raw in body.splitlines() if raw.strip().startswith(prefix)
-    )

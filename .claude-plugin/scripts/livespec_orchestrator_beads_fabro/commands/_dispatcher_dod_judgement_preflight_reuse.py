@@ -83,6 +83,7 @@ def reusable_verdict_for_identity(
     digest: str,
     rubric_digest: str,
     identity: SpecIdentity,
+    workflow_graph_digest: str | None = None,
 ) -> RecordedJudgement | None:
     """Read the verdict a taking may share with the repository preflight."""
     return reusable_verdict(
@@ -90,6 +91,7 @@ def reusable_verdict_for_identity(
         digest=digest,
         rubric_digest=rubric_digest,
         spec_identity=identity,
+        workflow_graph_digest=workflow_graph_digest,
     )
 
 

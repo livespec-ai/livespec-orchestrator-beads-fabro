@@ -226,7 +226,12 @@ def _goal_fields(*, item: WorkItem, lessons: str) -> list[str]:
 
 
 def judgement_subject_digest(
-    *, item: WorkItem, cwd: Path, comments: Sequence[str] = (), spec_identity: str | None = None
+    *,
+    item: WorkItem,
+    cwd: Path,
+    comments: Sequence[str] = (),
+    spec_identity: str | None = None,
+    workflow_graph_digest: str | None = None,
 ) -> str:
     """Return the stable byte digest used to determine verdict reuse.
 
@@ -245,7 +250,10 @@ def judgement_subject_digest(
     """
     subject = judgement_subject(item=item, cwd=cwd, comments=comments)
     identity = "tree:" + spec_tree_identity(cwd=cwd) if spec_identity is None else spec_identity
-    return hashlib.sha256(f"{subject}\n{_SPEC_IDENTITY_LABEL}{identity}".encode()).hexdigest()
+    graph = "unreadable" if workflow_graph_digest is None else workflow_graph_digest
+    return hashlib.sha256(
+        f"{subject}\n{_SPEC_IDENTITY_LABEL}{identity}\nworkflow-graph-digest: {graph}".encode()
+    ).hexdigest()
 
 
 def spec_tree_identity(*, cwd: Path) -> str:

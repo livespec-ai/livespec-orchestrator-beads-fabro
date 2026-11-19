@@ -71,6 +71,12 @@ seeded_open_red_declared() {
     grep -q '^##[[:space:]]\+seeded-open-red\([[:space:]]\|$\)' "$handoff"
 }
 
+preserve_rebuilt_seed_red_subject() {
+    [[ -n "${LIVESPEC_RESUME_PUBLISHED_HEAD:-}" ]] \
+        && seeded_open_red_declared \
+        && open_seed_red HEAD
+}
+
 seeded_red_passes_declared() {
     local handoff=""
     handoff="$(git rev-parse --git-path "$HANDOFF_NAME")"
@@ -405,7 +411,7 @@ main() {
         return 0
     fi
     title="${LIVESPEC_PR_TITLE:-}"
-    if [[ -n "$title" ]]; then
+    if [[ -n "$title" ]] && ! preserve_rebuilt_seed_red_subject; then
         # Keep the complete Red message after its first line.  `-F` then replaces
         # only the placeholder subject while the commit-msg hook appends Green's
         # evidence, so the replay trailers remain part of the amended commit.
