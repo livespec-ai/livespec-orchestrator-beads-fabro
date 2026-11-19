@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.343.4](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.3...v0.343.4) (2026-11-19)
+
+
+### Bug Fixes
+
+* **fleet-launch:** a seat ticket passed --fresh records the fresh ruling, or refuses and launches nothing (bd-ib-2yibku) ([3e13ff6](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/3e13ff693b46928f231520dcfdcfb1cfb9eee0bc))
+
 ## [0.343.3](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.2...v0.343.3) (2026-11-19)
 
 
