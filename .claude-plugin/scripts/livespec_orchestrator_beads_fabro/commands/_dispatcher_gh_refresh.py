@@ -215,10 +215,28 @@ fi
 """
 
 
+# The variables that make a python3 started under `uv run pytest` measure itself: coverage's own
+# subprocess switch and pytest-cov's pth startup hook. The mint helper is no repository's source,
+# so the wrapper starts it without them and no repository's coverage omit has to track where the
+# bundle lives (bd-ib-ompbgu).
+_COVERAGE_HOOK_VARIABLES = (
+    "COVERAGE_PROCESS_START",
+    "COV_CORE_SOURCE",
+    "COV_CORE_CONFIG",
+    "COV_CORE_DATAFILE",
+    "COV_CORE_BRANCH",
+    "COV_CORE_CONTEXT",
+)
+_MINT_COMMAND = (
+    "env " + " ".join(f"-u {name}" for name in _COVERAGE_HOOK_VARIABLES) + ' python3 "$mint"'
+)
+
 _WRAPPER_TAIL = (
     _AGENT_PUBLICATION_GUARD_SOURCE
-    + """token="$(python3 "$mint")"
-export GH_TOKEN="$token"
+    + 'token="$('
+    + _MINT_COMMAND
+    + ')"\n'
+    + """export GH_TOKEN="$token"
 export GITHUB_TOKEN="$token"
 exec "$real_gh" "$@"
 """
