@@ -31,6 +31,7 @@ __all__: list[str] = [
     "STAGE_PRE_ADMISSION",
     "STAGE_PRE_DISPATCH",
     "did_not_run_comment",
+    "named_setting_check_did_not_run_comment",
 ]
 
 STAGE_PRE_ADMISSION = "pre-admission"
@@ -81,5 +82,24 @@ def did_not_run_comment(
             ),
             *bound_ended_lines(candidates=details.get("bound_ended_candidates", ())),
             *unavailable_record_lines(attempts=details.get("attempts", ())),
+        )
+    )
+
+
+def named_setting_check_did_not_run_comment(
+    *, item_id: str, stage: str, tool: str, version: str, detail: str
+) -> str:
+    """Render the receipt for a non-blocking pinned-settings-listing failure."""
+    return "\n".join(
+        (
+            UNAVAILABLE_COMMENT_MARKER,
+            "",
+            f"The {stage} named-setting check did not run for this item.",
+            "",
+            f"{_WORK_ITEM_FIELD}{_FIELD_SEPARATOR}{item_id}",
+            f"{_STAGE_FIELD}{_FIELD_SEPARATOR}{stage}",
+            f"tool: {tool}",
+            f"version: {version}",
+            f"reason: {detail}",
         )
     )

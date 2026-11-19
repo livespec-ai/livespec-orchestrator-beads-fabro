@@ -3402,6 +3402,14 @@ if [ "$(find "$FLEET_LAUNCH_GMK_QUEUE_DIR" -type f -name "[0-9]*" | sort | tr '\
 else
     fail "the readback disturbed a launcher or its ticket"
 fi
+non_root_report="$CASE_DIR/non-root-readback"
+if runuser -u nobody -- bash "$LAUNCH_DIR/launcher-versions.sh" > "$non_root_report" 2>&1 \
+    && ! grep -qF 'Permission denied' "$non_root_report"; then
+    pass "a non-root readback suppresses permission errors from processes it cannot inspect"
+else
+    fail "a non-root readback printed a permission error for a process it cannot inspect"
+    cat "$non_root_report" >&2
+fi
 stop_launcher "$stale_pid" "$fresh_pid"
 wait "$stale_pid" 2>/dev/null
 wait "$fresh_pid" 2>/dev/null

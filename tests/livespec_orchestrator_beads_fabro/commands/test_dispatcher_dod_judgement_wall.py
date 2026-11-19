@@ -36,11 +36,21 @@ import pytest
 from livespec_orchestrator_beads_fabro._beads_client import reset_fake_singleton
 from livespec_orchestrator_beads_fabro._store_comments import append_work_item_comment
 from livespec_orchestrator_beads_fabro._store_dispatch_workflow import record_dispatch_workflow
+from livespec_orchestrator_beads_fabro.commands import (
+    _dispatcher_definition_of_done_setting_checks as setting_checks,
+)
+from livespec_orchestrator_beads_fabro.commands import (
+    _dispatcher_dod_judgement_wall as wall,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement import (
+    JUDGEMENT_ADMITTED,
     JUDGEMENT_HELD,
     DodJudgement,
     judgement_subject_digest,
     rubric_digest,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_gate import (
+    DodJudgementDecision,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_record import (
     STAGE_PRE_DISPATCH,
@@ -255,3 +265,31 @@ def test_an_unresolvable_connection_preserves_the_callers_order(tmp_path: Path) 
     assert (
         dod_unrefused_candidates(items=ranked, repo=_unresolvable_repo(tmp_path=tmp_path)) == ranked
     )
+
+
+def test_an_unavailable_pinned_listing_writes_a_receipt_before_pre_dispatch_judgement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _connected_repo(tmp_path=tmp_path)
+    item = _item()
+    comments: list[str] = []
+    unavailable = setting_checks.NamedSettingCheck(
+        tool="ansible-core", version="2.21.4", detail="ansible-config was unavailable"
+    )
+    decision = DodJudgementDecision(work_item_id=item.id, outcome=JUDGEMENT_ADMITTED, reused=True)
+    monkeypatch.setattr(
+        wall.setting_checks,
+        "named_setting_checks",
+        lambda **_kwargs: setting_checks.NamedSettingCheckResult(unavailable=(unavailable,)),
+    )
+    monkeypatch.setattr(
+        wall, "append_work_item_comment", lambda **kwargs: comments.append(kwargs["body"])
+    )
+    monkeypatch.setattr(wall, "judge_item_definition_of_done", lambda **_kwargs: decision)
+
+    assert wall.dod_judgement_refusal(repo=repo, items=[item]) is None
+    assert len(comments) == 1
+    assert "named-setting check did not run" in comments[0]
+    assert "pre-dispatch" in comments[0]
+    assert "tool: ansible-core" in comments[0]
+    assert "version: 2.21.4" in comments[0]

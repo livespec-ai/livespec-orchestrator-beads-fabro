@@ -50,6 +50,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from livespec_orchestrator_beads_fabro._store_comments import append_work_item_comment
+from livespec_orchestrator_beads_fabro.commands import (
+    _dispatcher_definition_of_done_setting_checks as setting_checks,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_criteria_wall_variant import (
     criteria_wall_variant,
 )
@@ -67,6 +71,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_spec_identity im
     spec_identity_journal_record,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import store_config
+from livespec_orchestrator_beads_fabro.commands._dod_unavailable_record import (
+    named_setting_check_did_not_run_comment,
+)
 from livespec_orchestrator_beads_fabro.effects import AttemptFailure, attempt
 from livespec_orchestrator_beads_fabro.errors import (
     ConnectionPrefixMissingError,
@@ -117,6 +124,7 @@ def dod_judgement_refusal(
     for item in items:
         if _exempt(repo=repo, item=item, workflow_name=workflow_name):
             continue
+        _record_unavailable_setting_checks(config=config, item=item, repo=repo)
         decision = judge_item_definition_of_done(
             item=item, repo=repo, path=config, stage=STAGE_PRE_DISPATCH
         )
@@ -138,6 +146,22 @@ def dod_judgement_refusal(
                 f" the item.\n{findings}\n"
             )
     return None
+
+
+def _record_unavailable_setting_checks(*, config: StoreConfig, item: WorkItem, repo: Path) -> None:
+    """Record the non-blocking receipt before the model-backed judgement runs."""
+    for check in setting_checks.named_setting_checks(item=item, cwd=repo).unavailable:
+        append_work_item_comment(
+            path=config,
+            work_item_id=item.id,
+            body=named_setting_check_did_not_run_comment(
+                item_id=item.id,
+                stage=STAGE_PRE_DISPATCH,
+                tool=check.tool,
+                version=check.version,
+                detail=check.detail,
+            ),
+        )
 
 
 def dod_unrefused_candidates(

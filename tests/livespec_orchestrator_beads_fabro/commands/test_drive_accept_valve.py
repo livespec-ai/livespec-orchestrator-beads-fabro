@@ -20,11 +20,19 @@ import json
 import textwrap
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from livespec_orchestrator_beads_fabro._beads_client import reset_fake_singleton
 from livespec_orchestrator_beads_fabro.commands import _drive_accept_valve as accept_valve
+from livespec_orchestrator_beads_fabro.commands import _drive_approve_valve as approve_valve
+from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done_setting_checks import (
+    NamedSettingCheck,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
+from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_size_gate import (
+    FactorySizeDecision,
+)
 from livespec_orchestrator_beads_fabro.commands._drive_accept_valve import (
     HOST_REPLAY_PENDING_ERR,
     HUMAN_ATTESTATION_PENDING_ERR,
@@ -36,6 +44,7 @@ from livespec_orchestrator_beads_fabro.store import (
     read_work_items,
 )
 from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
+from returns.io import IOSuccess
 
 _HUMAN_ASSERTION = "The production console renders the capacity banner."
 _HOST_ASSERTION = "The released build prints its own version on an operator host."
@@ -503,3 +512,60 @@ def test_closing_on_the_human_record_leaves_a_pointer_carrying_both_links(
     assert "- Verified record: https://example.test/c/1" in description
     assert "- Pull request: #11" in description
     assert description.count("## Proof of Done") == 1
+
+
+def test_approval_records_an_unavailable_pinned_setting_listing_without_holding_the_item(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    item = _item(
+        status="pending-approval",
+        description="## Definition of Done\n\n- It works.\n\nReferences: ## Something\n",
+    )
+    append_work_item(path=_config(), item=item)
+    comments: list[str] = []
+    unavailable = NamedSettingCheck(
+        tool="ansible-core", version="2.21.4", detail="ansible-config was unavailable"
+    )
+    monkeypatch.setattr(
+        approve_valve,
+        "resolved_stored_factory_size_decision",
+        lambda **_kwargs: IOSuccess(
+            FactorySizeDecision(
+                disposition="proceed",
+                adopted_ceiling=None,
+                assertion_count=1,
+                reason=None,
+                size_justified=False,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        approve_valve,
+        "acceptance_eligibility",
+        lambda **_kwargs: SimpleNamespace(
+            refusal=None,
+            variant=SimpleNamespace(exempt=False),
+            unavailable_setting_checks=(unavailable,),
+        ),
+    )
+    monkeypatch.setattr(
+        approve_valve,
+        "judge_item_definition_of_done",
+        lambda **_kwargs: SimpleNamespace(holds=False),
+    )
+    monkeypatch.setattr(
+        approve_valve.store,
+        "append_work_item_comment",
+        lambda **kwargs: comments.append(kwargs["body"]),
+    )
+
+    result = approve_valve.approve_item(
+        repo=tmp_path, config=_config(), item=item, action_id=f"approve:{item.id}"
+    )
+
+    assert result["status"] == "green"
+    assert len(comments) == 1
+    assert "named-setting check did not run" in comments[0]
+    assert "pre-admission" in comments[0]
+    assert "tool: ansible-core" in comments[0]
+    assert "version: 2.21.4" in comments[0]

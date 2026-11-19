@@ -37,6 +37,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from livespec_orchestrator_beads_fabro.commands import (
+    _dispatcher_definition_of_done_setting_checks as setting_checks,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_criteria_wall_variant import (
     CriteriaWallVariant,
     criteria_wall_variant,
@@ -106,6 +109,7 @@ class AcceptanceEligibility:
     variant: CriteriaWallVariant
     criteria: EffectiveCriteria
     findings: tuple[str, ...]
+    unavailable_setting_checks: tuple[setting_checks.NamedSettingCheck, ...]
     proof_routing: str
     refusal: str | None
 
@@ -132,20 +136,30 @@ def acceptance_eligibility(
         # decomposed into gradeable slices, and its whole output is the draft
         # that produces them — so it is exempt from the section requirement
         # entirely, not merely from the assertion count.
-        return _verdict(item=item, variant=variant, criteria=criteria, findings=(), refusal=None)
+        return _verdict(
+            item=item,
+            variant=variant,
+            criteria=criteria,
+            findings=(),
+            unavailable_setting_checks=(),
+            refusal=None,
+        )
     # An editable opener is a filing- and approve-time mechanical finding, but
     # a hand-picked legacy `ready` row reaches the goal preflight so that the
     # Dispatcher can give its dedicated stage and exit-code diagnosis.
+    resolved_setting_checks = setting_checks.named_setting_checks(item=item, cwd=cwd)
     findings = definition_of_done_findings(
         item=item,
         cwd=cwd,
         include_goal_template_openers=False,
+        pinned_setting_checks=resolved_setting_checks,
     )
     return _verdict(
         item=item,
         variant=variant,
         criteria=criteria,
         findings=findings,
+        unavailable_setting_checks=resolved_setting_checks.unavailable,
         refusal=_refusal(item=item, variant=variant, criteria=criteria, findings=findings, cwd=cwd),
     )
 
@@ -222,6 +236,7 @@ def _verdict(
     variant: CriteriaWallVariant,
     criteria: EffectiveCriteria,
     findings: tuple[str, ...],
+    unavailable_setting_checks: tuple[setting_checks.NamedSettingCheck, ...],
     refusal: str | None,
 ) -> AcceptanceEligibility:
     return AcceptanceEligibility(
@@ -229,6 +244,7 @@ def _verdict(
         variant=variant,
         criteria=criteria,
         findings=findings,
+        unavailable_setting_checks=unavailable_setting_checks,
         proof_routing=_proof_routing(criteria=criteria),
         refusal=refusal,
     )

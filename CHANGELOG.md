@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.343.10](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.9...v0.343.10) (2026-11-19)
+
+
+### Bug Fixes
+
+* a final-patch run-files read with null contents is read from each entry's unified patch instead of refused, so a finished run's work is published (bd-ib-ph62fj) ([2395ab1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/2395ab1ef663e45c4bfb2d7714e4cd796eae2528))
+* dod_gate check 5 has the finding name the released-build requirement for a prompt or workflow file the item changes (Refs bd-ib-w3l7rs) ([710217b](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/710217bb30468f8dca2c7989efb7982703600544))
+
 ## [0.343.9](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.8...v0.343.9) (2026-11-19)
 
 
