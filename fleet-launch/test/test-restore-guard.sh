@@ -28,8 +28,20 @@ run 6 "an open factory PR is refused" STUB_PRS=5527 --
 case "$LAST" in *seeded-ticket.sh*restore\ rider*) echo "ok   the refusal names seeded-ticket.sh with the restore rider";; *) echo "FAIL refusal text: $LAST"; fail=1;; esac
 git -C "$T/repo" push -q origin HEAD:refs/livespec/preserved-publish/bd-ib-x/abc123
 run 6 "a preserved-publish ref is refused" STUB_PRS= --
-run 0 "an explicit --fresh reason bypasses" STUB_PRS=5527 -- --fresh "measured: nothing worth restoring"
+cat > "$T/ruler-ok" <<'RULER'
+#!/bin/bash
+printf '%s|%s|%s\n' "$1" "$2" "$3" >> "$RULER_LOG"; echo "FRESH-RULING  $1  by stub at now"
+RULER
+printf '#!/bin/bash\necho "boom" >&2; exit 1\n' > "$T/ruler-fail"; chmod +x "$T/ruler-ok" "$T/ruler-fail"
+export RULER_LOG="$T/ruler.log"
+run 0 "an explicit --fresh reason bypasses" STUB_PRS=5527 SEAT_FRESH_RULING_CMD="$T/ruler-ok" -- --fresh "measured: nothing worth restoring"
 case "$LAST" in *bypassed*) echo "ok   the bypass is announced";; *) echo "FAIL bypass text: $LAST"; fail=1;; esac
+[ "$(cat "$RULER_LOG")" = "bd-ib-x|$T/repo|measured: nothing worth restoring" ] && echo "ok   --fresh wrote the ruling naming the item and the reason" || { echo "FAIL ruling log: $(cat "$RULER_LOG")"; fail=1; }
+: > "$RULER_LOG"
+run 0 "--fresh records the ruling even when no earlier work exists" STUB_PRS= SEAT_FRESH_RULING_CMD="$T/ruler-ok" -- --fresh "reason two"
+[ -s "$RULER_LOG" ] && echo "ok   the ruling is written with no PR and no preserved ref" || { echo "FAIL no ruling written on a clear item"; fail=1; }
+run 8 "a failed ruling write refuses and names the failure" STUB_PRS=5527 SEAT_FRESH_RULING_CMD="$T/ruler-fail" -- --fresh "reason three"
+case "$LAST" in *"ruling write failed"*boom*) echo "ok   the refusal names the failed write";; *) echo "FAIL refusal text: $LAST"; fail=1;; esac
 run 2 "--fresh without a reason is refused" STUB_PRS=5527 -- --fresh
 run 0 "a seeded ruling passes" STUB_PRS=5527 SEAT_SEEDED_RULING=1 --
 git -C "$T/repo" push -q origin :refs/livespec/preserved-publish/bd-ib-x/abc123

@@ -6,7 +6,11 @@
 # Refuses (exit 6) when, on the repository's origin, the item has an open factory pull request (head feat/<item>) or a
 # refs/livespec/preserved-publish/<item>/* ref. Exit 7 when either could not be measured (never read as clear).
 # Passes (exit 0) when neither exists, when SEAT_SEEDED_RULING=1 (seeded-ticket.sh sets it after its seed ruling read-back),
-# or when the caller names an explicit `--fresh <reason>`. Needs-human refs are named by dispatch id, not item, so they are
+# or when the caller names an explicit `--fresh <reason>`. An explicit `--fresh <reason>` ALSO records the ruling: it writes
+# the livespec-fresh-ruling comment through `dispatcher.py fresh-ruling` BEFORE the guard reads anything, so recovery routing
+# reads the item's route as fresh instead of seeding it from a preserved work-in-progress ref (bd-ib-2yibku, measured on
+# bd-ib-qjdiwl run 01M7RWJ8751N). When that write fails it refuses (exit 8) and the ticket launches nothing; SEAT_FRESH_RULING_CMD
+# replaces the writer for a hermetic test. Needs-human refs are named by dispatch id, not item, so they are
 # not matched here; the preserved-publish ref and the open pull request are what a reclaim destroys.
 set -u
 ITEM=${1:?usage: restore-guard.sh <item> <repo-dir> [--fresh <reason>]}; REPO=${2:?repo-dir}; shift 2
@@ -16,6 +20,16 @@ if [ "${1:-}" = --fresh ]; then
   [ -n "$FRESH" ] || { echo "REFUSED $ITEM: --fresh needs a reason" >&2; exit 2; }
 fi
 [ "${SEAT_SEEDED_RULING:-}" = 1 ] && exit 0
+if [ -n "$FRESH" ]; then
+  if [ -n "${SEAT_FRESH_RULING_CMD:-}" ]; then ruled=$($SEAT_FRESH_RULING_CMD "$ITEM" "$REPO" "$FRESH" 2>&1); rc=$?
+  else
+    root=$(python3 "${SEAT_PLUGIN_ROOT:?set SEAT_PLUGIN_ROOT to the installed plugin root}/scripts/bin/registered_plugin_root.py" --repo "$REPO" 2>&1); rc=$?
+    [ "$rc" = 0 ] && { ruled=$(/usr/local/bin/with-livespec-env.sh -- python3 "$root/scripts/bin/dispatcher.py" fresh-ruling --invoker "${SEAT_INVOKER:-claude:fleet-launch-seat}" --repo "$REPO" --item "$ITEM" --reason "$FRESH" 2>&1); rc=$?; } || ruled=$root
+  fi
+  case "$ruled" in *FRESH-RULING*) [ "$rc" = 0 ] || rc=8;; *) [ "$rc" != 0 ] || rc=8;; esac
+  if [ "$rc" != 0 ]; then echo "REFUSED $ITEM: the --fresh ruling write failed (rc=$rc): $(printf %s "$ruled" | tail -n 1 | cut -c1-200); nothing is launched." >&2; exit 8; fi
+  echo "RESTORE-GUARD $ITEM: fresh ruling recorded: $FRESH"
+fi
 slug=$(git -C "$REPO" remote get-url origin 2>/dev/null | sed -E 's#^(git@github.com:|https://github.com/)##; s#\.git$##')
 found=(); unread=()
 if [ -z "$slug" ]; then unread+=("origin of $REPO")
