@@ -137,7 +137,13 @@ def preview(stage, test_file):
     paths = selected_paths(stage, root, test_file, base)
     if not paths:
         return 2, [], [], False
-    preview_root = Path(tempfile.mkdtemp(prefix="livespec-gate-preview-"))
+    # Coverage omits `/tmp/*`, so a preview worktree there reports no measured
+    # source and the hook falls back to its full-suite path.  Keep the
+    # disposable worktree under the same home-rooted worktree area as factory
+    # worktrees, while retaining the normal `git worktree remove` cleanup.
+    preview_parent = Path.home() / ".worktrees" / root.name
+    preview_parent.mkdir(parents=True, exist_ok=True)
+    preview_root = Path(tempfile.mkdtemp(prefix="gate-preview-", dir=preview_parent))
     unset = []
     try:
         git("worktree", "add", "--detach", "--quiet", str(preview_root), base, cwd=root)
@@ -151,6 +157,16 @@ def preview(stage, test_file):
         if not hook.is_file():
             return 0, [], unset, True
         environment, unset = skipped_environment()
+        # The hook selects the scoped affected-tests gate for commits made by an
+        # implement turn.  This disposable index is the prospective implement
+        # commit, so preview it through that same selection path.  It is also a
+        # local preview of that gate rather than a request to delegate a second
+        # full pre-commit aggregate to a gate Job.
+        environment["LIVESPEC_AUTHORING_TURN"] = "implement"
+        environment["LIVESPEC_GATE_CONTEXT"] = "1"
+        # The preview is feedback for the changed modules, not a substitute
+        # for the commit's import-closure gate or the final aggregate.
+        environment["LIVESPEC_GATE_PREVIEW"] = "1"
         trust = command("mise", "trust", cwd=preview_root, env=environment, check=False)
         trust_output = trust.stdout + trust.stderr
         if trust.returncode:

@@ -137,6 +137,37 @@ def test_gate_preview_runs_the_hook_against_a_disposable_staged_tree_and_unsets_
     assert _git(repo=repo, env=env, argv=["diff", "--cached", "--name-only"]) == ""
 
 
+def test_green_preview_uses_the_implement_turns_affected_tests_gate(tmp_path: Path) -> None:
+    """A one-module Green preview takes the hook's scoped route, not its full-suite route."""
+    preview = importlib.import_module(_MODULE)
+    repo, runner, env = _preview_repository(tmp_path=tmp_path, preview=preview)
+    (repo / "created.py").unlink()
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text(
+        "#!/bin/sh\n"
+        'if test "${LIVESPEC_AUTHORING_TURN:-}" = implement; then\n'
+        '  test "$(git diff --cached --name-only)" = tracked.py || exit 8\n'
+        "  printf '%s\\n' 'affected-tests gate selected the changed modules'\n"
+        "  exit 0\n"
+        "fi\n"
+        "printf '%s\\n' 'full pytest suite would run' >&2\n"
+        "exit 9\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+
+    completed = _run(
+        repo=repo,
+        env=env,
+        argv=[sys.executable, str(runner), "green"],
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "affected-tests gate selected the changed modules" in completed.stdout
+    assert "full pytest suite would run" not in completed.stderr
+
+
 def test_gate_preview_trusts_its_worktree_before_running_the_hook(tmp_path: Path) -> None:
     """A generated mise config cannot block the prospective commit checks."""
     preview = importlib.import_module(_MODULE)

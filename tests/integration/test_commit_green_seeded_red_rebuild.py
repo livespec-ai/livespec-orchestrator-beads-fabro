@@ -115,6 +115,10 @@ def _commit_green(
     *, repo: Path, script: Path, resume_head: str | None
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
+    # These direct command-program fixtures exercise the no-rendered-title
+    # branch.  A factory run exports its publication title into the parent
+    # environment, which must not alter that fixture's intended command path.
+    env.pop("LIVESPEC_PR_TITLE", None)
     if resume_head is not None:
         env["LIVESPEC_RESUME_PUBLISHED_HEAD"] = resume_head
     return subprocess.run(
