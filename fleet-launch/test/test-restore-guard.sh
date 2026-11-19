@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# PROVISIONAL / EXPERIMENTAL — fleet-launch hermetic harness script for the fleet-launch check.
+# This directory is a stopgap; its first-class replacements are the livespec console
+# application and the committed launch-loop tool bd-ib-jr6w7v (see fleet-launch/README.md).
+#
 # The seat restore guard refuses a PLAIN ticket for an item whose earlier work still exists (an open factory PR on
 # feat/<item>, or a preserved-publish ref), because a plain ticket routes fresh and the reclaim closes that PR
 # (2026-11-18, bd-ib-xbw2yk). Hermetic: a local bare repo is the origin and `gh` is a stub on PATH.

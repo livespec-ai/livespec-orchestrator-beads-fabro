@@ -1,4 +1,8 @@
 #!/bin/bash
+# PROVISIONAL / EXPERIMENTAL — fleet-launch seat resume ticket.
+# This directory is a stopgap; its first-class replacements are the livespec console
+# application and the committed launch-loop tool bd-ib-jr6w7v (see fleet-launch/README.md).
+#
 # resume.sh <20-digit key> <repo-dir> <item>: start tmp/petri-canary/resume-capped.sh in its own systemd scope under
 # factory-dispatch.slice (dev-host-disk-retention 00:2xZ 11-14: a resumed run's dispatcher loop is one of the per-run
 # loops the slice is sized for). Same shape as ticket.sh: MemoryMax from the bound file, OOMPolicy=continue (systemd 257

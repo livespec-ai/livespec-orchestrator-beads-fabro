@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# PROVISIONAL / EXPERIMENTAL — fleet-launch signal supervisor for launcher children.
+# This directory is a stopgap; its first-class replacements are the livespec console
+# application and the committed launch-loop tool bd-ib-jr6w7v (see fleet-launch/README.md).
+#
 # Supervise launcher stop signals without making Bash parse a trap action. This
 # stays a shell file so a launcher copied for an on-disk re-exec carries its
 # supervisor with it.

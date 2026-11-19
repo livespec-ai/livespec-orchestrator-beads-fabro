@@ -1,4 +1,8 @@
 #!/bin/bash
+# PROVISIONAL / EXPERIMENTAL — fleet-launch seat seeded relaunch ticket.
+# This directory is a stopgap; its first-class replacements are the livespec console
+# application and the committed launch-loop tool bd-ib-jr6w7v (see fleet-launch/README.md).
+#
 # seeded-ticket.sh <item> <repo-dir> <full-ref> <expected-sha-prefix> <20-digit key> <reason...>: post-lift SEEDED relaunch (coordinator 3e750bae lift rules):
 # origin ref check -> empty-diff check vs merge base (must be NON-empty) -> seed ruling (read back) -> release to ready -> admission auto -> ticket.
 set -u; IT=$1; REPO=$2; REF=$3; SHA=$4; KEY=$5; shift 5; REASON="$*"

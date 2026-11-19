@@ -1,4 +1,8 @@
 #!/bin/bash
+# PROVISIONAL / EXPERIMENTAL — fleet-launch seat ticket for one guarded launch.
+# This directory is a stopgap; its first-class replacements are the livespec console
+# application and the committed launch-loop tool bd-ib-jr6w7v (see fleet-launch/README.md).
+#
 # ticket.sh <item> <repo-dir> <20-digit key>: one guarded gmktec ticket (seat 50a20bc8, post-reboot; coordinator load guard).
 # Guard: GO -> launch. HOLD on procs_running alone -> re-read after 60 s (max 30 tries). Memory HOLD -> exit 3 (holds the wave).
 set -u; ITEM=$1; REPO=$2; KEY=$3; SEAT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd); . "$SEAT_DIR/../config.sh"; L=$FLEET_LAUNCH_STATE_DIR; ORCH=$FLEET_LAUNCH_ORCH_REPO; GUARD=${SEAT_LOAD_GUARD:-$SEAT_DIR/load-guard.sh}

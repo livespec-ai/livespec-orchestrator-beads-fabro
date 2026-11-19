@@ -1,4 +1,8 @@
 #!/bin/bash
+# PROVISIONAL / EXPERIMENTAL — fleet-launch seat load guard read before each ticket.
+# This directory is a stopgap; its first-class replacements are the livespec console
+# application and the committed launch-loop tool bd-ib-jr6w7v (see fleet-launch/README.md).
+#
 # Load-guard reading for the dispatching host (originally measured on the vps, legacy-coordinator-agent, 2026-11-13 after the 15:53Z reboot).
 # Memory decides: the 2026-11-13 overload was memory exhaustion (kbmemfree ~450 MB, %commit 105%, 126 blocked).
 # CPU contention is the MEDIAN of 5 procs_running samples 1 s apart, so a burst of seats waking does not read as HOLD.
