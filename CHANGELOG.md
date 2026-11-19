@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.343.5](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.4...v0.343.5) (2026-11-19)
+
+
+### Bug Fixes
+
+* **fleet-launch:** restore-guard --fresh reads the plugin root from the resolver stdout only (bd-ib-2yibku) ([3304cca](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/3304ccab09e1d4ce22b3cfd9fedcadfe1ce28682))
+* red — the pre-commit hook accepts a Red commit that adds a failing fleet-launch scenario and still gates every other scenario (bd-ib-ganm6d) ([6a97cdd](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/6a97cdd829c1d47a11788fa1580d1eddf24dd2a9))
+
 ## [0.343.4](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.3...v0.343.4) (2026-11-19)
 
 
