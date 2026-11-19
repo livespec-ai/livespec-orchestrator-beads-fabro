@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.343.9](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.8...v0.343.9) (2026-11-19)
+
+
+### Bug Fixes
+
+* a pull-request read gh rejects field-by-field drops an optional field and retries, and blocks naming a field it cannot do without (bd-ib-o657q3) ([104619d](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/104619d72276aea87dc8a322f7217611441827cf))
+* an unreadable merge-queue answer reads as membership unknown, journaled, and a stranded handoff never reads unknown as the pull request leaving the queue (bd-ib-o657q3) ([f606b47](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/f606b4774bc52557f6bcc8e61d9fda10f5313345))
+
 ## [0.343.8](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.7...v0.343.8) (2026-11-19)
 
 
