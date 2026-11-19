@@ -40,6 +40,38 @@ def test_a_commit_gate_command_record_keeps_its_explicit_nonzero_exit_code() -> 
 
 
 @pytest.mark.parametrize(
+    ("record_key", "stage"),
+    [
+        ("044-commit_green@1", "commit_green@1"),
+        ("commit_green@1", "044-commit_green@1"),
+        ("044-commit_green@1", "045-commit_green@1"),
+    ],
+)
+def test_a_commit_gate_record_is_found_across_the_engines_stage_key_spellings(
+    *, record_key: str, stage: str
+) -> None:
+    payload = {
+        "stages": {
+            "043-commit_green@0": {
+                "handler": "command",
+                "state": "failed",
+                "output": "Failed targets (1):\n  - check-stale\n",
+            },
+            record_key: {
+                "handler": "command",
+                "state": "failed",
+                "output": "Failed targets (1):\n  - check-types\n",
+                "exit_code": 3,
+            },
+        }
+    }
+
+    assert hook_verdict_for(inspect=_inspect(payload=payload), stages=(stage,)) == HookVerdict(
+        node="commit_green", exit_code=3, failed_targets=("check-types",)
+    )
+
+
+@pytest.mark.parametrize(
     "payload",
     [
         [],

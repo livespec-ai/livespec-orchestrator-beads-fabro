@@ -184,7 +184,7 @@ def _commit_gate_verdict(*, payload: object | None, stage: str | None) -> HookVe
     if node not in _COMMIT_GATE_NODES:
         return None
     record = _inspect_record(payload=payload)
-    stage_record = _mapping(value=_mapping(value=record.get("stages")).get(stage))
+    stage_record = _stage_record(stages=_mapping(value=record.get("stages")), stage=stage)
     if stage_record.get("handler") != "command" or stage_record.get("state") != "failed":
         return None
     output = stage_record.get("output")
@@ -283,6 +283,24 @@ def _envelope_node(*, envelope: dict[str, object]) -> str:
 def _node_id(*, stage: str) -> str:
     """`implement` for `implement`, `implement@1` and `050-implement@1` alike."""
     return re.sub(r"^\d+-", "", stage.split("@", maxsplit=1)[0].strip())
+
+
+def _stage_record(*, stages: dict[str, object], stage: str) -> dict[str, object]:
+    """The record of `stage`'s visit, whichever ordinal prefix its key spells.
+
+    Petri keys records `044-commit_green@1` while the causal stage may read
+    `commit_green@1`; the node and the visit identify the record, not the ordinal.
+    """
+    wanted = _visit_key(stage=stage)
+    for key, record in stages.items():
+        if _visit_key(stage=key) == wanted:
+            return _mapping(value=record)
+    return {}
+
+
+def _visit_key(*, stage: str) -> str:
+    """`commit_green@1` for `commit_green@1` and `044-commit_green@1` alike."""
+    return re.sub(r"^\d+-", "", stage.strip())
 
 
 def _inspect_record(*, payload: object | None) -> dict[str, object]:
