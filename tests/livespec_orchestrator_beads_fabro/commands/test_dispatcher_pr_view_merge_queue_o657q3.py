@@ -9,6 +9,13 @@ from pathlib import Path
 import pytest
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
 from livespec_orchestrator_beads_fabro.commands._dispatcher_pr_view import view_pr
+from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_grade import (
+    HANDOFF_ENDED,
+    HANDOFF_UNOBSERVABLE,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_handoff import (
+    observe_handoff,
+)
 
 from tests.integration.test_merge_poll_budget_exhausted_scenario220 import _Journal, _plan
 
@@ -83,3 +90,22 @@ def test_a_missing_or_unreadable_queue_answer_reads_as_not_queued(
     answer: CommandResult, tmp_path: Path
 ) -> None:
     assert _read(queue_result=answer, tmp_path=tmp_path) is False
+
+
+def _handoff_kind(*, answer: CommandResult, tmp_path: Path) -> str:
+    return observe_handoff(
+        plan=_plan(repo=tmp_path),
+        pr_number=299,
+        runner=_Forge(queue_result=answer),
+        journal=_Journal(),
+    ).kind
+
+
+def test_a_stranded_handoff_never_reads_unknown_membership_as_the_pull_request_leaving_the_queue(
+    tmp_path: Path,
+) -> None:
+    unreadable = CommandResult(exit_code=1, stdout="", stderr="HTTP 502")
+    absent = CommandResult(exit_code=0, stdout=_queue_answer(entry=None), stderr="")
+
+    assert _handoff_kind(answer=unreadable, tmp_path=tmp_path) == HANDOFF_UNOBSERVABLE
+    assert _handoff_kind(answer=absent, tmp_path=tmp_path) == HANDOFF_ENDED

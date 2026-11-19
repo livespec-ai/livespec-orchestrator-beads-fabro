@@ -185,6 +185,10 @@ def observe_handoff(
             pr_head=view.head,
             merge_sha=view.merge_sha,
         )
+    if view.state == "OPEN" and view.merge_queue_unknown and not view.auto_merge_armed:
+        # Membership could not be read: the pull request is not provably out of the queue, so it
+        # is never reported as ended on a reading that cannot say.
+        return HandoffReading(kind=HANDOFF_UNOBSERVABLE, plan=plan, pr_number=number)
     if view.state == "CLOSED" or (
         view.state == "OPEN" and not (view.auto_merge_armed or view.merge_queue_entry)
     ):

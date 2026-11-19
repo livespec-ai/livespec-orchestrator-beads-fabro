@@ -64,6 +64,11 @@ class PrView:
     `merge_queue_entry` is true when the forge reports that the pull request is
     in the merge queue. GitHub clears `autoMergeRequest` once that happens, but
     the queued pull request remains on the same path to merge.
+
+    `merge_queue_unknown` is true when the membership read was taken and could not be answered (a
+    failed, unparseable or oddly shaped answer). It is a third state beside queued and not queued,
+    never folded into "not queued": a caller that would conclude a pull request left the queue must
+    treat unknown as "not provably queued" and decline that conclusion.
     """
 
     number: int
@@ -72,6 +77,7 @@ class PrView:
     merge_state_status: str
     merge_sha: str | None
     merge_queue_entry: bool = False
+    merge_queue_unknown: bool = False
     diff_size: int | None = None
     head: str | None = None
     base: str | None = None

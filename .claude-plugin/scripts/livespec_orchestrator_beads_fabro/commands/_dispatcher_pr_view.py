@@ -112,7 +112,16 @@ def view_pr(
     view = parse_pr_view(stdout=result.stdout)
     if view is not None and _queue_read_wanted(view=view):
         queued = _merge_queue_entry(plan=plan, number=view.number, runner=runner, journal=journal)
-        if queued:
+        if queued is None:
+            journal.append(
+                record={
+                    "work_item_id": plan.work_item_id,
+                    "stage": "pr-merge-queue-unknown",
+                    "pr_number": view.number,
+                }
+            )
+            view = replace(view, merge_queue_unknown=True)
+        elif queued:
             view = replace(view, merge_queue_entry=True)
     return PrViewReading(
         view=view,
@@ -135,13 +144,13 @@ def _merge_queue_entry(
     number: int,
     runner: CommandRunner,
     journal: JournalWriter,
-) -> bool:
-    """True when the forge reports a merge-queue entry for the pull request.
+) -> bool | None:
+    """True or False when the forge answers, None when the answer cannot be read.
 
     `gh pr view --json` has no queue-entry field (gh 2.96.0 refuses `mergeQueueEntry`), so the
     entry is read from GraphQL `pullRequest.mergeQueueEntry`. A read that fails or answers in
-    an unexpected shape reads as not queued: the view it supplements has already been taken,
-    and the failed read is journaled under its own stage.
+    an unexpected shape is UNKNOWN (None), never "not queued": the caller marks the view and
+    journals it, so no plausible wrong answer goes unreported.
     """
     result = runner.run(
         argv=merge_queue_entry_argv(number=number),
@@ -150,14 +159,14 @@ def _merge_queue_entry(
     )
     journal_stage(journal=journal, plan=plan, stage="pr-merge-queue", result=result)
     if result.exit_code != 0:
-        return False
+        return None
     parsed = parse_json(text=result.stdout)
     if isinstance(parsed, JsonParseFailure):
-        return False
+        return None
     node: object = parsed
     for key in ("data", "repository", "pullRequest", "mergeQueueEntry"):
         if not isinstance(node, dict):
-            return False
+            return None
         node = cast("dict[str, object]", node).get(key)
     return node is not None
 
