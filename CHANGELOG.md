@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.343.2](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.1...v0.343.2) (2026-11-19)
+
+
+### Bug Fixes
+
+* red — a seed ruling naming a stale seed is reseeded onto the default branch tip (bd-ib-nlofrn) ([b459107](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/b45910760894cc860a4ec9c664b625b20afc9b88))
+
 ## [0.343.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.0...v0.343.1) (2026-11-18)
 
 
