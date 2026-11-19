@@ -29,6 +29,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from livespec_orchestrator_beads_fabro.commands import (
+    _dispatcher_definition_of_done_setting_checks as setting_checks,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done import (
     PROOF_MODE_HOST_CAPTURED,
     PROOF_MODE_HUMAN_ATTESTED,
@@ -76,6 +79,7 @@ def definition_of_done_findings(
     item: WorkItem,
     cwd: Path,
     include_goal_template_openers: bool = True,
+    pinned_setting_checks: setting_checks.NamedSettingCheckResult | None = None,
 ) -> tuple[str, ...]:
     """Every mechanical Definition-of-Done finding for one item, or an empty tuple.
 
@@ -93,6 +97,12 @@ def definition_of_done_findings(
     if not section.references:
         findings.append(_absent_reference_line_finding(item=item))
     findings.extend(_reference_findings(item=item, references=section.references, cwd=cwd))
+    resolved_setting_checks = (
+        setting_checks.named_setting_checks(item=item, cwd=cwd)
+        if pinned_setting_checks is None
+        else pinned_setting_checks
+    )
+    findings.extend(resolved_setting_checks.findings)
     findings.extend(
         _malformed_proof_mode_finding(item=item, sub_heading=sub_heading)
         for sub_heading in section.malformed_proof_modes
