@@ -15,9 +15,6 @@ from pathlib import Path
 
 import pytest
 from livespec_orchestrator_beads_fabro._beads_client import FakeBeadsClient, make_beads_client
-from livespec_orchestrator_beads_fabro.commands._dispatcher_publish_branch_liveness import (
-    ItemRunLiveness,
-)
 from livespec_orchestrator_beads_fabro.commands._drive_valves import run_human_valve_action
 from livespec_orchestrator_beads_fabro.store import append_work_item
 from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
@@ -321,7 +318,10 @@ def test_hold_is_refused_naming_the_merge_when_the_pull_request_already_merged(
 ) -> None:
     repo = _repo(tmp_path)
     runner = _Runner(
-        results=[_Run(returncode=0, stdout=_pr_json(state="MERGED", merge_sha="abc1234"))]
+        results=[
+            _Run(returncode=0, stdout=_pr_json(state="MERGED", merge_sha="abc1234")),
+            _Run(returncode=0, stdout=_ps_json()),
+        ]
     )
 
     result = run_human_valve_action(
@@ -332,28 +332,25 @@ def test_hold_is_refused_naming_the_merge_when_the_pull_request_already_merged(
     assert result["domain_error"] == "already-merged"
     assert "#7" in str(result["summary"])
     assert "abc1234" in str(result["summary"])
-    assert runner.calls == [_view_argv()]
+    assert len(runner.calls) == 2
+    assert runner.calls[0] == _view_argv()
 
 
 def test_hold_binds_to_a_live_runs_coming_pull_request_before_an_earlier_one_merged(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     """A live run gives the hold a future PR even when its branch's prior PR merged.
 
-    The liveness fixture is deliberately measured rather than merely assumed from
-    the item being active: only a live run promises another `pr` stage, so only
-    that state must win over the merged pull-request view.
+    Liveness is read through the valve's injected runner, the single command seam:
+    only a live run promises another `pr` stage, so only that measured state wins
+    over the merged pull-request view.
     """
     repo = _repo(tmp_path)
-    valve = importlib.import_module(_VALVE_MODULE)
-    monkeypatch.setattr(
-        valve,
-        "observe_item_run_liveness",
-        lambda **_kwargs: ItemRunLiveness(live_run_ids=("01MLIVE",), observed=True),
-        raising=False,
-    )
     runner = _Runner(
-        results=[_Run(returncode=0, stdout=_pr_json(state="MERGED", merge_sha="abc1234"))]
+        results=[
+            _Run(returncode=0, stdout=_pr_json(state="MERGED", merge_sha="abc1234")),
+            _Run(returncode=0, stdout=_ps_json(run_ids=("01MLIVE",))),
+        ]
     )
 
     result = run_human_valve_action(
@@ -362,12 +359,18 @@ def test_hold_binds_to_a_live_runs_coming_pull_request_before_an_earlier_one_mer
 
     assert result["status"] == "green", result
     assert _held()
-    assert runner.calls == [_view_argv()]
+    assert len(runner.calls) == 2
+    assert runner.calls[0] == _view_argv()
 
 
 def test_hold_refusal_names_the_pull_request_even_with_no_merge_commit(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    runner = _Runner(results=[_Run(returncode=0, stdout=_pr_json(state="MERGED"))])
+    runner = _Runner(
+        results=[
+            _Run(returncode=0, stdout=_pr_json(state="MERGED")),
+            _Run(returncode=0, stdout=_ps_json()),
+        ]
+    )
 
     result = run_human_valve_action(
         repo=repo, action_id=f"set-merge-hold:{_ITEM_ID}:on", runner=runner
