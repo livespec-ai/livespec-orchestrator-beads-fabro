@@ -135,6 +135,14 @@ def test_gate_preview_runs_the_hook_against_a_disposable_staged_tree_and_unsets_
     )
     assert _git(repo=repo, env=env, argv=["log", "--format=%H"]) == before_history
     assert _git(repo=repo, env=env, argv=["diff", "--cached", "--name-only"]) == ""
+    assert (
+        json.loads(
+            (repo / ".git" / "livespec-implement-gate-preview-green-result.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        == report
+    )
 
 
 def test_gate_preview_trusts_its_worktree_before_running_the_hook(tmp_path: Path) -> None:
