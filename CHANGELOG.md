@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.343.7](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.6...v0.343.7) (2026-11-19)
+
+
+### Bug Fixes
+
+* a commit-refusal brief names each LLOC soft-band file the failed target reported (bd-ib-splwtk) ([1f5418e](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/1f5418e24b8bc7383753e536c75b6d1e19826a6e))
+* the sandbox gh wrapper runs its mint helper outside coverage's subprocess hook (bd-ib-ompbgu) ([08c0b06](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/08c0b063d7cf6b308cc00a1216d609ed466c51d2))
+
 ## [0.343.6](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.5...v0.343.6) (2026-11-19)
 
 
