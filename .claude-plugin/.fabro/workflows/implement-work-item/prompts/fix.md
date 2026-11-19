@@ -376,6 +376,24 @@ must name EACH failed test together with its result on the default branch's tree
 and its result on this run's tree. An untested target, or a target whose result on either tree is unknown,
 is not evidence of inherited attribution.
 
+## A janitor failure in another item's test rests at needs-human
+
+Never edit a test merely to clear a janitor or refresh-repair failure. Before
+editing a test in this repair turn, establish that this item's already-recorded
+branch change touched it: run `git diff --name-only
+origin/{{ inputs.default_branch }}...HEAD -- tests/` before staging the repair.
+The staged edit itself is not ownership evidence.
+
+When a failed test is absent from that list, preserve it unchanged. Identify
+the owning work item from the latest default-branch commit that changed it
+(`git log -1 origin/{{ inputs.default_branch }} --format='%h %s' -- <test>`),
+and end with the needs-human protocol. Your failure reason must name both the
+failing test and that commit's work-item identifier; do not guess an owner. If
+the default-branch history names no work-item identifier, say that ownership
+could not be established and ask a human to assign it. The commit hook refuses
+such an edit before recording it; do not retry by weakening, replacing, or
+restaging the other item's test.
+
 ## A commit hook outlasts a tool call — a return is not a verdict
 
 This repository's commit hook runs its whole declared check suite, so on a

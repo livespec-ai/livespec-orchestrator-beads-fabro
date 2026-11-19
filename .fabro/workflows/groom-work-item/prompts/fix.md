@@ -52,6 +52,10 @@ things, reporting exactly one:
 - Fix ONLY the refused condition. Do not re-draft a cut the gate did not
   object to, and do not widen the decomposition while you are here.
 - Do not modify any tracked file, and do not commit, push, or branch.
+- If a failure names a test owned by another work item, do not edit that test.
+  Identify its owner from the latest default-branch commit that changed it and
+  use the needs-human protocol naming both the test and the owner's work-item
+  identifier; never guess the owner or weaken the test to clear the failure.
 - File nothing. Do not call the filing seam and do not run any `bd`
   write command; this node cannot file and must not try.
 - `{{ inputs.sandbox_check_suite }}` is this repository's declared check

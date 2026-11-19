@@ -500,6 +500,7 @@ digraph GroomWorkItem {
     conformance -> review [label="Conformant", condition="outcome=succeeded"]
     conformance -> fix [label="Malformed", condition="outcome!=succeeded && context.internal.node_visit_count < 3"]
     conformance -> non_converged [label="Exhausted (conformance loop cap)"]
+    fix -> needs_human [label="Blocked", condition="outcome=failed", weight=100]
     fix -> conformance
 
     // Review routing, on `preferred_label` alone. The fix-round bound is
@@ -520,6 +521,7 @@ digraph GroomWorkItem {
     disposition -> review_fix [label="fix accepted", condition="preferred_label=fix"]
     disposition -> review     [label="all rejected", condition="preferred_label=all_rejected"]
     disposition -> needs_human [label="unmatched disposition outcome"]
+    review_fix -> needs_human [label="Blocked", condition="outcome=failed", weight=100]
     review_fix -> conformance
 
     // The two endings. Apply publishes its filing plan; propose parks with its

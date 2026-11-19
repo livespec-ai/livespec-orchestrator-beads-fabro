@@ -203,6 +203,28 @@ def test_a_red_commit_keeps_its_fast_path_in_an_authoring_turn(*, tmp_path: Path
     assert calls == [_RED_MODE]
 
 
+@pytest.mark.parametrize("stage", ["fix", "review_fix"])
+def test_a_fix_turn_cannot_commit_a_test_its_item_did_not_touch(
+    *, tmp_path: Path, stage: str
+) -> None:
+    """A foreign test is not a Red test for a repair turn and the hook refuses it.
+
+    The item has no prior change to this test in the throwaway repository, so
+    staging it during either repair turn models a janitor failure in another
+    item's test.  A successful Red fast-path would let the repair weaken that
+    test before the next janitor can name its owner.
+    """
+    foreign_test = "tests/test_another_items_contract.py"
+    done, _ = _hook(
+        tmp_path=tmp_path,
+        staged={foreign_test: "def test_another_items_contract() -> None:\n    assert False\n"},
+        extra={"LIVESPEC_AUTHORING_TURN": stage},
+    )
+
+    assert done.returncode != 0
+    assert foreign_test in done.stderr
+
+
 def test_a_workflow_graph_change_runs_the_doc_only_gates_then_the_graph_reading_tests(
     *, tmp_path: Path
 ) -> None:

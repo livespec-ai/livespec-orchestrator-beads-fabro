@@ -38,6 +38,10 @@ review. Keep ` ;; ` between slices and ` | ` between a slice's fields.
   from the approved cut, that is a human's decision, not yours — use the
   needs-human protocol below.
 - Do not modify any tracked file. Do not commit, push, or branch.
+- If a failure names a test owned by another work item, do not edit that test.
+  Identify its owner from the latest default-branch commit that changed it and
+  use the needs-human protocol naming both the test and the owner's work-item
+  identifier; never guess the owner or weaken the test to clear the failure.
 - File nothing. Do not call the filing seam and do not run any `bd`
   write command.
 

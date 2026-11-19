@@ -135,6 +135,38 @@ test_count=0
 impl_count=0
 [[ -n "$test_staged" ]] && test_count=$(echo "$test_staged" | wc -l)
 [[ -n "$impl_staged" ]] && impl_count=$(echo "$impl_staged" | wc -l)
+# A repair turn may finish a Red test that this item already introduced, but it
+# may not turn an unrelated janitor failure into a new Red of another item's
+# test.  The item's already-recorded branch diff is the only evidence of that
+# ownership: accepting the staged test itself would let the repair turn claim
+# any test merely by staging it.  `check-changed` below needs the same
+# `origin/master` comparison, so a missing or unreadable base fails closed here
+# as an empty owned-test set rather than granting the Red fast path.
+if [[ "${LIVESPEC_AUTHORING_TURN:-}" =~ ^(fix|review_fix)$ ]] && [[ -n "$test_staged" ]]; then
+    owned_tests=$(git diff --name-only origin/master...HEAD -- tests/ 2>/dev/null || true)
+    # A newly-added test is part of this item's own change, rather than a
+    # pre-existing test a janitor failure might tempt the repair to weaken.
+    # In a throwaway or otherwise unanchored repository, fail closed instead:
+    # there is no default-branch tree from which that distinction is knowable.
+    if git rev-parse --verify --quiet origin/master >/dev/null; then
+        existing_default_tests=$(while IFS= read -r test_path; do
+            test -n "$test_path" || continue
+            if git cat-file -e "origin/master:$test_path" 2>/dev/null; then
+                printf '%s\n' "$test_path"
+            fi
+        done <<<"$test_staged")
+    else
+        existing_default_tests=$test_staged
+    fi
+    foreign_tests=$(comm -23 \
+        <(printf '%s\n' "$existing_default_tests" | sed '/^$/d' | sort -u) \
+        <(printf '%s\n' "$owned_tests" | sed '/^$/d' | sort -u))
+    if [[ -n "$foreign_tests" ]]; then
+        echo "LIVESPEC_FOREIGN_REPAIR_TEST: $LIVESPEC_AUTHORING_TURN may not edit a test this item did not already touch: $foreign_tests" >&2
+        echo ":: preserve the named test; identify its owning work item from origin/master and end at needs-human" >&2
+        exit 1
+    fi
+fi
 head_msg=$(git log -1 --format=%B 2>/dev/null || true)
 red_test_staged=$(git diff-tree --no-commit-id --name-only --diff-filter=AM -r HEAD -- tests/ \
     | grep -E '^tests/.*\.py$' || true)
