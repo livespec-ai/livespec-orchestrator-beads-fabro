@@ -22,6 +22,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_wall i
     dod_unrefused_candidates,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_loop_selection import ready_items
+from livespec_orchestrator_beads_fabro.commands._spec_change_tier_ready_withdrawal import (
+    withdraw_durable_spec_change_holds,
+)
 from livespec_orchestrator_beads_fabro.commands._spec_change_tier_wall import (
     spec_change_unrefused_candidates,
 )
@@ -30,6 +33,7 @@ if TYPE_CHECKING:
     import argparse
     from pathlib import Path
 
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_types import JournalWriter
     from livespec_orchestrator_beads_fabro.types import WorkItem
 
 __all__: list[str] = ["candidates"]
@@ -40,6 +44,7 @@ def candidates(
     args: argparse.Namespace,
     items: list[WorkItem],
     repo: Path,
+    journal: JournalWriter | None = None,
 ) -> list[WorkItem]:
     """The drain's selection for one pass, in the canonical ranked order.
 
@@ -58,22 +63,21 @@ def candidates(
     implement-kind item and a groom candidate exempted by one of them while the
     other dropped it would be invisible to the drain either way.
 
-    It then drops every row a recorded spec-change tier HOLDS for its linked
-    proposal's ratification. That third filter takes no judgement either and
-    reaches no provider at all — the hold is a read of the spec history — and it
-    is what keeps one held item at the head of the ranking from stopping the
-    queue behind it: the wall row that carries the same decision refuses the
-    WHOLE selection, so without this filter the drain would keep picking a row
-    that cannot run until its linked proposal ratifies.
+    Before that filter, a durable recorded spec-change hold (no linked topic or
+    an unratified topic) is journaled back to `backlog` with its reason.  That
+    makes the intake door, rather than a permanently unlaunchable `ready` row,
+    own its later release.  The filter remains the launch backstop for a claim
+    race and for a row awaiting re-judgement; the latter stays `ready` so the
+    wall can re-classify it against the ratified specification.
 
-    A NAMED id is narrowed to and deliberately NOT filtered. The clause keeps the
-    hand-picked path protected by the wall "even when candidate enumerations
-    filtered the item earlier", and that only holds if the named row still
-    reaches it — dropping it here would report the drain as having nothing to do
-    for an id the operator typed, which is the absence-reads-as-resolution
-    failure the attention contract forbids.
+    A NAMED id is narrowed to and deliberately NOT filtered, after the durable
+    hold repair above. The clause keeps the hand-picked path protected by the
+    wall "even when candidate enumerations filtered the item earlier", and that
+    only holds if a row not returned to intake still reaches it.
     """
     ranked = ready_items(items=items, repo=repo)
+    if journal is not None:
+        ranked = withdraw_durable_spec_change_holds(items=ranked, repo=repo, journal=journal)
     requested = set(args.items or [])
     if requested:
         return [item for item in ranked if item.id in requested]
