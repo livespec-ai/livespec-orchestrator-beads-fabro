@@ -34,7 +34,7 @@ id is never the leading part of another's.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
@@ -48,6 +48,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_publish_branch_prese
 
 __all__: list[str] = [
     "JOURNAL_STAGE_DELETION_FAILED",
+    "RefListingCache",
     "delete_closed_item_refs",
     "delete_ended_run_refs",
 ]
@@ -59,6 +60,7 @@ _NEEDS_HUMAN_REF_PREFIX = "refs/heads/needs-human"
 _FORGE_TIMEOUT_SECONDS = 120.0
 _DETAIL_EXCERPT_CHARS = 2000
 _MATCHING_REFS_ENDPOINT = "/repos/{owner}/{repo}/git/matching-refs"
+_LIST_CACHE_TTL = "1h"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -67,6 +69,19 @@ class _Target:
 
     prefix: str
     exact: bool
+
+
+@dataclass(kw_only=True)
+class RefListingCache:
+    """One collection pass's namespace readings.
+
+    A closed item can have several ended runs.  Its preserved-publish namespace
+    is shared by all of them, so each pass reads that namespace once and lets
+    the later runs reuse the result.  ``None`` is a remembered refused listing:
+    it prevents a transient forge failure from being amplified once per run.
+    """
+
+    readings: dict[_Target, list[str] | None] = field(default_factory=dict)
 
 
 def delete_closed_item_refs(
@@ -93,6 +108,7 @@ def delete_ended_run_refs(
     journal: JournalWriter,
     work_item_id: str,
     run_id: str,
+    listing_cache: RefListingCache | None = None,
 ) -> bool:
     """Delete an ended run's refs and its closed item's preserved-publish refs."""
     return _delete(
@@ -100,6 +116,7 @@ def delete_ended_run_refs(
         repo=repo,
         journal=journal,
         work_item_id=work_item_id,
+        listing_cache=listing_cache,
         targets=(
             _Target(prefix=f"{_WIP_REF_PREFIX}/{work_item_id}/{run_id}/", exact=False),
             _Target(prefix=f"{PRESERVED_PUBLISH_REF_PREFIX}/{work_item_id}/", exact=False),
@@ -122,16 +139,22 @@ def _delete(
     journal: JournalWriter,
     work_item_id: str,
     targets: tuple[_Target, ...],
+    listing_cache: RefListingCache | None = None,
 ) -> bool:
     complete = True
     for target in targets:
         refs = _listed(
-            runner=runner, repo=repo, journal=journal, work_item_id=work_item_id, target=target
+            runner=runner,
+            repo=repo,
+            journal=journal,
+            work_item_id=work_item_id,
+            target=target,
+            listing_cache=listing_cache,
         )
         if refs is None:
             complete = False
             continue
-        for ref in refs:
+        for ref in tuple(refs):
             deleted = runner.run(
                 argv=delete_ref_argv(ref=ref), cwd=repo, timeout_seconds=_FORGE_TIMEOUT_SECONDS
             )
@@ -145,6 +168,10 @@ def _delete(
                     exit_code=deleted.exit_code,
                     detail=deleted.stderr,
                 )
+            elif listing_cache is not None:
+                cached = listing_cache.readings.get(target)
+                if cached is not None:
+                    cached.remove(ref)
     return complete
 
 
@@ -155,14 +182,19 @@ def _listed(
     journal: JournalWriter,
     work_item_id: str,
     target: _Target,
+    listing_cache: RefListingCache | None = None,
 ) -> list[str] | None:
     """The refs origin carries under `target`, or None when the forge refused to list."""
+    if listing_cache is not None and target in listing_cache.readings:
+        return listing_cache.readings[target]
     result = runner.run(
         argv=[
             "gh",
             "api",
             "--paginate",
             f"{_MATCHING_REFS_ENDPOINT}/{target.prefix.removeprefix('refs/')}",
+            "--cache",
+            _LIST_CACHE_TTL,
             "--jq",
             ".[].ref",
         ],
@@ -178,9 +210,14 @@ def _listed(
             exit_code=result.exit_code,
             detail=result.stderr,
         )
+        if listing_cache is not None:
+            listing_cache.readings[target] = None
         return None
     listed = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-    return [ref for ref in listed if ref == target.prefix] if target.exact else listed
+    refs = [ref for ref in listed if ref == target.prefix] if target.exact else listed
+    if listing_cache is not None:
+        listing_cache.readings[target] = refs
+    return refs
 
 
 def _journal_failure(

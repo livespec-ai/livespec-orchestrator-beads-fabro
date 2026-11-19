@@ -40,6 +40,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_journal_tail import 
     journal_tail_records,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_preservation_ref_deletion import (
+    RefListingCache,
     delete_ended_run_refs,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_runs_attribution import (
@@ -102,6 +103,7 @@ def collect_closed_ended_runs(
     """
     if not dry_run:
         prune_expired_exports(repo=repo, now_epoch=time.time())
+    ref_listings = RefListingCache()
     for row in attributed_runs(inventory=inventory, include_terminal=True):
         if inventory.only_work_item_id not in (None, row.work_item_id):
             continue
@@ -117,6 +119,7 @@ def collect_closed_ended_runs(
             journal=journal,
             work_item_id=row.work_item_id,
             run_id=row.run.run_id,
+            listing_cache=ref_listings,
         ):
             continue
         _journal_export(inventory=inventory, port=port, repo=repo, journal=journal, row=row)
