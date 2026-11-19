@@ -131,13 +131,31 @@ def skipped_environment():
     return environment, names
 
 
+def preview_parent():
+    """The directory the disposable worktree is made in, never the system temp directory.
+
+    The fleet's coverage configuration omits /tmp/* so the tests' own scratch directories
+    are not measured, so a worktree under it has every source file omitted: coverage
+    collects nothing and reports 0% (bd-ib-2j5k74). LIVESPEC_GATE_PREVIEW_ROOT names the
+    directory; otherwise it is below the home directory.
+    """
+    named = os.environ.get("LIVESPEC_GATE_PREVIEW_ROOT")
+    try:
+        parent = Path(named) if named else Path.home() / ".livespec-gate-preview"
+        parent.mkdir(parents=True, exist_ok=True)
+    except (OSError, RuntimeError) as error:
+        print("gate preview parent directory unusable: " + str(error), file=sys.stderr)
+        return None
+    return str(parent)
+
+
 def preview(stage, test_file):
     root = Path(git("rev-parse", "--show-toplevel", cwd=Path.cwd()).stdout.strip())
     base = dispatch_base(root)
     paths = selected_paths(stage, root, test_file, base)
     if not paths:
         return 2, [], [], False
-    preview_root = Path(tempfile.mkdtemp(prefix="livespec-gate-preview-"))
+    preview_root = Path(tempfile.mkdtemp(prefix="livespec-gate-preview-", dir=preview_parent()))
     unset = []
     try:
         git("worktree", "add", "--detach", "--quiet", str(preview_root), base, cwd=root)
