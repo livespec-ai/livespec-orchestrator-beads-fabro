@@ -76,6 +76,8 @@ from livespec_orchestrator_beads_fabro.commands._node_timeouts import NodeTimeou
 from livespec_orchestrator_beads_fabro.store import append_work_item
 from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 
+from tests.merge_queue_support import merge_queue_read_answer
+
 _HELD_LABEL = f"{MERGE_HOLD_LABEL_PREFIX}on"
 _DECLARED_CONFIG = '{"livespec-orchestrator-beads-fabro": {"compat": {"pinned": "master"}}}'
 _TENANT_CONFIG = """{
@@ -166,6 +168,9 @@ class _Runner:
         env: dict[str, str] | None = None,
         stdin: int | None = None,
     ) -> CommandResult:
+        queue_read = merge_queue_read_answer(argv=argv)
+        if queue_read is not None:
+            return queue_read
         _ = (cwd, timeout_seconds, env, stdin)
         self.calls.append(argv)
         return self.queue.pop(0)
@@ -354,11 +359,11 @@ def test_the_fallback_arming_never_fires_for_a_held_pull_request(tmp_path: Path)
             # `headRefOid,baseRefOid` ride it for the same reason and for the
             # overtaken-arming record, which names the head that was armed and
             # the default-branch tip that overtook it (`bd-ib-3hpdvm`).
-            "number,state,autoMergeRequest,mergeQueueEntry,mergeStateStatus,mergeCommit,"
+            "number,state,autoMergeRequest,mergeStateStatus,mergeCommit,"
             "additions,deletions,headRefOid,baseRefOid",
         ]
     ]
-    assert [record["stage"] for record in journal.records] == ["pr-view"]
+    assert [record["stage"] for record in journal.records] == ["pr-view", "pr-merge-queue"]
 
 
 def test_a_held_run_terminates_green_at_the_pr_stage_and_never_waits(tmp_path: Path) -> None:

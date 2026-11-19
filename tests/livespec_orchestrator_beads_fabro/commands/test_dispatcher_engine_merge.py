@@ -19,6 +19,8 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import (
     build_plan,
 )
 
+from tests.merge_queue_support import merge_queue_read_answer
+
 # A DECLARED janitor-core pin: an undeclared one, or an unresolved default
 # branch, degrades the post-merge flow before any of these cases is reached.
 _DECLARED_CONFIG = '{"livespec-orchestrator-beads-fabro": {"compat": {"pinned": "master"}}}'
@@ -52,6 +54,9 @@ class Runner:
         timeout_seconds: float,
         env: dict[str, str] | None = None,
     ) -> CommandResult:
+        queue_read = merge_queue_read_answer(argv=argv)
+        if queue_read is not None:
+            return queue_read
         assert timeout_seconds > 0
         self.calls.append((argv, cwd))
         self.envs.append(env)
@@ -112,6 +117,7 @@ def test_confirm_pr_arms_auto_merge_when_needed(tmp_path: Path) -> None:
     assert runner.calls[1][0][:3] == ["gh", "pr", "merge"]
     assert [record["stage"] for record in journal.records] == [
         "pr-view",
+        "pr-merge-queue",
         "pr-arm-fallback",
         "pr-view",
     ]
@@ -142,6 +148,7 @@ def test_confirm_pr_rearms_without_delete_branch_when_a_merge_queue_refuses_it(
     ]
     assert [record["stage"] for record in journal.records] == [
         "pr-view",
+        "pr-merge-queue",
         "pr-arm-fallback",
         "pr-arm-fallback",
         "pr-view",

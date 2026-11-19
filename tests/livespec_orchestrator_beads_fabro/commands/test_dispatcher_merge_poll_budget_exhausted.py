@@ -43,6 +43,8 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import Dispatch
 from livespec_orchestrator_beads_fabro.store import append_work_item, read_work_items
 from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 
+from tests.merge_queue_support import merge_queue_read_answer
+
 _DECLARED_CONFIG = '{"livespec-orchestrator-beads-fabro": {"compat": {"pinned": "master"}}}'
 _ITEM_ID = "bd-ib-exhausted"
 _RUN_ID = "01M62WN80GEFPBFVFT5XHZN27P"
@@ -78,6 +80,9 @@ class _Runner:
         timeout_seconds: float,
         env: dict[str, str] | None = None,
     ) -> CommandResult:
+        queue_read = merge_queue_read_answer(argv=argv)
+        if queue_read is not None:
+            return queue_read
         _ = (cwd, env)
         assert timeout_seconds > 0
         self.calls.append(argv)
