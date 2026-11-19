@@ -172,6 +172,16 @@ COVERAGE_ROW = re.compile(
 )
 BELOW_COVERAGE_EVENT = "file below 100% coverage"
 LLOC_EVENT_PREFIX = "file LLOC exceeds"
+# The aggregate prints each target's own section behind this header, and its summary last.
+TARGET_SECTION_HEADER = re.compile(r"^::: just (\S+)")
+SUMMARY_MARKER = "--- parallel check summary ---"
+LINT_TYPE_TARGETS = frozenset({"check-lint", "check-types"})
+# A lint or type finding line: `path.py:LINE[:COL]` then `: CODE ...` (ruff) or
+# ` - error: ...` (pyright).
+FINDING_LINE = re.compile(
+    r"^\s*(?P<file>\S+\.py):(?P<line>\d+)(?::\d+)?\s*[:-]\s*(?P<message>\S.*?)\s*$"
+)
+FINDING_MESSAGE_CAP = 160
 
 
 class RunnerRefusal(Exception):
@@ -719,16 +729,79 @@ def event_file(event, coverage, lloc):
     return None
 
 
+def target_sections(text):
+    """Each target's own section of the aggregate output, by target name.
+
+    A section runs from its `::: just <target>` header to the next header, and no
+    further than the summary or the `Failed targets` list that the aggregate prints
+    last, so the per-target timing table never counts as a target's own lines. A name
+    printed twice keeps its last section; trailing blank lines are dropped.
+    """
+    lines = text.splitlines()
+    limit = len(lines)
+    for index, line in enumerate(lines):
+        if line.startswith(SUMMARY_MARKER) or FAILED_TARGETS_HEADER.match(line):
+            limit = index
+            break
+    sections = {}
+    current = None
+    for line in lines[:limit]:
+        header = TARGET_SECTION_HEADER.match(line)
+        if header is not None:
+            current = header.group(1)
+            sections[current] = []
+        elif current is not None:
+            sections[current].append(line)
+    for body in sections.values():
+        while body and not body[-1].strip():
+            body.pop()
+    return sections
+
+
+def failed_target_output(text, targets):
+    """Each failed target's own last lines, headed by its name, or "" without sections.
+
+    Taken from the full recorded output, never from its final lines, so output that
+    ends in the per-target timing table still yields what each failed target printed.
+    """
+    sections = target_sections(text)
+    if not sections:
+        return ""
+    blocks = []
+    for target in targets:
+        if target not in sections:
+            blocks.append("::: just " + target + " (no section in the output)")
+            continue
+        blocks.append("\n".join(["::: just " + target, *sections[target][-BRIEF_TAIL_LINES:]]))
+    return "\n".join(blocks)
+
+
+def lint_type_files(text, targets):
+    """The file and line of each finding a failed lint or type target printed."""
+    sections = target_sections(text)
+    found = {}
+    for target in targets:
+        if target not in LINT_TYPE_TARGETS:
+            continue
+        for line in sections.get(target, []):
+            finding = FINDING_LINE.match(line)
+            if finding is not None:
+                name = finding.group("file") + ":" + finding.group("line")
+                found.setdefault(name, finding.group("message")[:FINDING_MESSAGE_CAP])
+    return found
+
+
 def failing_files(text, targets):
     """Each failing file the failed targets' own reports name, first mention first.
 
     Only a failed target's kind of report is read, so a coverage table printed by a
     target that passed is never named; a table row's uncovered lines refine the
-    per-file coverage check's count for the same file.
+    per-file coverage check's count for the same file. A failed lint or type target
+    names the file and line of each finding in its own section.
     """
     coverage = bool(COVERAGE_TARGETS.intersection(targets))
     lloc = bool(LLOC_TARGETS.intersection(targets))
-    found = {}
+    found = lint_type_files(text, targets)
     for line in text.splitlines():
         row = coverage_row_file(line) if coverage else None
         if row is None:
@@ -876,8 +949,10 @@ def brief_text(run_id, path, record, state, timeout_seconds):
             + tail
             + "\n"
         )
+    target_output = failed_target_output(output, targets_for_refusal(output))
     return (
         failing_section(output) + "\n"
+        + (target_output + "\n\n" if target_output else "")
         + named + "ended FAILED with exit status " + str(record.get("exit_code"))
         + "; the repository commit hook "
         + ("ran" if record.get("hook_ran") is True else "did not run")
