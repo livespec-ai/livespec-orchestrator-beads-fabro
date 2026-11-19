@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.343.6](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.5...v0.343.6) (2026-11-19)
+
+
+### Bug Fixes
+
+* a failed commit run's repair brief carries each failed target's own output (bd-ib-2bombh) ([d512794](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/d5127945712e58fefb81de9527a0be6437ff145e))
+* red - an executed recapture route stops re-capturing against a stale declared publish head and names the stale-head cause (bd-ib-chonmf) ([860102e](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/860102e8ee52fb42ac4becc55114989163fbb10c))
+* red — every script under fleet-launch/ carries the PROVISIONAL and EXPERIMENTAL banner, and a test fails the build for one that does not (bd-ib-mflywb) ([8100a3e](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/8100a3e303194e7a262963db91b847c158f88ab7))
+* red — the pre-commit hook admits a shell-only Red commit that adds a failing fleet-launch scenario and still refuses one that breaks an existing scenario (bd-ib-6sfwgo) ([9d329bf](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/9d329bf7fe382142f94671045ee0156c44cb091f))
+* the green handoff comparison reads every stated form of the preview result (bd-ib-lhwlxr) ([bf1db3d](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/bf1db3d8c4311f6811b4f898f040b868987e7f9a))
+* the green handoff comparison reads wordier exit-status phrasings (bd-ib-lhwlxr) ([8305295](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/83052950de3071738daba678bf47c359f987bcff))
+
 ## [0.343.5](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.4...v0.343.5) (2026-11-19)
 
 

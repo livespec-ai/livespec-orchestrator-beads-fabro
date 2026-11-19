@@ -43,6 +43,7 @@ NO_MATCHING_STAGED_FILES = re.compile(r"\(skip\) no matching staged files")
 HOOK_STEP_RAN = re.compile(r"(?:┃\s+\S+\s+\u276f|(?:✔️|🥊)\s+\S+\s+\(\d+(?:\.\d+)? seconds\))")
 CHECKPOINT_RUN_TRAILER = re.compile(r"^Fabro-Run: ", re.MULTILINE)
 CHECKPOINT_LIMIT = 500
+GREEN_RESULT_NAME = "livespec-implement-gate-preview-green-result.json"
 
 
 def command(*argv, cwd, env=None, check=True):
@@ -131,13 +132,31 @@ def skipped_environment():
     return environment, names
 
 
+def preview_parent():
+    """The directory the disposable worktree is made in, never the system temp directory.
+
+    The fleet's coverage configuration omits /tmp/* so the tests' own scratch directories
+    are not measured, so a worktree under it has every source file omitted: coverage
+    collects nothing and reports 0% (bd-ib-2j5k74). LIVESPEC_GATE_PREVIEW_ROOT names the
+    directory; otherwise it is below the home directory.
+    """
+    named = os.environ.get("LIVESPEC_GATE_PREVIEW_ROOT")
+    try:
+        parent = Path(named) if named else Path.home() / ".livespec-gate-preview"
+        parent.mkdir(parents=True, exist_ok=True)
+    except (OSError, RuntimeError) as error:
+        print("gate preview parent directory unusable: " + str(error), file=sys.stderr)
+        return None
+    return str(parent)
+
+
 def preview(stage, test_file):
     root = Path(git("rev-parse", "--show-toplevel", cwd=Path.cwd()).stdout.strip())
     base = dispatch_base(root)
     paths = selected_paths(stage, root, test_file, base)
     if not paths:
         return 2, [], [], False
-    preview_root = Path(tempfile.mkdtemp(prefix="livespec-gate-preview-"))
+    preview_root = Path(tempfile.mkdtemp(prefix="livespec-gate-preview-", dir=preview_parent()))
     unset = []
     try:
         git("worktree", "add", "--detach", "--quiet", str(preview_root), base, cwd=root)
@@ -171,6 +190,21 @@ def preview(stage, test_file):
         shutil.rmtree(preview_root, ignore_errors=True)
 
 
+def record_green_result(report):
+    """Persist Green's completed tool result outside the commit tree.
+
+    The completion gate must grade the last completed preview, rather than an
+    agent's transcription of it in the append-only handoff.  `git-path` keeps
+    that evidence scoped to this run's clone, and the replace prevents a
+    stopped writer from turning a previous complete record into malformed JSON.
+    """
+    root = Path(git("rev-parse", "--show-toplevel", cwd=Path.cwd()).stdout.strip())
+    record = Path(git("rev-parse", "--git-path", GREEN_RESULT_NAME, cwd=root).stdout.strip())
+    temporary = record.with_name(f"{record.name}.tmp.{os.getpid()}")
+    temporary.write_text(json.dumps(report, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, record)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("stage", choices=("red", "green"))
@@ -179,17 +213,15 @@ def main():
     if (args.stage == "red") != (args.test_file is not None):
         parser.error("red requires the test file path commit_red will stage; green takes none")
     status, targets, unset, preview_ran = preview(args.stage, args.test_file)
-    print(
-        json.dumps(
-            {
-                "status": status,
-                "failed_targets": targets,
-                "preview_ran": preview_ran,
-                "unset_variables": unset,
-            },
-            sort_keys=True,
-        )
-    )
+    report = {
+        "status": status,
+        "failed_targets": targets,
+        "preview_ran": preview_ran,
+        "unset_variables": unset,
+    }
+    if args.stage == "green":
+        record_green_result(report)
+    print(json.dumps(report, sort_keys=True))
     return status
 
 
