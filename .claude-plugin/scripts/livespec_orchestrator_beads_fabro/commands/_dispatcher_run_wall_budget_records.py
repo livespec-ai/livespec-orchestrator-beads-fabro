@@ -92,6 +92,7 @@ def run_wall_budget_exceeded_record(  # noqa: PLR0913 — kw-only record rendere
     preserved_ref: str | None = None,
     preserved_ref_commit: str | None = None,
     export_failed_measurement: str | None = None,
+    no_progress_stages: tuple[str, ...] = (),
 ) -> dict[str, object]:
     """Render the one record a budget cancel writes.
 
@@ -131,6 +132,14 @@ def run_wall_budget_exceeded_record(  # noqa: PLR0913 — kw-only record rendere
             "export_failed_measurement": export_failed_measurement,
         }
     )
+    no_progress = (
+        {}
+        if not no_progress_stages
+        else {
+            "no_progress_consecutive_stage_count": len(no_progress_stages),
+            "no_progress_stages": list(no_progress_stages),
+        }
+    )
     return {
         "stage": RUN_WALL_BUDGET_EXCEEDED_STAGE,
         **watchdog_cancel_fields(
@@ -145,6 +154,7 @@ def run_wall_budget_exceeded_record(  # noqa: PLR0913 — kw-only record rendere
         "budget_seconds": budget.seconds,
         "budget_layer": budget.layer,
         "budget_start_source": start_source,
+        **no_progress,
         **preservation,
     }
 

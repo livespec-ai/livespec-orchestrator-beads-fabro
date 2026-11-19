@@ -65,6 +65,11 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_hold
     RunWallHoldState,
     hold_run,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_no_progress import (
+    NO_PROGRESS_TIME_FLOOR_SECONDS,
+    cancel_run_for_no_progress,
+    stage_diffs_from_run_record,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_preserve import (
     preserved_pointer,
 )
@@ -105,10 +110,9 @@ __all__: list[str] = [
     "RunWallBudgetWatch",
     "RunWallVerdict",
     "RunWallVerdictValue",
+    "cancel_preserved_run",
     "cancel_run_past_budget",
 ]
-
-_INSPECT_TIMEOUT_SECONDS = 60.0
 
 # The two measurements that fail BEFORE any export is attempted, each named in
 # its own words because the remedies differ: one is a configuration fault on
@@ -185,7 +189,7 @@ def cancel_run_past_budget(  # noqa: PLR0913 — kw-only per-poll decision; the 
     def cancel(
         *, pointer: str | None, verified_ref: VerifiedPreservationRef | None
     ) -> RunWallVerdictValue:
-        _cancel(
+        cancel_preserved_run(
             dispatch_id=dispatch_id,
             plan=plan,
             port=port,
@@ -232,7 +236,7 @@ def _failed_measurement(*, export: str, located: PreservationRefsUnobservable | 
     return export
 
 
-def _cancel(  # noqa: PLR0913 — kw-only cancel; the dispatch, the two seams, the run and the two measured figures are independent inputs.
+def cancel_preserved_run(  # noqa: PLR0913 — kw-only cancel; the dispatch, the two seams, the run and the two measured figures are independent inputs.
     *,
     dispatch_id: str | None,
     plan: DispatchPlan,
@@ -245,6 +249,7 @@ def _cancel(  # noqa: PLR0913 — kw-only cancel; the dispatch, the two seams, t
     pointer: str | None,
     verified_ref: VerifiedPreservationRef | None,
     export_failure: str,
+    no_progress_stages: tuple[str, ...] = (),
 ) -> None:
     """Destroy the run, then write the record of the reading taken BEFORE it.
 
@@ -272,6 +277,7 @@ def _cancel(  # noqa: PLR0913 — kw-only cancel; the dispatch, the two seams, t
                 preserved_ref=None if verified_ref is None else verified_ref.ref,
                 preserved_ref_commit=None if verified_ref is None else verified_ref.commit,
                 export_failed_measurement=export_failure,
+                no_progress_stages=no_progress_stages,
             ),
             "rm_exit_code": rm.command.exit_code,
         }
@@ -336,6 +342,23 @@ class RunWallBudgetWatch:
             self.start = run_wall_start_from(
                 recorded_epoch=recorded_epoch, observed_at_epoch=now_epoch
             )
+        elapsed = slot_holding_seconds(start=self.start, now_epoch=now_epoch)
+        if elapsed is not None and elapsed >= NO_PROGRESS_TIME_FLOOR_SECONDS:
+            no_progress = cancel_run_for_no_progress(
+                dispatch_id=dispatch_id,
+                plan=plan,
+                port=port,
+                runner=runner,
+                journal=journal,
+                run_id=run_id,
+                ledger=self.ledger,
+                stage_diffs=stage_diffs_from_run_record(port=port, run_id=run_id),
+                elapsed_seconds=elapsed,
+                start=self.start,
+                hold=self.hold,
+            )
+            if no_progress is not RunWallVerdict.WITHIN:
+                return no_progress
         return cancel_run_past_budget(
             dispatch_id=dispatch_id,
             plan=plan,
