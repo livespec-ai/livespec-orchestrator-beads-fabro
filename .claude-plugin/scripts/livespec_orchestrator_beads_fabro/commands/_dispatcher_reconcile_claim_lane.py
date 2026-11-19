@@ -37,12 +37,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from livespec_orchestrator_beads_fabro._beads_client import make_beads_client
+from livespec_orchestrator_beads_fabro._store_claim_tokens import settle_unapplied_transition
 from livespec_orchestrator_beads_fabro.commands._config import FactoryTarget
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dispatching_host import (
     dispatching_host,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_bin import factory_fabro_bin
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import utc_now_iso
+from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import store_config
 from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_runs_inputs import (
     ReconcileInputs,
 )
@@ -53,6 +56,13 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_surve
     FactoryInventory,
     StrandedClaimInputs,
     survey_stranded_claims,
+)
+from livespec_orchestrator_beads_fabro.errors import (
+    BeadsCommandError,
+    BeadsConnectionError,
+    BeadsMappingError,
+    BeadsTenantMissingError,
+    WorkItemNotFoundError,
 )
 
 __all__: list[str] = [
@@ -77,6 +87,8 @@ def reconcile_claim_lane(
     journal = inputs.claim_journal
     if journal is None:
         return ClaimLaneResult()
+    if not dry_run:
+        _settle_unapplied_transitions(inputs=inputs)
     survey = survey_stranded_claims(
         inputs=StrandedClaimInputs(
             inventories=tuple(
@@ -93,6 +105,31 @@ def reconcile_claim_lane(
         )
     )
     return ClaimLaneResult(recovered=survey.recovered, held=survey.held)
+
+
+def _settle_unapplied_transitions(*, inputs: ReconcileInputs) -> None:
+    """Finish the metadata half of transitions a prior writer already won.
+
+    This cleanup runs before grading stranded claims, so a terminal recovery
+    sees the open token it is entitled to claim rather than repeatedly starting
+    a new observation of the old closed one. The standalone `reconcile-runs`
+    surface owns no dispatch path and therefore cannot launch a factory run.
+    A ledger fault is left for the pass's normal fail-open recovery on its next
+    invocation.
+    """
+    client = make_beads_client(config=store_config(repo=inputs.repo))
+    recoverable = (
+        BeadsCommandError,
+        BeadsConnectionError,
+        BeadsMappingError,
+        BeadsTenantMissingError,
+        WorkItemNotFoundError,
+    )
+    for item in inputs.items:
+        try:
+            _ = settle_unapplied_transition(client=client, work_item_id=item.id)
+        except recoverable:
+            continue
 
 
 def _inventory(

@@ -5,9 +5,9 @@ whose winner never wrote the item only after that writer has itself watched the
 unapplied transition for the takeover wait. A valve press and an intake call
 are one process each: each waits out that wait itself and writes once more, and
 the second answer is final. When that answer is `claim-transition-pending`
-again, the operator has to be told how the item gets written after all, which
-is a Dispatcher pass on it: the Dispatcher loop keeps its sightings from one
-pass to the next.
+again, the operator has to be told how the item gets written after all: the
+standalone `reconcile-runs` cleanup command settles its metadata transition
+without launching a factory run.
 
 Each end-to-end case drives the public entry point against the in-memory
 tenant, `drive.run_action` for the valve and `apply_intake_dor` for intake, on
@@ -69,9 +69,8 @@ _HEADING = "## Effective acceptance criteria"
 _PENDING = "claim-transition-pending"
 _LOST = "claim-changed"
 _REMEDY = (
-    f"Remedy: wait for or trigger a Dispatcher pass on {_ITEM_ID}. A Dispatcher loop keeps "
-    "its first sighting of an unapplied transition from one pass to the next, and takes the "
-    "transition over on a pass made after the takeover wait."
+    "Remedy: run `dispatcher.py reconcile-runs --repo <repository>` to finish the "
+    f"closed-token transition for {_ITEM_ID}. This cleanup command never launches a factory run."
 )
 _NOT_WRITTEN = f"the status and claim of {_ITEM_ID} were not written."
 _NOTHING_WRITTEN = f"nothing was written to {_ITEM_ID}."
