@@ -49,7 +49,13 @@ def _repository(*, tmp_path: Path) -> tuple[Path, dict[str, str]]:
     bin_dir.mkdir()
     fake_just = bin_dir / "just"
     fake_just.write_text(
-        "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> just.log\n",
+        "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> just.log\n"
+        'if [ "$1" = check-fleet-launch ]; then\n'
+        '  printf "%s" "${FAKE_FAILED_LABELS:-}" | while IFS= read -r label; do\n'
+        '    [ -z "$label" ] || printf "%s\\n" "$label" >> "$HARNESS_FAILED_SCENARIOS_FILE"\n'
+        "  done\n"
+        '  exit "${FAKE_FLEET_RC:-0}"\n'
+        "fi\n",
         encoding="utf-8",
     )
     fake_just.chmod(fake_just.stat().st_mode | stat.S_IXUSR)
@@ -111,3 +117,80 @@ def test_authoring_turn_runs_the_fleet_launch_gate_for_a_declared_input(*, tmp_p
         "check-fleet-launch",
         "check-changed",
     ]
+
+
+_RED_SCENARIO = 'scenario "31a. a master-CI rate-limit 403 waits with its ticket"'
+
+
+def _stage_red_fleet_launch_test(*, repo: Path) -> None:
+    """Stage one new failing test file plus a fleet-launch harness adding one scenario."""
+    _stage(repo=repo, path="tests/test_new_behaviour.py")
+    harness = repo / "fleet-launch" / "test" / "run-tests.sh"
+    harness.parent.mkdir(parents=True, exist_ok=True)
+    harness.write_text(f"{_RED_SCENARIO}\n", encoding="utf-8")
+    result = _run(
+        argv=["git", "add", "fleet-launch/test/run-tests.sh"], cwd=repo, env=dict(os.environ)
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def _red_hook(
+    *, repo: Path, env: dict[str, str], labels: str, rc: str
+) -> subprocess.CompletedProcess[str]:
+    return _run(
+        argv=["bash", str(_HOOK)],
+        cwd=repo,
+        env={**env, "FAKE_FAILED_LABELS": labels, "FAKE_FLEET_RC": rc},
+    )
+
+
+def test_red_commit_adding_a_failing_fleet_launch_scenario_is_accepted(*, tmp_path: Path) -> None:
+    repo, env = _repository(tmp_path=tmp_path)
+    _stage_red_fleet_launch_test(repo=repo)
+
+    result = _red_hook(
+        repo=repo, env=env, labels="31a. a master-CI rate-limit 403 waits with its ticket\n", rc="1"
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    log = (repo / "just.log").read_text(encoding="utf-8").splitlines()
+    assert log[-1] == "check-fleet-launch"
+    assert "check-fleet-launch" in log[0].split()
+
+
+def test_red_commit_still_refuses_a_failing_fleet_launch_scenario_it_did_not_add(
+    *, tmp_path: Path
+) -> None:
+    repo, env = _repository(tmp_path=tmp_path)
+    _stage_red_fleet_launch_test(repo=repo)
+
+    result = _red_hook(
+        repo=repo,
+        env=env,
+        labels="31a. a master-CI rate-limit 403 waits with its ticket\n5. an older scenario\n",
+        rc="1",
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "scenario not added by this commit: 5. an older scenario" in result.stderr
+
+
+def test_red_commit_refuses_a_fleet_launch_failure_that_names_no_scenario(
+    *, tmp_path: Path
+) -> None:
+    repo, env = _repository(tmp_path=tmp_path)
+    _stage_red_fleet_launch_test(repo=repo)
+
+    result = _red_hook(repo=repo, env=env, labels="", rc="1")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "failed without naming a failing scenario" in result.stderr
+
+
+def test_red_commit_with_a_passing_fleet_launch_harness_is_accepted(*, tmp_path: Path) -> None:
+    repo, env = _repository(tmp_path=tmp_path)
+    _stage_red_fleet_launch_test(repo=repo)
+
+    result = _red_hook(repo=repo, env=env, labels="", rc="0")
+
+    assert result.returncode == 0, result.stdout + result.stderr

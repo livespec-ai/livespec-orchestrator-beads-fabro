@@ -78,7 +78,12 @@ scenario_watchdog_start "$WORK"
 PASS=0
 FAIL=0
 pass() { PASS=$((PASS + 1)); printf '  ok:   %s\n' "$1"; }
-fail() { FAIL=$((FAIL + 1)); printf '  FAIL: %s\n' "$1" >&2; }
+fail() {
+    FAIL=$((FAIL + 1))
+    printf '  FAIL: %s\n' "$1" >&2
+    # The pre-commit hook's Red mode reads the failing scenarios from here (bd-ib-ganm6d).
+    [ -z "${HARNESS_FAILED_SCENARIOS_FILE:-}" ] || printf '%s\n' "${SCENARIO_LABEL:-}" >> "$HARNESS_FAILED_SCENARIOS_FILE"
+}
 
 # The two stub server URLs. They are opaque to the launcher, which only passes
 # them to `fabro ps -a --server`, so the stub discriminates boards on them.
