@@ -28,6 +28,7 @@ __all__: list[str] = [
     "ClaimChangeResult",
     "change_claim",
     "create_claim_token",
+    "settle_unapplied_transition",
 ]
 
 _CLAIM_TOKEN_LABEL = "claim-token"  # noqa: S105 - record label
@@ -65,6 +66,45 @@ def create_claim_token(*, client: BeadsClient) -> str:
     )
     client.update_issue(issue_id=token_id, add_labels=[_CLAIM_TOKEN_LABEL])
     return token_id
+
+
+def settle_unapplied_transition(*, client: BeadsClient, work_item_id: str) -> bool:
+    """Advance one item from its closed token to that token's open successor.
+
+    A winning writer closes its current token before it writes the item that
+    names the successor. If that second write is lost, a reconciliation pass
+    may finish that already-decided, metadata-only half of the transition. It
+    never creates or closes a token, and it leaves every other metadata key
+    intact. A successor that is absent or already closed is deliberately not
+    advanced: another reconciliation pass can settle the next observable hop,
+    while an unreadable or malformed transition stays untouched.
+    """
+    record = client.show_issue(issue_id=work_item_id)
+    named = _current_token(record=record)
+    if named is None:
+        return False
+    reading = token_reading(client=client, token_id=named)
+    successor = successor_named_by(reason=reading.close_reason)
+    if not reading.closed or successor is None:
+        return False
+    successor_reading = token_reading(client=client, token_id=successor)
+    if not successor_reading.present or successor_reading.closed:
+        return False
+    current = client.show_issue(issue_id=work_item_id)
+    current_reading = token_reading(client=client, token_id=named)
+    if (
+        _current_token(record=current) != named
+        or not current_reading.closed
+        or successor_named_by(reason=current_reading.close_reason) != successor
+    ):
+        return False
+    client.update_issue(
+        issue_id=work_item_id,
+        metadata=_with_successor(record=current, metadata=None, successor=successor),
+        names_claim_token=True,
+    )
+    landed = client.show_issue(issue_id=work_item_id)
+    return _current_token(record=landed) == successor
 
 
 def change_claim(  # noqa: PLR0911, PLR0913
