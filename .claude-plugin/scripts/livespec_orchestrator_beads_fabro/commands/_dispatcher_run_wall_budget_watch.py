@@ -66,9 +66,12 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_hold
     hold_run,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_no_progress import (
+    NO_PROGRESS_CONSECUTIVE_STAGE_COUNT,
     NO_PROGRESS_TIME_FLOOR_SECONDS,
+    NoProgressSpan,
     cancel_run_for_no_progress,
     stage_diffs_from_run_record,
+    trailing_empty_implementation_stages,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_preserve import (
     preserved_pointer,
@@ -311,6 +314,7 @@ class RunWallBudgetWatch:
     ledger: LedgerComments | None
     start: RunWallStart | None = None
     hold: RunWallHoldState = field(default_factory=RunWallHoldState)
+    no_progress: NoProgressSpan = field(default_factory=NoProgressSpan)
 
     def verdict(  # noqa: PLR0913 — kw-only per-poll decision; the dispatch, the three seams, the run and the two clock readings are independent inputs.
         self,
@@ -343,22 +347,31 @@ class RunWallBudgetWatch:
                 recorded_epoch=recorded_epoch, observed_at_epoch=now_epoch
             )
         elapsed = slot_holding_seconds(start=self.start, now_epoch=now_epoch)
+        # A span cannot exceed the slot's age, so no poll younger than the floor
+        # can owe a cut and none of them pays the run-state read.
         if elapsed is not None and elapsed >= NO_PROGRESS_TIME_FLOOR_SECONDS:
-            no_progress = cancel_run_for_no_progress(
-                dispatch_id=dispatch_id,
-                plan=plan,
-                port=port,
-                runner=runner,
-                journal=journal,
-                run_id=run_id,
-                ledger=self.ledger,
-                stage_diffs=stage_diffs_from_run_record(port=port, run_id=run_id),
-                elapsed_seconds=elapsed,
-                start=self.start,
-                hold=self.hold,
+            stage_diffs = stage_diffs_from_run_record(port=port, run_id=run_id)
+            span = self.no_progress.observe(
+                stages=trailing_empty_implementation_stages(
+                    stage_diffs=stage_diffs,
+                    consecutive_stage_count=NO_PROGRESS_CONSECUTIVE_STAGE_COUNT,
+                ),
+                now_epoch=now_epoch,
             )
-            if no_progress is not RunWallVerdict.WITHIN:
-                return no_progress
+            if span is not None and span >= NO_PROGRESS_TIME_FLOOR_SECONDS:
+                return cancel_run_for_no_progress(
+                    dispatch_id=dispatch_id,
+                    plan=plan,
+                    port=port,
+                    runner=runner,
+                    journal=journal,
+                    run_id=run_id,
+                    ledger=self.ledger,
+                    stage_diffs=stage_diffs,
+                    elapsed_seconds=elapsed,
+                    start=self.start,
+                    hold=self.hold,
+                )
         return cancel_run_past_budget(
             dispatch_id=dispatch_id,
             plan=plan,
