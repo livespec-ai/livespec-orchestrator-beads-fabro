@@ -103,6 +103,7 @@ def preserved_pointer(
     runner: CommandRunner,
     run_id: str,
     ledger: LedgerComments | None,
+    pointer_suffix: str = "",
 ) -> Preservation:
     """Write and read back this run's pointer, or name the measurement that failed."""
     if ledger is None:
@@ -122,6 +123,7 @@ def preserved_pointer(
         fabro_bin=plan.fabro_bin,
         runner=runner,
         ledger=ledger,
+        pointer_suffix=pointer_suffix,
     )
     if not exported.exported or exported.comment_id is None:
         return Preservation(pointer=None, failed_measurement=exported.detail)
