@@ -82,6 +82,44 @@ while IFS= read -r staged_path; do
         fleet_launch_input_staged+="${staged_path}"$'\n'
     fi
 done <<<"$staged_with_deletions"
+# In Red mode the staged test is a deliberately failing one, so the harness must not refuse the commit for the
+# scenario the staged diff ADDS (bd-ib-ganm6d, measured on bd-ib-zdqshg run 01M7RYJ0VTEB: commit_red failed three times
+# at 755 s on its own new section 31a). Every other scenario still gates: the harness records each failing scenario's
+# label in HARNESS_FAILED_SCENARIOS_FILE, and the commit passes only when the harness failed AND every recorded label
+# is a `scenario "<label>"` line the staged diff of fleet-launch/test/run-tests.sh adds. A failure that names no
+# scenario, or names one the diff did not add, is refused.
+red_fleet_launch_gate() {
+    local failed_file log status allowed label unexpected
+    failed_file=$(mktemp)
+    log=$(mktemp)
+    set +e
+    HARNESS_FAILED_SCENARIOS_FILE="$failed_file" just check-fleet-launch >"$log" 2>&1
+    status=$?
+    set -e
+    cat "$log"
+    if [[ "$status" -eq 0 ]]; then
+        rm -f "$failed_file" "$log"
+        return 0
+    fi
+    allowed=$(git diff --cached -U0 -- fleet-launch/test/run-tests.sh | sed -n 's/^+scenario "\(.*\)"$/\1/p')
+    unexpected=""
+    if [[ ! -s "$failed_file" ]]; then
+        unexpected="the harness failed without naming a failing scenario"
+    else
+        while IFS= read -r label; do
+            if ! grep -Fxq -- "$label" <<<"$allowed"; then
+                unexpected+="${unexpected:+; }scenario not added by this commit: $label"
+            fi
+        done < <(sort -u "$failed_file")
+    fi
+    rm -f "$failed_file" "$log"
+    if [[ -n "$unexpected" ]]; then
+        echo ":: fleet-launch gate refused the Red commit: $unexpected" >&2
+        return "$status"
+    fi
+    echo ":: Red mode: every failing fleet-launch scenario is one this commit adds, so the staged Red test is expected to fail"
+    return 0
+}
 fleet_launch_skips=()
 if [[ -z "$fleet_launch_input_staged" ]]; then
     fleet_launch_skips+=(check-fleet-launch)
@@ -204,13 +242,20 @@ if [[ "$merge_in_progress" == false ]] && [[ "$test_count" -eq 1 ]] && [[ "$impl
     # armed here refuses the ritual's own first step (work-item bd-ib-c4sfpr).
     # No coverage is lost: the Green amend, pre-push, and CI each run the full
     # aggregate on the final commit, which is the load-bearing net.
+    red_fleet_skips=("${fleet_launch_skips[@]}")
+    if [[ -n "$fleet_launch_input_staged" ]]; then
+        red_fleet_skips=(check-fleet-launch)
+    fi
     just check-skipping \
         check-coverage \
         check-per-file-coverage \
         check-check-coverage-incremental \
         check-codex-skill-picker \
         "${sandbox_skips[@]}" \
-        "${delegated_skip_targets[@]}" "${fleet_launch_skips[@]}"
+        "${delegated_skip_targets[@]}" "${red_fleet_skips[@]}"
+    if [[ -n "$fleet_launch_input_staged" ]]; then
+        red_fleet_launch_gate
+    fi
     exit $?
 fi
 if [[ "$merge_in_progress" == false ]] \
