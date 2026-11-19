@@ -45,6 +45,10 @@ def _run_gate(*, tmp_path: Path, status: int, targets: list[str], section: str) 
         ("## green\nPreview exited 1.\n", "preview exit status 1"),
         ("## green\n- Gate preview: exit code 2\n", "preview exit status 2"),
         ("## green\nThe gate preview\n  exited with status 3\n", "preview exit status 3"),
+        ("## green\nThe preview's exit status was 1.\n", "preview exit status 1"),
+        ("## green\nThe gate preview's exit code is 4\n", "preview exit status 4"),
+        ("## green\nThe exit status of the preview was 1.\n", "preview exit status 1"),
+        ("## green\nGate preview returned 5.\n", "preview exit status 5"),
     ],
 )
 def test_a_preview_exit_stated_in_any_form_is_compared(
