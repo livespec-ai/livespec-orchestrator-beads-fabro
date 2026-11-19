@@ -309,7 +309,7 @@ def test_self_heal_reexec_supervises_subprocess_and_propagates_output_and_exit(
     assert "credential_wrapper could not run" not in captured.err
 
 
-def test_self_heal_reexec_structural_wrapper_failure_prints_clean_fail_message(
+def test_self_heal_reexec_nonzero_empty_stdout_forwards_child_stderr(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -344,8 +344,10 @@ def test_self_heal_reexec_structural_wrapper_failure_prints_clean_fail_message(
     assert excinfo.value.code == 1
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "credential_wrapper could not run in this environment" in captured.err
-    assert "sudo:" not in captured.err
+    assert captured.err == (
+        "livespec: required credential env absent; re-invoking under credential_wrapper\n"
+        "sudo: The 'no new privileges' flag is set\n"
+    )
 
 
 def test_self_heal_reexec_zero_exit_with_empty_output_exits_zero_without_hint(

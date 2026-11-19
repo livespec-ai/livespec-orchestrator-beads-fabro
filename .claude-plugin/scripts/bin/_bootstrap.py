@@ -268,27 +268,29 @@ def _self_heal_credentials(
                 "livespec: required credential env absent; re-invoking under credential_wrapper\n"
             )
             os.environ[CREDENTIAL_REEXEC_SENTINEL] = "1"
-            completed = subprocess.run(  # noqa: S603
-                _marker_forwarded_argv(
-                    reexec_argv=reexec_argv,
-                    credential_wrapper=credential_wrapper,
-                    environ=os.environ,
-                ),
-                capture_output=True,
-                check=False,
-            )
-            stdout = completed.stdout or b""
-            stderr = completed.stderr or b""
-            if stdout:
-                _ = sys.stdout.buffer.write(stdout)
-                _ = sys.stdout.flush()
-            if completed.returncode != 0 and not stdout:
+            try:
+                completed = subprocess.run(  # noqa: S603
+                    _marker_forwarded_argv(
+                        reexec_argv=reexec_argv,
+                        credential_wrapper=credential_wrapper,
+                        environ=os.environ,
+                    ),
+                    capture_output=True,
+                    check=False,
+                )
+            except (FileNotFoundError, PermissionError):
                 fail = wrapper_launch_failure(
                     required=required,
                     credential_wrapper=credential_wrapper,
                 )
                 _ = sys.stderr.write(fail.message + "\n")
-            elif stderr:
+                raise SystemExit(_CREDENTIAL_FAIL_EXIT) from None
+            stdout = completed.stdout or b""
+            stderr = completed.stderr or b""
+            if stdout:
+                _ = sys.stdout.buffer.write(stdout)
+                _ = sys.stdout.flush()
+            if stderr:
                 _ = sys.stderr.buffer.write(stderr)
                 _ = sys.stderr.flush()
             raise SystemExit(completed.returncode)

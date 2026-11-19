@@ -73,28 +73,15 @@ that and nothing more. It runs the child as
     exit $status
 
 so the child's stderr is MERGED into stdout and re-emitted on stdout. A real
-`with-<project>-env.sh` does NOT do that, and two earlier versions of this
-docstring claimed otherwise — first that the `exec`-form difference was
-"fixture mechanics, not product behaviour", then that this double is "what a
-real wrapper does". **Both claims are retracted.** The merge is a deliberate
-adapter, and the reason is a real product behaviour.
+`with-<project>-env.sh` does NOT do that. The merge is a deliberate observation
+adapter, not a claim about production stream handling.
 
 `_bootstrap`'s credential self-heal runs the wrapper with
-`capture_output=True` and then, at lines 276-284, branches:
-
-    if completed.returncode != 0 and not stdout:
-        ... write wrapper_launch_failure ...
-    elif stderr:
-        ... write the child's stderr ...
-
-A child that REFUSES — non-zero exit, diagnostic on STDERR, empty STDOUT —
-takes the first arm, so the `elif` never runs and its real stderr is
-DISCARDED. The operator is handed "credential_wrapper could not run in this
-environment" instead. A dispatch floor refusal writes only stderr and so hits
-that arm exactly; `ledger-check` SUCCEEDS and writes stdout, which is the only
-reason the sibling file's `exec`-form double works at all. Merging the streams
-makes stdout non-empty, so this adapter keeps the branch out of the
-wrapper-launch arm and the genuine diagnostic survives to be asserted.
+`capture_output=True`, then forwards stdout and stderr independently before
+exiting with the child's status. Thus a child that REFUSES — non-zero exit,
+diagnostic on STDERR, empty STDOUT — preserves its own diagnostic. The
+wrapper-launch diagnostic is reserved for a wrapper executable that cannot be
+started; it is not inferred from an ordinary child exit.
 
 WHAT THE ADAPTER DOES AND DOES NOT AFFECT. It changes OBSERVABILITY, not the
 outcome: the child really did refuse, really exited 3, and really produced
@@ -113,16 +100,13 @@ on it at all:
   the credential-self-heal branch, so its exact-outcome evidence is
   ADAPTER-INDEPENDENT;
 - the DIRECT-route case and the intact control assert on the top-level
-  process's own output, and those two DO depend on the merge. Both use the
-  SAME adapter, so the control compares like with like; its installation is
-  real and un-evicted, and the only difference between it and the evicted case
-  is the `rm -rf`.
+  process's own output, and both use the SAME adapter, so the control compares
+  like with like; its installation is real and un-evicted, and the only
+  difference between it and the evicted case is the `rm -rf`.
 
-The underlying behaviour is NOT repaired here — that is outside this
-work-item's declared assertions and no product change was requested — and it
-is recorded as an additive incident in
-`plan/archive/dispatcher-cache-lifetime/research/003-red-provenance-cycles-9-to-11-2026-10-06.md`
-so the next reader examines it instead of trusting a "not a finding" label.
+The bootstrap's stream-preserving behaviour is covered directly in
+`tests/bin/test_bootstrap.py`; this integration fixture retains its adapter
+only to keep its route comparison focused on payload retention.
 
 Real child processes are the only way to ask any of this, so this file is
 listed in `pyproject.toml`'s `subprocess_spawn_allowlist` and scrubs the
