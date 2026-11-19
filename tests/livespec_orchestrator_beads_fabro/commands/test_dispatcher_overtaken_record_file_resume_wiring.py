@@ -287,7 +287,7 @@ def _install(
             if world.anchored
             else None
         ),
-        observation=SimpleNamespace(pull_request=184),
+        observation=SimpleNamespace(pull_request=184, proof_only_resume=False),
         earlier_run_ids=("01M6W31BSSE1P8Z43EGGY9XVNF",),
         workflow_name=None,
     )
