@@ -1,4 +1,8 @@
 #!/bin/bash
+# PROVISIONAL / EXPERIMENTAL — fleet-launch seat helper that writes hold files.
+# This directory is a stopgap; its first-class replacements are the livespec console
+# application and the committed launch-loop tool bd-ib-jr6w7v (see fleet-launch/README.md).
+#
 # hold-write.sh <hold-file-path> < body      (seat helper, legacy-dispatcher-agent b27237, 2026-11-14; coordinator STRUCTURAL routing tick 3)
 # The ONE way a seat or the coordinator writes tmp/petri-canary/hold-item-* (and hold-repo-*) files. Rule HOLD-ENDS-ARE-DRIVEN, enforced:
 # REFUSES (exit 2, nothing written) a body that lacks any of

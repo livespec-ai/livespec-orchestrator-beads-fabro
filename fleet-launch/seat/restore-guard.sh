@@ -1,4 +1,8 @@
 #!/bin/bash
+# PROVISIONAL / EXPERIMENTAL — fleet-launch seat guard that refuses a plain ticket for an item whose earlier work exists.
+# This directory is a stopgap; its first-class replacements are the livespec console
+# application and the committed launch-loop tool bd-ib-jr6w7v (see fleet-launch/README.md).
+#
 # restore-guard.sh <item> <repo-dir> [--fresh <reason>]: refuse a PLAIN ticket for an item whose earlier work still exists.
 # A plain ticket routes the run FRESH, and the fresh run's publish-branch reclaim closes the item's open pull request and
 # deletes its branch (measured 2026-11-18, bd-ib-xbw2yk, #5527). Work that exists is restored through seeded-ticket.sh with

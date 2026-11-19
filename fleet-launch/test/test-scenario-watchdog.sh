@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# PROVISIONAL / EXPERIMENTAL — fleet-launch hermetic harness script for the fleet-launch check.
+# This directory is a stopgap; its first-class replacements are the livespec console
+# application and the committed launch-loop tool bd-ib-jr6w7v (see fleet-launch/README.md).
+#
 # The per-scenario watchdog must turn a stuck scenario into a fast, named, non-zero failure,
 # and must leave a scenario that finishes in time alone.
 

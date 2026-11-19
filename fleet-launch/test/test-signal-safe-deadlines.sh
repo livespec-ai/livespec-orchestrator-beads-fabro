@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# PROVISIONAL / EXPERIMENTAL — fleet-launch hermetic harness script for the fleet-launch check.
+# This directory is a stopgap; its first-class replacements are the livespec console
+# application and the committed launch-loop tool bd-ib-jr6w7v (see fleet-launch/README.md).
+#
 # A repository-hold signal can arrive at any point in the launch wait loop.
 # The loop must not evaluate an external clock in a command substitution at
 # that point: Bash can defer or lose the pending signal trap while parsing it.

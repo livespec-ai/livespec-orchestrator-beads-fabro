@@ -2227,16 +2227,16 @@
     "heading": "## Provisional fleet launch scripts",
     "spec_root": "SPECIFICATION",
     "spec_file": "contracts.md",
-    "test": "TODO",
-    "reason": "Owed: an integration-tier test exercising check-fleet-launch end to end (shellcheck plus the hermetic launcher harness) is the binding for this heading, delivered by plan provisional-fleet-launch child bd-ib-nz4av6. TODO until that item merges and names the exercising test node; never a unit-tier test.",
+    "test": "tests.integration.test_fleet_launch_scenario242_banner.test_scenario242_every_fleet_launch_script_carries_the_provisional_banner",
+    "reason": "Hermetic integration coverage (bd-ib-mflywb, completing bd-ib-nz4av6's binding): the test reads the opening comment block of every tracked shell and Python script under fleet-launch/ and fails, naming the script and what it lacks, unless it marks itself PROVISIONAL and EXPERIMENTAL and names the livespec console application and bd-ib-jr6w7v; a sibling test in the same file fails unless check-fleet-launch is declared in the check aggregate. The launcher harness itself is exercised by tests/integration/test_fleet_launch_scenario297.py and by every commit and push gate through just check-fleet-launch. NOT covered by a test: the host-values-declared-once scenario and the retirement scenario of Scenario 242, which stay verified by the plan's captured records.",
     "work_item": "bd-ib-nz4av6"
   },
   {
     "heading": "## Scenario 242 — The provisional fleet launch check fails the build on a broken launcher",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "TODO",
-    "reason": "Owed: an integration-tier test exercising check-fleet-launch end to end (shellcheck plus the hermetic launcher harness) is the binding for this heading, delivered by plan provisional-fleet-launch child bd-ib-nz4av6. TODO until that item merges and names the exercising test node; never a unit-tier test.",
+    "test": "tests.integration.test_fleet_launch_scenario242_banner.test_scenario242_every_fleet_launch_script_carries_the_provisional_banner",
+    "reason": "Hermetic integration coverage (bd-ib-mflywb, completing bd-ib-nz4av6's binding): the test reads the opening comment block of every tracked shell and Python script under fleet-launch/ and fails, naming the script and what it lacks, unless it marks itself PROVISIONAL and EXPERIMENTAL and names the livespec console application and bd-ib-jr6w7v; a sibling test in the same file fails unless check-fleet-launch is declared in the check aggregate. The launcher harness itself is exercised by tests/integration/test_fleet_launch_scenario297.py and by every commit and push gate through just check-fleet-launch. NOT covered by a test: the host-values-declared-once scenario and the retirement scenario of Scenario 242, which stay verified by the plan's captured records.",
     "work_item": "bd-ib-nz4av6"
   },
   {

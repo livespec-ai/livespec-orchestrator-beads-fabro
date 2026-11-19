@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# PROVISIONAL / EXPERIMENTAL — fleet-launch hermetic harness script for the fleet-launch check.
+# This directory is a stopgap; its first-class replacements are the livespec console
+# application and the committed launch-loop tool bd-ib-jr6w7v (see fleet-launch/README.md).
+#
 # The seat load guard's /tmp rule is a share of the mounted tmpfs, not an absolute size: the same
 # share of a 24G tmpfs (hetzner) and a 48G one (vps) must give the same verdict, and a size-blind
 # 16G limit must not hold a 24G tmpfs at 16G used on a host whose memory is fine.
