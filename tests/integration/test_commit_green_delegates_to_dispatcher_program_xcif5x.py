@@ -22,7 +22,7 @@ def test_commit_green_dev_tooling_entry_point_execs_the_dispatcher_program() -> 
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${{BASH_SOURCE[0]}}")" && pwd)"
-exec "$script_dir/../{_DISPATCHER_PROGRAM.relative_to(_ROOT)}" "$@"
+exec bash "$script_dir/../{_DISPATCHER_PROGRAM.relative_to(_ROOT)}" "$@"
 """
 
     assert _DEV_TOOLING_PROGRAM.read_text(encoding="utf-8") == expected
