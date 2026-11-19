@@ -597,6 +597,35 @@ def _hermetic_operator_attribution_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+_FACTORY_RUN_METADATA_ENV = (
+    "LIVESPEC_PR_TITLE",
+    "LIVESPEC_PR_BODY_FILE",
+    "LIVESPEC_PUBLISH_BRANCH",
+    "LIVESPEC_GIT_AUTHOR_NAME",
+    "LIVESPEC_GIT_AUTHOR_EMAIL",
+    "LIVESPEC_DISPATCH_PULL_REQUESTS",
+)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_factory_run_metadata_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep factory-run metadata out of tests that did not declare it.
+
+    A dispatched factory sandbox receives the work item's rendered pull-request
+    metadata, publication branch, author identity, and pull-request policy.
+    These values are inputs to commit and publication scripts, not test
+    configuration.  Inheriting them makes a test that does not name metadata
+    behave differently in a factory than on a developer host or in continuous
+    integration.
+
+    Tests that exercise a metadata path set the value they need after this
+    fixture runs, so their explicit setting remains visible to the child
+    command they execute.
+    """
+    for name in _FACTORY_RUN_METADATA_ENV:
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture(autouse=True)
 def _hermetic_agent_stage_publication_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the running agent stage's publication guard out of the test process.
