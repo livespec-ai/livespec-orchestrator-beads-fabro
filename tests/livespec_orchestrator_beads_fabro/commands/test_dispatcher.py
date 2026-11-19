@@ -1899,7 +1899,7 @@ def test_render_run_config_overlay_prepares_refreshing_gh_wrapper(
     # helper the install step appends from the bundle root.
     assert f'tail_file="{DEFAULT_SANDBOX_GH_REFRESH_ROOT}/{GH_WRAPPER_TAIL_RELPATH}"' in prepared
     assert 'cat "$tail_file" >> "$real_gh"' in prepared
-    assert 'token="$(python3 ' in _gh_wrapper_tail().decode("utf-8")
+    assert 'token="$(env -u COVERAGE_PROCESS_START ' in _gh_wrapper_tail().decode("utf-8")
     assert 'real_gh="$(command -v gh)"' in prepared
     assert 'mv "$real_gh" "$wrapped_gh"' in prepared
     env_table = rendered[env_table_at:]
@@ -1942,10 +1942,8 @@ def test_render_run_config_overlay_projects_gh_mint_helper_for_target_without_sc
         if (entry["root"], entry["path"]) == (GH_REFRESH_ROOT, GH_WRAPPER_TAIL_RELPATH)
     ]
     assert tail["sha256"] == hashlib.sha256(_gh_wrapper_tail()).hexdigest()
-    assert 'token="$(python3 "$mint")"' in _gh_wrapper_tail().decode("utf-8")
-    assert not any(
-        'token="$(python3 "$mint")"' in readable(value=v) for s in steps for v in s.env.values()
-    )
+    assert 'python3 "$mint")"' in _gh_wrapper_tail().decode("utf-8")
+    assert not any('python3 "$mint")"' in readable(value=v) for s in steps for v in s.env.values())
     assert not any("tarfile.open" in s.script for s in steps)
 
 
