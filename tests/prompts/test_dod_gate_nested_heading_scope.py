@@ -60,6 +60,15 @@ _FINDING_NAMES_THE_NESTED_HEADING = (
     "NAMES THE NESTED HEADING AS WELL AS THE H2",
     "`## <the H2> → ### <the nested heading>`",
 )
+_RECORDED_INTERNAL_RULING_EXCEPTION = (
+    "The one exception is a recorded internal ruling",
+    "newest `livespec-spec-change-tier` record",
+    "still current",
+    "`tier: none`",
+    "`generalization-target`",
+    "nearest topic, not a governing clause",
+    "no coherence finding",
+)
 
 
 def _dod_gate_prompt() -> Path:
@@ -131,4 +140,18 @@ def test_check_four_requires_a_finding_to_name_the_nested_heading_and_the_h2() -
     check_four = _check_four()
 
     for needle in _FINDING_NAMES_THE_NESTED_HEADING:
+        assert needle in check_four, needle
+
+
+def test_check_four_accepts_a_current_recorded_internal_ruling_for_the_nearest_topic() -> None:
+    """A current internal ruling makes its cited nearest topic coherent.
+
+    The shared prompt is the entire check-4 rubric for both the host judgement
+    and the in-run node.  A tier-none record that names the References heading
+    as its generalization target therefore waives only the ordinary
+    non-governing-heading coherence finding.
+    """
+    check_four = _check_four()
+
+    for needle in _RECORDED_INTERNAL_RULING_EXCEPTION:
         assert needle in check_four, needle

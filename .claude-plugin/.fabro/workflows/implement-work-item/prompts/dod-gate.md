@@ -217,6 +217,14 @@ question of fact — the spec tree above all.
    `## <the H2> → ### <the nested heading>`, so the human reads the finding
    at the level the governing text actually sits at.
 
+   **The one exception is a recorded internal ruling.** When the item's newest `livespec-spec-change-tier` record is still current,
+   and reads `tier: none`, it is an internal ruling. When it names the referenced
+   heading as its `generalization-target`, that heading is the item's nearest topic, not a governing clause.
+   Report no coherence finding merely because that nearest topic does not state
+   or derive the assertion. This exception applies only to that current newest
+   record and only to its matching References heading; without it, a
+   non-governing referenced heading remains incoherent under this check.
+
    Concretely, treat these as incoherent:
    - An assertion whose subject does not appear in, and cannot be derived
      from, the referenced heading's whole section, its nested headings
