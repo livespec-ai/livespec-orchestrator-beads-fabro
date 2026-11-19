@@ -1,21 +1,5 @@
 #!/usr/bin/env bash
-# Return a test-wrong lap to the dispatch base while retaining git-dir handoff
-# records.  The graph calls this only after Green declares the Red test wrong.
-
 set -euo pipefail
 
-if (( $# != 1 )); then
-    echo "usage: $0 <default-branch>" >&2
-    exit 2
-fi
-
-readonly default_branch="$1"
-case "$default_branch" in
-    "" | *[!A-Za-z0-9._/-]*)
-        echo "dispatch base branch is not a safe ref name: $default_branch" >&2
-        exit 2
-        ;;
-esac
-
-git reset --hard "origin/$default_branch"
-git clean -fd
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+exec bash "$script_dir/../.claude-plugin/scripts/livespec_orchestrator_beads_fabro/commands/_dispatcher_reset_test_wrong_program.sh" "$@"
