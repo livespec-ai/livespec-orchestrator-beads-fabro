@@ -741,6 +741,7 @@ subprocess_spawn_allowlist = [
     "tests/integration/test_review_fix_failed_commit_cause.py",
     "tests/bin/test_host_side_self_contained_import.py",
     "tests/bin/test_bootstrap_unattended_marker_forwarding.py",
+    "tests/bin/test_credential_reexec_passthrough.py",
     "tests/bin/test_payload_retention_after_eviction.py",
     "tests/bin/test_payload_retention_harness.py",
     "tests/bin/test_payload_concurrent_release_isolation.py",
