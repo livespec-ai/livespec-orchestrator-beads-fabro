@@ -45,6 +45,9 @@ from livespec_orchestrator_beads_fabro.commands._config import dispatcher_block
 from livespec_orchestrator_beads_fabro.commands._dispatcher_assertion_count import (
     assertion_count_of,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done import (
+    definition_of_done,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done_advisories import (
     advisory_definition_of_done_findings,
 )
@@ -59,6 +62,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_io import ShellComma
 from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_capabilities import (
     UNPUBLISHED_REPORT,
     mirrored_sandbox_capabilities,
+)
+from livespec_orchestrator_beads_fabro.commands._dod_governing_heading import (
+    governing_heading_findings,
+    governing_heading_holds,
 )
 from livespec_orchestrator_beads_fabro.commands._dod_governing_heading_judge import (
     GoverningHeadingReader,
@@ -233,10 +240,17 @@ def _finding_lines(
     The mechanical ones lead, because they are the ones that withhold `ready`: a
     filer reading top to bottom meets the blocking repair before the advisory one.
     """
-    lines = [
+    mechanical = [
         f"{MECHANICAL_FINDING_PREFIX} {finding}"
         for finding in definition_of_done_findings(item=item, cwd=cwd)
     ]
+    section = definition_of_done(description=item.description)
+    if governing_heading_holds(section=section, verdict=governing):
+        mechanical.extend(
+            f"{MECHANICAL_FINDING_PREFIX} {finding}"
+            for finding in governing_heading_findings(item=item, section=section, verdict=governing)
+        )
+    lines = mechanical
     lines.extend(
         f"{ADVISORY_FINDING_PREFIX} {finding}"
         for finding in advisory_definition_of_done_findings(item=item, cwd=cwd, governing=governing)
