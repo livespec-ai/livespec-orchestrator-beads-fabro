@@ -11410,6 +11410,8 @@ deadline and freshness requirement follow the rules above; the documented
 margin remains implementation-owned. The behavior is exercised by Scenario 18,
 Scenario 19 and Scenario 228 in `scenarios.md`.
 
+**Credential re-exec passthrough.** When a plugin entry point finds its required secrets absent and re-execs through the configured credential_wrapper, the re-executed command's exit code MUST be the entry point's exit code, and everything the re-executed command writes to stderr and stdout MUST reach the caller unchanged. The diagnostic "credential_wrapper could not run in this environment" MUST be emitted only when the wrapper itself failed to start, or when a required secret is demonstrably still absent after the hop, and it MUST name the wrapper and the still-missing secret names and never a secret value. A non-zero exit from the re-executed command with the secrets present MUST NOT be reported as a credential failure and MUST NOT suppress the command's own stderr.
+
 ## Proof credential projection
 
 A governed repository MAY declare `dispatcher.proof_credentials` as a list of

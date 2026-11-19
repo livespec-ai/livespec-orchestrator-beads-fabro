@@ -16144,3 +16144,22 @@ Feature: A factory may hand its sandboxes a gate-Job credential
     When the Dispatcher evaluates the dispatch
     Then it refuses before claim with a diagnostic naming dispatcher.factories.<name>.gates_kubeconfig
 ```
+
+## Scenario 382 — A credential re-exec passes the child's exit code and stderr through
+
+```gherkin
+Feature: A credential_wrapper re-exec does not relabel or swallow the child's failure
+  Scenario: A re-executed command that refuses with the secrets present reports its own refusal
+    Given a plugin entry point whose required secrets are absent from its environment
+    And a credential_wrapper that delivers those secrets to the command it execs
+    When the entry point re-execs through the wrapper and the re-executed command exits non-zero writing only a refusal message to stderr
+    Then the entry point exits with that same non-zero exit code
+    And the refusal message appears on the entry point's stderr
+    And the output does not say the credential_wrapper could not run
+  Scenario: The could-not-run diagnostic names a wrapper that failed to start or secrets still absent
+    Given a plugin entry point whose required secrets are absent from its environment
+    And a credential_wrapper that fails to start or delivers none of the required secrets
+    When the entry point re-execs through the wrapper
+    Then the output says the credential_wrapper could not run in this environment
+    And it names the wrapper and the still-missing secret names and never a secret value
+```
