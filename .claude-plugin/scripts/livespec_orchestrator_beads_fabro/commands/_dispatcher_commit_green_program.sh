@@ -392,17 +392,29 @@ main() {
         return "$status"
     fi
     if [[ "$cause" == LIVESPEC_COMMIT_GREEN_SEEDED_RED_PASSES:* ]]; then
-        if ! git diff --cached --quiet; then
-            cause="${cause}; Green left staged changes despite the already-complete seed"
-            : > "$output"
-            printf '%s\n' "commit_green: $cause" >&2
-            append_verdict "$handoff" 2 "$output" "$cause"
-            append_reentry_class "$handoff" "$output" "$mechanical_targets" "$reentries"
-            return 2
+        if git diff --cached --quiet; then
+            printf '%s\n' "$cause" | tee "$output"
+            append_verdict "$handoff" 0 "$output" "$cause"
+            return 0
         fi
-        printf '%s\n' "$cause" | tee "$output"
-        append_verdict "$handoff" 0 "$output" "$cause"
-        return 0
+        # The seed's tests pass but Green repaired its gate failures and left them
+        # staged (bd-ib-hxifbi).  Land them as the run's own commit and let the
+        # repository hook grade it (suite-green leg: implementation staged with no
+        # Red-awaiting-Green HEAD); no per-test Red is claimed and no trailer is forged.
+        title="${LIVESPEC_PR_TITLE:-}"
+        if [[ -z "$title" ]]; then
+            title="fix: land the seeded run's staged repairs"
+        fi
+        set +e
+        LIVESPEC_AUTHORING_TURN=implement git commit --quiet -m "$title" >"$output" 2>&1
+        status=$?
+        set -e
+        cat "$output"
+        append_verdict "$handoff" "$status" "$output"
+        if (( status != 0 )); then
+            append_reentry_class "$handoff" "$output" "$mechanical_targets" "$reentries"
+        fi
+        return "$status"
     fi
     title="${LIVESPEC_PR_TITLE:-}"
     if [[ -n "$title" ]]; then
