@@ -53,7 +53,7 @@ EMPTY_DIFF_MARKER_MAX_BYTES: Final = 78
 NO_PROGRESS_CONSECUTIVE_STAGE_COUNT: Final = 3
 NO_PROGRESS_TIME_FLOOR_SECONDS: Final = 3600.0
 _NO_PROGRESS_STAGE_BASES: Final = frozenset(
-    {"implement", "red", "green", "fix", "commit_red", "commit_green"}
+    {"implement", "red", "green", "fix", "review_fix", "commit_red", "commit_green"}
 )
 _NUMBERED_STAGE_PREFIX = re.compile(r"^\d+-")
 _NO_PROGRESS_START = RunWallStart(epoch=0.0, source="no-progress-cut")

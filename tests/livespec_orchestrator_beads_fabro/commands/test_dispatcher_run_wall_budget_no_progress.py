@@ -128,6 +128,15 @@ def test_cancel_for_no_progress_leaves_a_run_with_changing_diffs_within_budget()
     assert verdict is _dispatcher_run_wall_budget_watch.RunWallVerdict.WITHIN
 
 
+def test_marker_sized_review_fix_diffs_count_toward_the_no_progress_cut() -> None:
+    cut = _dispatcher_run_wall_budget_no_progress.trailing_empty_implementation_stages(
+        stage_diffs={"review_fix@1": "", "review_fix@2": "", "review_fix@3": ""},
+        consecutive_stage_count=3,
+    )
+
+    assert cut == ("review_fix@1", "review_fix@2", "review_fix@3")
+
+
 def test_nonpositive_k_never_matches_empty_stage_diffs() -> None:
     cut = _dispatcher_run_wall_budget_no_progress.trailing_empty_implementation_stages(
         stage_diffs={"green@1": ""},
