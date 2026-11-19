@@ -42,6 +42,22 @@ run 0 "--fresh records the ruling even when no earlier work exists" STUB_PRS= SE
 [ -s "$RULER_LOG" ] && echo "ok   the ruling is written with no PR and no preserved ref" || { echo "FAIL no ruling written on a clear item"; fail=1; }
 run 8 "a failed ruling write refuses and names the failure" STUB_PRS=5527 SEAT_FRESH_RULING_CMD="$T/ruler-fail" -- --fresh "reason three"
 case "$LAST" in *"ruling write failed"*boom*) echo "ok   the refusal names the failed write";; *) echo "FAIL refusal text: $LAST"; fail=1;; esac
+# The unseamed writer path: a resolver that prints a notice on STDERR must still yield a clean plugin root.
+mkdir -p "$T/plugin/scripts/bin"
+cat > "$T/plugin/scripts/bin/registered_plugin_root.py" <<'RESOLVER'
+import sys
+sys.stderr.write("livespec: required credential env absent; re-invoking under credential_wrapper\n")
+print(__file__.rsplit("/scripts/bin/", 1)[0])
+RESOLVER
+cat > "$T/plugin/scripts/bin/dispatcher.py" <<'DISPATCHER'
+import sys
+print("FRESH-RULING  " + sys.argv[sys.argv.index("--item") + 1] + "  by stub at now")
+DISPATCHER
+printf '#!/bin/bash\nshift\nexec "$@"\n' > "$T/wrapper"; chmod +x "$T/wrapper"
+run 0 "a resolver notice on stderr does not corrupt the plugin root" STUB_PRS= SEAT_PLUGIN_ROOT="$T/plugin" SEAT_ENV_WRAPPER="$T/wrapper" -- --fresh "reason four"
+case "$LAST" in *"fresh ruling recorded"*) echo "ok   the unseamed writer recorded the ruling";; *) echo "FAIL unseamed writer: $LAST"; fail=1;; esac
+run 8 "an unresolvable plugin root refuses and names it" STUB_PRS= SEAT_PLUGIN_ROOT="$T/nonexistent" -- --fresh "reason five"
+case "$LAST" in *"could not resolve the plugin root"*) echo "ok   the refusal names the unresolved root";; *) echo "FAIL root refusal: $LAST"; fail=1;; esac
 run 2 "--fresh without a reason is refused" STUB_PRS=5527 -- --fresh
 run 0 "a seeded ruling passes" STUB_PRS=5527 SEAT_SEEDED_RULING=1 --
 git -C "$T/repo" push -q origin :refs/livespec/preserved-publish/bd-ib-x/abc123
