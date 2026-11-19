@@ -53,6 +53,7 @@ from livespec_orchestrator_beads_fabro.commands._drive_merge_hold_arm_guard impo
     ArmDecision,
     MergeHoldCommandRun,
     arm_decision_for_release,
+    observe_item_run_liveness,
 )
 from livespec_orchestrator_beads_fabro.commands._drive_merge_hold_head_proof import (
     MessageOnlyHeadMove,
@@ -131,6 +132,18 @@ def journaled_merge_method_flag(*, repo: Path, work_item_id: str) -> str | None:
 
 def _hold(*, call: _MergeHoldCall, view: PrView | None) -> dict[str, Any]:
     if view is not None and view.state == _MERGED_STATE:
+        liveness = observe_item_run_liveness(
+            repo=call.repo, work_item_id=call.item.id, runner=call.runner
+        )
+        if liveness.observed and liveness.live_run_ids:
+            update_work_item_merge_hold(path=call.config, item_id=call.item.id, value=True)
+            return _hold_success(
+                call=call,
+                note=(
+                    "live run will publish a held pull request "
+                    f"({', '.join(liveness.live_run_ids)})"
+                ),
+            )
         return valve_refusal(
             aid=call.aid,
             wid=call.item.id,
