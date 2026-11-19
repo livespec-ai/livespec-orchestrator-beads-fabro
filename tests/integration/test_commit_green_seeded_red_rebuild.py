@@ -38,6 +38,11 @@ _RED_SUBJECT = "feat: red"
 @pytest.fixture(autouse=True)
 def _current_fabro_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FABRO_RUN_ID", "run")
+    # These command-program fixtures are not dispatched work items.  They
+    # assert that rebuilding an open seeded Red preserves its own subject, so
+    # the factory's enclosing work-item title must not leak into their child
+    # processes and exercise the dispatched-title branch instead.
+    monkeypatch.delenv("LIVESPEC_PR_TITLE", raising=False)
 
 
 def _git(*, repo: Path, argv: list[str]) -> str:
