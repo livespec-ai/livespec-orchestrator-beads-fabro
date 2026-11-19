@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.343.3](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.2...v0.343.3) (2026-11-19)
+
+
+### Bug Fixes
+
+* red — a seeded run's staged repairs land as the run's commit instead of ending commit_green with SEEDED_RED_PASSES (bd-ib-hxifbi) ([84288a4](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/84288a41b8da038642192e5cc390a747300392d1))
+
 ## [0.343.2](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.1...v0.343.2) (2026-11-19)
 
 
