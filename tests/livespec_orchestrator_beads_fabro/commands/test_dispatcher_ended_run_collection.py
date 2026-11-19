@@ -355,6 +355,36 @@ def test_collecting_a_closed_items_run_deletes_its_refs_and_not_an_open_items(
     assert [call[1:3] for call in runner.calls] == [["dump", "01CLOSED"], ["rm", "01CLOSED"]]
 
 
+def test_one_collection_pass_lists_a_closed_items_shared_preserved_publish_namespace_once(
+    tmp_path: Path,
+) -> None:
+    forge = _Forge()
+
+    collect_closed_ended_runs(
+        inventory=_inventory(
+            runs=(
+                _run(run_id="01FIRST", status_kind="succeeded"),
+                _run(run_id="01SECOND", status_kind="succeeded"),
+            ),
+            statuses={"bd-ib-closed": "closed"},
+            stamps=(
+                ("01FIRST", "bd-ib-closed"),
+                ("01SECOND", "bd-ib-closed"),
+            ),
+        ),
+        port=_port(tmp_path=tmp_path, runner=_Runner()),
+        runner=forge,
+        repo=tmp_path,
+        journal=_Journal(),
+        dry_run=False,
+    )
+
+    shared_namespace = (
+        "/repos/{owner}/{repo}/git/matching-refs/livespec/preserved-publish/bd-ib-closed/"
+    )
+    assert sum(call[3] == shared_namespace for call in forge.calls) == 1
+
+
 def test_dry_run_deletes_no_preservation_ref(tmp_path: Path) -> None:
     forge = _Forge(refs=("refs/heads/needs-human/01CLOSED",))
 
