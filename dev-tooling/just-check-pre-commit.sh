@@ -265,7 +265,20 @@ if [[ -z "$py_staged" ]]; then
         exit 1
     fi
     if [[ -n "$fleet_launch_input_staged" ]]; then
-        just check-fleet-launch
+        # A fleet-launch item's Red commit can stage ONLY harness input, which reaches this
+        # path because no .py is staged (bd-ib-6sfwgo, measured on bd-ib-zdqshg runs
+        # 01M7RYJ0VTEB and 01M7SBAH4NVY). When every staged fleet-launch input lies under
+        # fleet-launch/test/ the commit is test-only, so the Red-mode tolerance applies: a
+        # failing scenario is accepted only when the staged diff adds it. A staged launcher
+        # script or any other declared input keeps the plain, unscoped gate. Pre-push and CI
+        # run the full unscoped harness, so a test-only commit that adds a failing scenario
+        # still cannot reach master.
+        non_harness_input_staged=$(grep -v '^fleet-launch/test/' <<<"$fleet_launch_input_staged" | sed '/^$/d' || true)
+        if [[ -z "$non_harness_input_staged" ]]; then
+            red_fleet_launch_gate
+        else
+            just check-fleet-launch
+        fi
     fi
     exit $?
 fi

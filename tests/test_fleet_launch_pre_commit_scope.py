@@ -194,3 +194,58 @@ def test_red_commit_with_a_passing_fleet_launch_harness_is_accepted(*, tmp_path:
     result = _red_hook(repo=repo, env=env, labels="", rc="0")
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _stage_shell_only_harness_input(*, repo: Path, extra: str | None = None) -> None:
+    """Stage only fleet-launch harness input: a run-tests.sh adding one scenario, and no .py."""
+    harness = repo / "fleet-launch" / "test" / "run-tests.sh"
+    harness.parent.mkdir(parents=True, exist_ok=True)
+    harness.write_text(f"{_RED_SCENARIO}\n", encoding="utf-8")
+    paths = ["fleet-launch/test/run-tests.sh"]
+    if extra is not None:
+        _stage(repo=repo, path=extra)
+        paths.append(extra)
+    result = _run(argv=["git", "add", *paths], cwd=repo, env=dict(os.environ))
+    assert result.returncode == 0, result.stderr
+
+
+def test_shell_only_commit_adding_a_failing_harness_scenario_is_accepted(*, tmp_path: Path) -> None:
+    repo, env = _repository(tmp_path=tmp_path)
+    _stage_shell_only_harness_input(repo=repo)
+
+    result = _red_hook(
+        repo=repo, env=env, labels="31a. a master-CI rate-limit 403 waits with its ticket\n", rc="1"
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "doc-only mode detected" in result.stdout
+
+
+def test_shell_only_commit_leaving_an_existing_scenario_failing_is_refused(
+    *, tmp_path: Path
+) -> None:
+    repo, env = _repository(tmp_path=tmp_path)
+    _stage_shell_only_harness_input(repo=repo)
+
+    result = _red_hook(
+        repo=repo,
+        env=env,
+        labels="31a. a master-CI rate-limit 403 waits with its ticket\n5. an older scenario\n",
+        rc="1",
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "scenario not added by this commit: 5. an older scenario" in result.stderr
+
+
+def test_shell_only_commit_with_a_non_harness_launcher_script_keeps_the_plain_gate(
+    *, tmp_path: Path
+) -> None:
+    repo, env = _repository(tmp_path=tmp_path)
+    _stage_shell_only_harness_input(repo=repo, extra="fleet-launch/dispatch-dual.sh")
+
+    result = _red_hook(
+        repo=repo, env=env, labels="31a. a master-CI rate-limit 403 waits with its ticket\n", rc="1"
+    )
+
+    assert result.returncode != 0, result.stdout + result.stderr
