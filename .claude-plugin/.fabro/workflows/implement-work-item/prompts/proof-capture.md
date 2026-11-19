@@ -515,6 +515,23 @@ ignored. If any proof below happens to print this label, that printed line
 is ignored too — so the declaration above is the only one that counts, and
 naming two different shas in prose makes the record anchor nothing.
 
+That first forge read is **provisional** until the posting boundary. This is
+especially important when this visit is **including a recapture after
+`review_fix`**: that stage can commit and `publish_draft` can move the pull
+request after the earlier read, while this capture is still composing its
+record. **Immediately before `gh pr comment`, read `headRefOid` from the
+forge again** for the same pull request. **If that fresh sha differs from the
+provisional one, replace the one `Publish-branch head:` declaration** in the
+unposted body with the fresh full sha, then **re-run `git fetch --quiet origin
+"refs/pull/<number>/head"` and `git diff --quiet FETCH_HEAD HEAD`**. Apply the
+same status rule above: post only if that repeat check says the newly read
+pull-request head has the tree your steps ran on; otherwise do not declare a
+head and take the no-declaration route above. Because replacing the declaration
+changes the body, measure it again against the Step 5 budget before posting.
+The final forge read, any needed replacement and repeat tree check, final
+measurement, and `gh pr comment` are one posting sequence — do not insert
+another action that could let a newly republished reviewed tree go unread.
+
 Then, **ahead of every numbered step in the body**, declare the directory
 those steps ran from — in PROSE, outside every fenced block:
 
