@@ -115,6 +115,11 @@ def _commit_green(
     *, repo: Path, script: Path, resume_head: str | None
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
+    # This fixture exercises the direct-program fallback, which deliberately
+    # preserves the synthetic Red subject when no dispatched work-item title
+    # exists. A factory injects its own title into the parent environment, but
+    # the temporary repository is not a dispatched work item.
+    env.pop("LIVESPEC_PR_TITLE", None)
     if resume_head is not None:
         env["LIVESPEC_RESUME_PUBLISHED_HEAD"] = resume_head
     return subprocess.run(
