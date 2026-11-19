@@ -222,6 +222,7 @@ from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 from livespec_runtime.cross_repo.types import CrossRepoManifest
 from livespec_runtime.github_auth.errors import GithubAppAuthError
 
+from tests.merge_queue_support import merge_queue_read_answer
 from tests.prepare_step_support import fetch_helpers, readable, runnable_script, steps_in
 
 _GITHUB_APP_ENV_KEYS = (
@@ -553,6 +554,9 @@ class _FakeRunner:
         env: dict[str, str] | None = None,
         stdin: int | None = None,
     ) -> CommandResult:
+        queue_read = merge_queue_read_answer(argv=argv)
+        if queue_read is not None:
+            return queue_read
         assert timeout_seconds > 0
         _ = (env, stdin)
         self.calls.append((argv, cwd))

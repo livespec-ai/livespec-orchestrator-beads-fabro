@@ -77,11 +77,13 @@ __all__: list[str] = [
 # the post-run disposition sequence — long after the poll — and a reading taken
 # there would describe a different moment from the mergeability the ending
 # routed on, with nothing saying the two disagreed.
+# `mergeQueueEntry` is NOT among them: gh 2.96.0 refuses it (`Unknown JSON field`), so asking for it
+# ended every drive whose run merged at stage pr-view (bd-ib-o657q3). Queue membership is read
+# through `gh api graphql` by `view_pr`, and only for an open pull request that is not armed.
 _PR_VIEW_FIELDS = (
     "number",
     "state",
     "autoMergeRequest",
-    "mergeQueueEntry",
     "mergeStateStatus",
     "mergeCommit",
     "statusCheckRollup",

@@ -37,6 +37,8 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_run_status import pa
 from livespec_orchestrator_beads_fabro.store import append_work_item
 from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 
+from tests.merge_queue_support import merge_queue_read_answer
+
 _ITEM_ID = "bd-ib-handoff-edge"
 _RUN_ID = "01M6VNKFXRA85Q8WF0JV23204B"
 _DECLARED_CONFIG = '{"livespec-orchestrator-beads-fabro": {"compat": {"pinned": "master"}}}'
@@ -111,6 +113,9 @@ class _Scripted:
         env: dict[str, str] | None = None,
         stdin: int | None = None,
     ) -> CommandResult:
+        queue_read = merge_queue_read_answer(argv=argv)
+        if queue_read is not None:
+            return queue_read
         _ = (cwd, timeout_seconds, env, stdin)
         self.calls.append(argv)
         return self.queue.pop(0)
