@@ -38,6 +38,11 @@ _RED_SUBJECT = "feat: red"
 @pytest.fixture(autouse=True)
 def _current_fabro_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FABRO_RUN_ID", "run")
+    # A factory run's environment carries the work item's title, and commit_green
+    # rewords the Red subject to it (bd-ib-5ypy5v: the janitor of run 01M7RC21GWBS
+    # failed these tests on exactly that). The scripts under test must see none.
+    monkeypatch.delenv("LIVESPEC_PR_TITLE", raising=False)
+    monkeypatch.delenv("LIVESPEC_PR_BODY_FILE", raising=False)
 
 
 def _git(*, repo: Path, argv: list[str]) -> str:
