@@ -43,6 +43,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_fabro_terminal impor
 from livespec_orchestrator_beads_fabro.commands._dispatcher_hook_verdict import (
     HookVerdict,
     hook_verdict_cause_lines,
+    hook_verdict_for,
     hook_verdict_from_events,
     innermost_cause_label,
 )
@@ -351,6 +352,38 @@ def test_a_completion_without_output_text_is_no_verdict() -> None:
     )
     stream = [_tool_call(seq=1, call_id="exec-o", command=_AMEND_COMMAND), done]
     assert hook_verdict_from_events(events_payload=stream, stage="implement") is None
+
+
+def test_a_commit_gate_script_verdict_reads_targets_before_the_stage_output_tail() -> None:
+    """Scenario 285: command-node output retains targets omitted by a tail-only cause."""
+    full_output = (
+        "Failed targets (2):\n  - check-types\n  - check-lint\n"
+        + ("hook detail\n" * 250)
+        + "summary: check-pre-commit failed\n"
+    )
+    assert len(full_output) > 2000
+    payload = [
+        {
+            "stages": {
+                "commit_green@1": {
+                    "handler": "command",
+                    "state": "failed",
+                    "output": full_output,
+                }
+            }
+        }
+    ]
+    inspect = FabroInspectResult(
+        command=CommandResult(exit_code=0, stdout="", stderr=""),
+        payload=payload,
+        status_kind="failed",
+        failure=None,
+        events_payload=None,
+    )
+
+    assert hook_verdict_for(inspect=inspect, stages=("commit_green@1",)) == HookVerdict(
+        node="commit_green", exit_code=1, failed_targets=("check-types", "check-lint")
+    )
 
 
 def test_the_cause_lines_name_exit_status_and_targets_and_label_a_contradicted_agent_text() -> None:

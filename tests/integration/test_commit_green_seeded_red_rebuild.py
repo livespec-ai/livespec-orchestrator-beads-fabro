@@ -115,6 +115,9 @@ def _commit_green(
     *, repo: Path, script: Path, resume_head: str | None
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
+    # These direct-program fixtures do not represent a dispatched work item.
+    # A factory host's title must not change the seeded Red subject they verify.
+    env.pop("LIVESPEC_PR_TITLE", None)
     if resume_head is not None:
         env["LIVESPEC_RESUME_PUBLISHED_HEAD"] = resume_head
     return subprocess.run(
@@ -130,8 +133,9 @@ _OPEN_RED = (
 
 @pytest.mark.parametrize("script", _GREEN_SCRIPTS, ids=lambda path: path.name)
 def test_a_seeded_red_the_checkpoint_chain_never_carried_is_rebuilt_from_the_seed(
-    tmp_path: Path, script: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, script: Path
 ) -> None:
+    monkeypatch.setenv("LIVESPEC_PR_TITLE", "host dispatch title")
     repo, base, seed_tip = _seeded_run(tmp_path=tmp_path, seed_red_trailers=_OPEN_RED)
 
     completed = _commit_green(repo=repo, script=script, resume_head=seed_tip)

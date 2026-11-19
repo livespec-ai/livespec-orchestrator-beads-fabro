@@ -57,6 +57,7 @@ from typing import TYPE_CHECKING, cast
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_commit_runner import (
     CommitRunResult,
+    failed_targets,
     result_from_observation,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_commit_runner_program import (
@@ -94,6 +95,7 @@ _INTERRUPTION_CLAIM = re.compile(
 
 _TOOL_CALL = "tool_call"
 _TOOL_CALL_UPDATE = "tool_call_update"
+_COMMIT_GATE_NODES = frozenset({"commit_red", "commit_green"})
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -118,9 +120,15 @@ def hook_verdict_for(
     its file-size ceiling, and the conditions it would otherwise spell out — no
     inspect result, no established causal stage — are the reader's own answers.
     """
+    stage = stages[-1] if stages else None
+    command_node_verdict = _commit_gate_verdict(
+        payload=None if inspect is None else inspect.payload, stage=stage
+    )
+    if command_node_verdict is not None:
+        return command_node_verdict
     return hook_verdict_from_events(
         events_payload=None if inspect is None else inspect.events_payload,
-        stage=stages[-1] if stages else None,
+        stage=stage,
     )
 
 
@@ -160,6 +168,32 @@ def hook_verdict_from_events(
     if latest is None or latest.state != "failed" or latest.exit_code is None:
         return None
     return HookVerdict(node=node, exit_code=latest.exit_code, failed_targets=latest.failed_targets)
+
+
+def _commit_gate_verdict(*, payload: object | None, stage: str | None) -> HookVerdict | None:
+    """Read a failed commit command node's whole output, before cause rendering tails it.
+
+    Commit gates are command nodes, so their output is retained in the inspect
+    record's stage map rather than in ACP tool-call events.  The command node's
+    failed state establishes its non-zero exit; older Fabro records omit the
+    numeric status, for which the command convention's status 1 is retained.
+    """
+    if stage is None:
+        return None
+    node = _node_id(stage=stage)
+    if node not in _COMMIT_GATE_NODES:
+        return None
+    record = _inspect_record(payload=payload)
+    stage_record = _mapping(value=_mapping(value=record.get("stages")).get(stage))
+    if stage_record.get("handler") != "command" or stage_record.get("state") != "failed":
+        return None
+    output = stage_record.get("output")
+    if not isinstance(output, str):
+        return None
+    exit_code = stage_record.get("exit_code")
+    if not isinstance(exit_code, int) or isinstance(exit_code, bool) or exit_code == 0:
+        exit_code = 1
+    return HookVerdict(node=node, exit_code=exit_code, failed_targets=failed_targets(output=output))
 
 
 def hook_verdict_cause_lines(
@@ -249,6 +283,17 @@ def _envelope_node(*, envelope: dict[str, object]) -> str:
 def _node_id(*, stage: str) -> str:
     """`implement` for `implement`, `implement@1` and `050-implement@1` alike."""
     return re.sub(r"^\d+-", "", stage.split("@", maxsplit=1)[0].strip())
+
+
+def _inspect_record(*, payload: object | None) -> dict[str, object]:
+    """The first inspect record, accepting both Fabro's list and map shapes."""
+    if isinstance(payload, dict):
+        return cast("dict[str, object]", payload)
+    if isinstance(payload, list):
+        for entry in cast("list[object]", payload):
+            if isinstance(entry, dict):
+                return cast("dict[str, object]", entry)
+    return {}
 
 
 def _mapping(*, value: object) -> dict[str, object]:
