@@ -118,8 +118,12 @@ try:
     from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_preflight_reuse import (
         identity_for_dod_taking,
     )
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_workflow_digest import (
+        workflow_graph_digest,
+    )
 except ImportError:
     identity_for_dod_taking = None
+    workflow_graph_digest = None
 
 # The reading is the package's own seam: a recorded verdict the component's reuse
 # rule still allows decides and starts no judge candidate, as at the gate. The
@@ -214,16 +218,26 @@ identity = (
     if identity_for_dod_taking is None
     else identity_for_dod_taking(item=item, cwd=repo, comments=comments, governing=governing)
 )
+graph_digest = (
+    None
+    if workflow_graph_digest is None
+    else workflow_graph_digest(repo=repo, item_id=item.id)
+)
 Path(f"{side}.record").write_text(
     json.dumps(
         {
             "item_id": item.id,
             "subject_digest": judgement_subject_digest(
-                item=item, cwd=repo, comments=comments, spec_identity=identity.value
+                item=item,
+                cwd=repo,
+                comments=comments,
+                spec_identity=identity.value,
+                workflow_graph_digest=graph_digest,
             ),
             "rubric_digest": rubric_digest(rubric=rubric),
             "spec_identity_form": identity.form,
             "spec_identity": identity.value,
+            "workflow_graph_digest": graph_digest,
             "records_verdict": identity_for_dod_taking is not None,
             "subject_characters": len(subject),
             "carried_rider_count": sum(
@@ -354,6 +368,7 @@ if record["records_verdict"]:
             spec_identity=SpecIdentity(
                 form=record["spec_identity_form"], value=record["spec_identity"]
             ),
+            workflow_graph_digest=record["workflow_graph_digest"],
         ),
     )
 outcome = judgement.outcome

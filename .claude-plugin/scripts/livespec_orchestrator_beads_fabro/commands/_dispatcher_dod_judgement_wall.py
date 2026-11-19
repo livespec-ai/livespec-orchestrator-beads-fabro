@@ -118,7 +118,11 @@ def dod_judgement_refusal(
         if _exempt(repo=repo, item=item, workflow_name=workflow_name):
             continue
         decision = judge_item_definition_of_done(
-            item=item, repo=repo, path=config, stage=STAGE_PRE_DISPATCH
+            item=item,
+            repo=repo,
+            path=config,
+            stage=STAGE_PRE_DISPATCH,
+            workflow_name=workflow_name,
         )
         append = getattr(journal, "append", None)
         if append is not None and decision.spec_identity is not None:
@@ -136,6 +140,24 @@ def dod_judgement_refusal(
                 " Definition-of-Done judgement; no claim was taken and no factory"
                 " run was created. The verdict, with each remedy, is recorded on"
                 f" the item.\n{findings}\n"
+            )
+        if (
+            decision.outcome == "did-not-run"
+            and decision.recorded_workflow_graph_digest is not None
+            and decision.workflow_graph_digest is not None
+            and (
+                decision.recorded_workflow_graph_digest != decision.workflow_graph_digest
+                or decision.recorded_spec_identity
+                != (None if decision.spec_identity is None else decision.spec_identity.value)
+            )
+        ):
+            return (
+                f"REFUSED: work-item {item.id} has a stale Definition-of-Done verdict and the "
+                "pre-ticket screen could not re-judge it; no claim was taken and no factory run "
+                f"was created. recorded spec digest: {decision.recorded_spec_identity}; current "
+                f"spec digest: {decision.spec_identity.value if decision.spec_identity else None}; "
+                f"recorded workflow graph digest: {decision.recorded_workflow_graph_digest}; "
+                f"current workflow graph digest: {decision.workflow_graph_digest}."
             )
     return None
 
@@ -165,7 +187,12 @@ def dod_unrefused_candidates(
         item
         for item in items
         if _exempt(repo=repo, item=item, workflow_name=workflow_name)
-        or not _is_held(item=item, repo=repo, config=config)
+        or not _is_held(
+            item=item,
+            repo=repo,
+            config=config,
+            workflow_name=workflow_name,
+        )
     ]
 
 
@@ -200,8 +227,11 @@ def _exempt(*, repo: Path, item: WorkItem, workflow_name: str | None) -> bool:
     ).exempt
 
 
-def _is_held(*, item: WorkItem, repo: Path, config: StoreConfig) -> bool:
+def _is_held(*, item: WorkItem, repo: Path, config: StoreConfig, workflow_name: str | None) -> bool:
     bodies = judgement_comment_bodies(path=config, work_item_id=item.id, repo=repo)
     if bodies is None:
         return False
-    return held_judgement(item=item, repo=repo, comments=bodies) is not None
+    return (
+        held_judgement(item=item, repo=repo, comments=bodies, workflow_name=workflow_name)
+        is not None
+    )

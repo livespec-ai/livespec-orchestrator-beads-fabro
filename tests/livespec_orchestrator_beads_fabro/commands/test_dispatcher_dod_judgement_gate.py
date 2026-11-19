@@ -68,6 +68,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_record
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_run import (
     dod_gate_prompt_path,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_workflow_digest import (
+    workflow_graph_digest,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
 from livespec_orchestrator_beads_fabro.commands._dod_governing_heading_judge import (
     governing_heading_verdict,
@@ -524,8 +527,16 @@ def test_every_appended_judgement_record_names_the_subject_and_rubric_digests(
         payload / ".fabro" / "workflows" / "implement-work-item" / "prompts" / "dod-gate.md"
     ).read_bytes()
     expected_rubric = hashlib.sha256(rubric).hexdigest()
+    repo = _repo(tmp_path=tmp_path)
+    identity = gate_module.identity_for_dod_taking(
+        item=_item(), cwd=repo, comments=(), governing=None
+    )
     expected_subject = judgement_subject_digest(
-        item=_item(), cwd=_repo(tmp_path=tmp_path), comments=()
+        item=_item(),
+        cwd=repo,
+        comments=(),
+        spec_identity=identity.value,
+        workflow_graph_digest=gate_module.workflow_graph_digest(repo=repo, item_id=_item().id),
     )
 
     held = _Ledger()
@@ -548,6 +559,41 @@ def test_every_appended_judgement_record_names_the_subject_and_rubric_digests(
     for body in (held.bodies[0], unavailable.bodies[0]):
         assert f"subject-digest: {expected_subject}" in body
         assert f"rubric-digest: {expected_rubric}" in body
+
+
+def test_a_changed_workflow_graph_retires_the_recorded_verdict_and_rejudges(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cached answer is about the graph that will run, not prose alone."""
+    graph = iter(("graph-before", "graph-after"))
+    monkeypatch.setattr(gate_module, "workflow_graph_digest", lambda **_kwargs: next(graph))
+    ledger = _Ledger()
+    runner = _Runner(results=[CommandResult(exit_code=0, stdout=_PASS_REPLY, stderr="")])
+
+    first = _judge(tmp_path=tmp_path, ledger=ledger, runner=runner)
+    second = _judge(tmp_path=tmp_path, ledger=ledger, runner=runner)
+
+    assert first.reused is False
+    assert second.reused is False
+    assert runner.calls == 2
+    assert "workflow-graph-digest: graph-before" in ledger.bodies[0]
+    assert "workflow-graph-digest: graph-after" in ledger.bodies[1]
+
+
+def test_the_workflow_digest_changes_with_the_committed_graph(tmp_path: Path) -> None:
+    repo = _repo(tmp_path=tmp_path)
+    workflow = repo / ".fabro" / "workflows" / "implement-work-item"
+    workflow.mkdir(parents=True)
+    _ = (workflow / "workflow.toml").write_text(
+        '[workflow]\ngraph = "workflow.fabro"\n', encoding="utf-8"
+    )
+    graph = workflow / "workflow.fabro"
+    _ = graph.write_text("digraph { start -> dod_gate }\n", encoding="utf-8")
+
+    before = workflow_graph_digest(repo=repo, item_id=_item().id)
+    _ = graph.write_text("digraph { start -> review }\n", encoding="utf-8")
+
+    assert workflow_graph_digest(repo=repo, item_id=_item().id) != before
 
 
 def test_an_unrelated_spec_revision_reuses_the_governing_heading_verdict(

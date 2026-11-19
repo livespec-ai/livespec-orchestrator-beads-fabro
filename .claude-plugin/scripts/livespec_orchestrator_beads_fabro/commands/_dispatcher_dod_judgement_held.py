@@ -22,13 +22,21 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_record
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_run import (
     judgement_rubric,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_workflow_digest import (
+    workflow_graph_digest,
+)
 from livespec_orchestrator_beads_fabro.types import WorkItem
 
 __all__: list[str] = ["held_judgement"]
 
 
 def held_judgement(
-    *, item: WorkItem, repo: Path, comments: tuple[str, ...], payload_root: Path | None = None
+    *,
+    item: WorkItem,
+    repo: Path,
+    comments: tuple[str, ...],
+    payload_root: Path | None = None,
+    workflow_name: str | None = None,
 ) -> RecordedJudgement | None:
     """Return the standing refusal without taking or recording a judgement."""
     rubric = judgement_rubric(payload_root=payload_root)
@@ -36,13 +44,19 @@ def held_judgement(
         return None
     governing = reusable_governing_heading_verdict(item=item, repo=repo, comments=comments)
     identity = identity_for_dod_taking(item=item, cwd=repo, comments=comments, governing=governing)
+    graph_digest = workflow_graph_digest(repo=repo, item_id=item.id, workflow_name=workflow_name)
     recorded = reusable_verdict(
         comments=comments,
         digest=judgement_subject_digest(
-            item=item, cwd=repo, comments=comments, spec_identity=identity.value
+            item=item,
+            cwd=repo,
+            comments=comments,
+            spec_identity=identity.value,
+            workflow_graph_digest=graph_digest,
         ),
         rubric_digest=rubric_digest(rubric=rubric),
         spec_identity=identity,
+        workflow_graph_digest=graph_digest,
     )
     if recorded is None or recorded.outcome != JUDGEMENT_HELD:
         return None
