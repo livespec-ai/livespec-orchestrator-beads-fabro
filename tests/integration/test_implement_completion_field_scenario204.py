@@ -68,6 +68,10 @@ _JANITOR = "janitor"
 # resolved through `git rev-parse --git-path` so it lands in the clone's own
 # `$GIT_DIR` rather than in the worktree a checkpoint commit would carry.
 _RECORD_GIT_PATH = "livespec-implement-completion"
+# The preview program writes this per-Green-turn result before its JSON report
+# reaches the agent.  The completion gate is deliberately driven by that
+# recorded tool result, rather than a claim in the append-only handoff.
+_GREEN_PREVIEW_RECORD_GIT_PATH = "livespec-implement-gate-preview-green-result.json"
 # The stage-cause pair the `needs_human` terminal renders as the recorded
 # question, written by the same convention `pr_refresh` writes it with.
 _STAGE_CAUSE_GIT_PATH = "livespec-stage-cause"
@@ -349,6 +353,37 @@ def test_a_turn_whose_field_reports_the_work_complete_keeps_its_routing(tmp_path
         assert result.returncode == 0, (name, result.stderr)
         assert _COMPLETE_SENTINEL in result.stderr, name
         assert not (repo / ".git" / _STAGE_CAUSE_GIT_PATH).exists(), name
+
+
+def test_a_failed_recorded_green_preview_refuses_a_claimed_complete_handoff(
+    tmp_path: Path,
+) -> None:
+    """The Green retry is driven by the tool result, never the agent's prose."""
+    repo = _clone(tmp_path=tmp_path)
+    _recorded(repo=repo, field=_COMPLETE_FIELD)
+    _ = (repo / ".git" / _GREEN_PREVIEW_RECORD_GIT_PATH).write_text(
+        json.dumps(
+            {
+                "failed_targets": ["check-per-file-coverage"],
+                "preview_ran": True,
+                "status": 1,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    handoff = repo / ".git" / "livespec-implement-handoff.md"
+    _ = handoff.write_text(
+        "## green\n" "preview exit status: 0; failed targets: none\n",
+        encoding="utf-8",
+    )
+
+    result = _graded(repo=repo, response=_COMPLETE_FIELD)
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"preferred_next_label": "incomplete"}
+    assert "check-per-file-coverage" in result.stderr
+    assert "check-per-file-coverage" in handoff.read_text(encoding="utf-8")
 
 
 def test_a_complete_structured_final_reply_succeeds_without_a_completion_record(
