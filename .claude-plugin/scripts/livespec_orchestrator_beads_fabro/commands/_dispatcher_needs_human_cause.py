@@ -49,6 +49,7 @@ comment.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from livespec_orchestrator_beads_fabro._store_comments import (
@@ -108,6 +109,8 @@ __all__: list[str] = [
 
 NEEDS_HUMAN_CAUSE_MARKER = "livespec-needs-human-cause"
 
+_SIGNATURE_TOKEN_RE = re.compile(r"\bLIVESPEC_[A-Z0-9_]+\b")
+
 _LEDGER_WRITE_ERRORS = (
     WorkItemNotFoundError,
     BeadsCommandError,
@@ -133,35 +136,44 @@ def record_needs_human_cause(
     item: WorkItem,
     outcome: DispatchOutcome,
     journal: JournalFile,
-) -> None:
-    """Append the causal record for a non-green Fabro terminal, once.
+) -> str | None:
+    """Append the durable terminal record for a Fabro run, once.
 
-    Returns without writing for any outcome other than a failed or blocked
-    terminal carrying the causal verdict. The writer runs inside the shared
-    post-run disposition sequence, which every outcome passes through, so the
-    status guard is what keeps this record an account of an ending that
-    actually happened rather than a note on every dispatch. A non-zero Fabro
-    terminal can be a direct failure as well as a needs-human block; both need
-    the same durable causal account on the item.
+    The writer runs inside the shared post-run disposition sequence, which
+    every outcome passes through.  A Fabro run id is the proof that this is an
+    ending rather than an intermediate dispatch outcome: without it there is
+    no run to name on the item.  Green terminals retain their compact outcome
+    record; failed and blocked terminals retain the causal record operators
+    need after Fabro has pruned the run.
 
-    A ledger write failure is JOURNALED and never raised. The run has already
-    ended and the lifecycle write that matters — `blocked` / `needs-human` —
-    is `_dispatcher_blocked`'s and has its own error arm; losing this record
-    costs an operator the durable account, which is worth a journal row and is
-    not worth converting into a dispatch failure after the fact.
+    A ledger write failure is JOURNALED rather than raised, but is returned to
+    the shared disposition sequence.  That caller turns it into the dispatch's
+    non-zero result, where the run id and missing field are visible to the
+    operator.  Keeping this primitive non-throwing preserves its use by the
+    stranded-claim reconciler, which has no drive result to revise.
     """
-    if outcome.status not in {"blocked", "failed"}:
-        return
-    if outcome.needs_human_kind is None:
-        return
+    if outcome.fabro_run_id is None or outcome.status not in {"green", "failed", "blocked"}:
+        return None
+    if outcome.status == "green":
+        body = _successful_terminal_body(outcome=outcome)
+    else:
+        # A dispatcher-side terminal (such as an exhausted merge poll) refers
+        # to an earlier run but is not a finished non-zero Fabro run.  Preserve
+        # its established specialist record rather than falsely attaching the
+        # factory-run cause contract to it.
+        if outcome.stage != "fabro-run":
+            return None
+        if outcome.needs_human_kind is None:
+            return None
+        body = needs_human_cause_body(
+            outcome=outcome,
+            preserve_by_reference=_preserve_by_reference_for_run(repo=repo, outcome=outcome),
+        )
     written = attempt(
         action=lambda: append_work_item_comment(
             path=store_config(repo=repo),
             work_item_id=item.id,
-            body=needs_human_cause_body(
-                outcome=outcome,
-                preserve_by_reference=_preserve_by_reference_for_run(repo=repo, outcome=outcome),
-            ),
+            body=body,
         ),
         exceptions=_LEDGER_WRITE_ERRORS,
     )
@@ -178,6 +190,22 @@ def record_needs_human_cause(
     if isinstance(written, AttemptFailure):
         record["reason"] = type(written.error).__name__
     journal.append(record=record)
+    if isinstance(written, AttemptFailure):
+        return f"ledger comment: {type(written.error).__name__} prevented the outcome record"
+    return None
+
+
+def _successful_terminal_body(*, outcome: DispatchOutcome) -> str:
+    """Render the compact durable account required for a successful ending."""
+    return "\n".join(
+        (
+            NEEDS_HUMAN_CAUSE_MARKER,
+            "",
+            f"work-item: {outcome.work_item_id}",
+            f"run id: {outcome.fabro_run_id}",
+            f"terminal outcome: {outcome.detail}",
+        )
+    )
 
 
 def needs_human_cause_body(
@@ -263,9 +291,32 @@ def _attribution(*, outcome: DispatchOutcome) -> tuple[str, ...]:
     lines.extend(node_timeout_cut_cause_lines(cut=outcome.node_timeout_cut))
     if outcome.fabro_failure_category is not None:
         lines.append(f"failure category: {outcome.fabro_failure_category}")
+    signature = _signature_token(outcome=outcome)
+    lines.append(f"failure signature: {signature or 'no signature'}")
+    # Keep the engine's complete signature beside the required, stable token.
+    # The complete value can carry category and reason that a triager needs,
+    # while the token is the fleet-wide correlation key the outcome contract
+    # requires.  A non-LIVESPEC engine signature therefore remains evidence,
+    # but never masquerades as that token.
     if outcome.fabro_failure_signature is not None:
-        lines.append(f"failure signature: {_safe(text=outcome.fabro_failure_signature)}")
+        lines.append(f"engine failure signature: {_safe(text=outcome.fabro_failure_signature)}")
     return tuple(lines)
+
+
+def _signature_token(*, outcome: DispatchOutcome) -> str | None:
+    """Return the first recorded LIVESPEC signature token, if one exists."""
+    for text in (
+        outcome.fabro_failure_signature,
+        outcome.fabro_failure_cause,
+        outcome.needs_human_reason,
+        outcome.detail,
+    ):
+        if text is None:
+            continue
+        match = _SIGNATURE_TOKEN_RE.search(text)
+        if match is not None:
+            return match.group(0)
+    return None
 
 
 def _sandbox_acquire_evidence(

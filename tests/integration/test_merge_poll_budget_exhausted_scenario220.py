@@ -43,6 +43,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
 from livespec_orchestrator_beads_fabro.commands._dispatcher_loop_selection import (
     post_run_dispositions,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_needs_human_cause import (
+    NEEDS_HUMAN_CAUSE_MARKER,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import DispatchPlan, build_plan
 from livespec_orchestrator_beads_fabro.store import append_work_item, read_work_items
 from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
@@ -365,7 +368,18 @@ def test_a_pull_request_merged_on_the_final_read_is_not_rested(
     assert outcome.status != "blocked"
     assert outcome.pr_number == 3913
     assert _rested().status == "active"
-    assert read_work_item_comments(path=_store(), work_item_id=_ITEM_ID) == ()
+    comments = read_work_item_comments(path=_store(), work_item_id=_ITEM_ID)
+    assert [comment.text for comment in comments] == [
+        "\n".join(
+            (
+                NEEDS_HUMAN_CAUSE_MARKER,
+                "",
+                f"work-item: {_ITEM_ID}",
+                "run id: 01M62WN80GEF",
+                "terminal outcome: merged, post-merge janitor green",
+            )
+        )
+    ]
     assert [r for r in journal.records if r.get("stage") == "needs-human-blocked"] == []
 
 

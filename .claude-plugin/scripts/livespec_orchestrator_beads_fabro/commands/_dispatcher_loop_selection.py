@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
@@ -105,6 +105,7 @@ __all__: list[str] = [
     "prepare",
     "ready_item_ids",
     "ready_items",
+    "record_terminal_outcome",
     "run_id",
 ]
 
@@ -316,7 +317,7 @@ def post_run_dispositions(  # noqa: PLR0913 — kw-only post-run stage; each fie
         # then never applied. A no-op for every outcome that is not a
         # needs-human ending, and for the groom-cut path above, whose own
         # comment is that run's terminal record.
-        record_needs_human_cause(repo=repo, item=item, outcome=outcome, journal=journal)
+        outcome = record_terminal_outcome(repo=repo, item=item, outcome=outcome, journal=journal)
     # Every non-green terminal route, as one group: the non-convergence bounce,
     # the stall-watchdog cancellation, and the provider-limit release. They are
     # mutually exclusive by predicate, so the order among them cannot change
@@ -338,6 +339,51 @@ def post_run_dispositions(  # noqa: PLR0913 — kw-only post-run stage; each fie
     # LAST, so the forge read and ledger write sit behind every state change.
     _record_wip_capture_receipt(args=args, repo=repo, item=item, outcome=outcome, journal=journal)
     return outcome
+
+
+def record_terminal_outcome(
+    *, repo: Path, item: WorkItem, outcome: DispatchOutcome, journal: JournalFile
+) -> DispatchOutcome:
+    """Write the run's durable outcome, or make a failed write visible to drive.
+
+    The writer records its own failure in the journal because that is useful
+    forensic evidence, but the journal is host-local and cannot discharge the
+    item-facing terminal-record obligation.  Make the terminal result failed
+    so `dispatch_exit_code` is non-zero and prints this diagnostic in the
+    dispatch outcome.
+    """
+    problem = _terminal_record_problem(outcome=outcome)
+    if problem is None:
+        problem = record_needs_human_cause(repo=repo, item=item, outcome=outcome, journal=journal)
+    if problem is None or outcome.fabro_run_id is None:
+        return outcome
+    prefix = f"LIVESPEC_TERMINAL_RECORDING_FAILED: run {outcome.fabro_run_id};"
+    diagnostic = f"{prefix} could not record {problem}"
+    detail = "\n".join(part for part in (outcome.detail, diagnostic) if part)
+    return replace(outcome, status="failed", detail=detail)
+
+
+def _terminal_record_problem(*, outcome: DispatchOutcome) -> str | None:
+    """Name evidence a terminal comment needs before a write is attempted."""
+    if outcome.fabro_run_id is None or outcome.status not in {"green", "failed", "blocked"}:
+        return None
+    if outcome.status == "green":
+        return (
+            None
+            if outcome.detail.strip()
+            else "terminal outcome: the finished run reported an empty terminal outcome"
+        )
+    # A post-run dispatcher decision can itself be blocked or failed while
+    # referring to an earlier successful Fabro run (for example merge-poll).
+    # It did not observe a non-zero factory exit, so it neither owes nor can
+    # honestly invent that exit's node, visit, signature, and reason.
+    if outcome.stage != "fabro-run":
+        return None
+    if outcome.needs_human_kind is None or not outcome.needs_human_stages:
+        return "failing node and visit: the finished run supplied no causal stage"
+    if outcome.needs_human_reason is None or outcome.needs_human_reason.strip() == "":
+        return "terminal reason: the finished run supplied no terminal reason"
+    return None
 
 
 def _record_wip_capture_receipt(

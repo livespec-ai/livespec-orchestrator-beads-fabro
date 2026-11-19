@@ -58,6 +58,7 @@ def test_loop_selection_records_receipt_after_every_state_change(
         ("record_wip_capture_receipt", None),
     ):
         monkeypatch.setattr(selection, name, _spy(calls=calls, name=name, result=result))
+    monkeypatch.setattr(selection, "record_terminal_outcome", lambda **kwargs: kwargs["outcome"])
     journal = SimpleNamespace(path=tmp_path / "journal", append=_spy(calls=[], name="append"))
     outcome = _Outcome()
 
