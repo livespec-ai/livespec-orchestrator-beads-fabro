@@ -20,10 +20,11 @@ _PRE_COMMIT = _REPO_ROOT / "dev-tooling" / "just-check-pre-commit.sh"
 _CHECK_CHANGED = _REPO_ROOT / "dev-tooling" / "just-check-changed.sh"
 _WORKFLOW = ".claude-plugin/.fabro/workflows/implement-work-item/workflow.fabro"
 _WIDGET = ".claude-plugin/scripts/livespec_orchestrator_beads_fabro/widget.py"
-_AGGREGATE = "check-skipping check-codex-skill-picker"
+_FLEET_LAUNCH_GATE = "check-fleet-launch"
+_AGGREGATE = f"check-skipping check-codex-skill-picker {_FLEET_LAUNCH_GATE}"
 _RED_MODE = (
     "check-skipping check-coverage check-per-file-coverage check-check-coverage-incremental"
-    " check-codex-skill-picker"
+    f" check-codex-skill-picker {_FLEET_LAUNCH_GATE}"
 )
 
 

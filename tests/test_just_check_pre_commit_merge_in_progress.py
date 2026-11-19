@@ -116,7 +116,7 @@ def test_a_merge_staging_product_python_runs_the_evidence_writing_aggregate(
 
     calls = _run(repo=repo, env=env, log=log)
 
-    assert "just check-skipping check-codex-skill-picker" in calls
+    assert "just check-skipping check-codex-skill-picker check-fleet-launch" in calls
     assert not any("check-red-green-replay" in call for call in calls)
     assert not any("check-staged-precheck" in call for call in calls)
     assert any("green_token write-pre-commit pre-commit-aggregate:" in call for call in calls)
@@ -146,5 +146,8 @@ def test_the_same_staged_change_without_a_merge_keeps_the_green_amend_branch(
     calls = _run(repo=repo, env=env, log=log)
 
     assert "just check-staged-precheck" in calls
-    assert "just check-skipping check-red-green-replay check-codex-skill-picker" in calls
+    assert (
+        "just check-skipping check-red-green-replay check-codex-skill-picker check-fleet-launch"
+        in calls
+    )
     assert not any("green_token write-pre-commit" in call for call in calls)
