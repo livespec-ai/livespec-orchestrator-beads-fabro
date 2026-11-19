@@ -165,6 +165,7 @@ FOLDED_CHECKPOINTS_SENTINEL = "LIVESPEC_COMMIT_RUNNER_FOLDED_CHECKPOINTS"
 FAILING_FILE_CAP = 40
 COVERAGE_TARGETS = frozenset({"check-per-file-coverage", "check-check-coverage-incremental"})
 LLOC_TARGETS = frozenset({"check-file-lloc"})
+SOFT_BAND_TARGETS = frozenset({"check-no-lloc-soft-warnings"})
 # A coverage table row: name, statements, misses, optional branch columns, cover, missing.
 COVERAGE_ROW = re.compile(
     r"^(?P<name>\S+)\s+\d+\s+\d+(?:\s+\d+\s+\d+)?\s+(?P<cover>\d+(?:\.\d+)?)%"
@@ -172,6 +173,8 @@ COVERAGE_ROW = re.compile(
 )
 BELOW_COVERAGE_EVENT = "file below 100% coverage"
 LLOC_EVENT_PREFIX = "file LLOC exceeds"
+SOFT_BAND_EVENT_PREFIX = "file in 201-250 LLOC soft band"
+SOFT_BAND_NO_MARKER = "no owning work-item marker"
 # The aggregate prints each target's own section behind this header, and its summary last.
 TARGET_SECTION_HEADER = re.compile(r"^::: just (\S+)")
 SUMMARY_MARKER = "--- parallel check summary ---"
@@ -710,7 +713,7 @@ def coverage_row_file(line):
     return row.group("name"), detail
 
 
-def event_file(event, coverage, lloc):
+def event_file(event, coverage, lloc, soft_band=False):
     """A check's failing-file event as (file, detail), or None."""
     name = event.get("file")
     message = str(event.get("event", ""))
@@ -726,6 +729,13 @@ def event_file(event, coverage, lloc):
             "LLOC " + str(event.get("lloc")) + " over the "
             + str(event.get("hard_ceiling")) + "-line hard ceiling"
         )
+    if soft_band and message.startswith(SOFT_BAND_EVENT_PREFIX) and event.get("failing") is True:
+        reason = (
+            SOFT_BAND_NO_MARKER
+            if SOFT_BAND_NO_MARKER in message
+            else "owning work-item closed or nonexistent"
+        )
+        return name, "LLOC " + str(event.get("lloc")) + " in the soft band, " + reason
     return None
 
 
@@ -801,12 +811,13 @@ def failing_files(text, targets):
     """
     coverage = bool(COVERAGE_TARGETS.intersection(targets))
     lloc = bool(LLOC_TARGETS.intersection(targets))
+    soft_band = bool(SOFT_BAND_TARGETS.intersection(targets))
     found = lint_type_files(text, targets)
     for line in text.splitlines():
         row = coverage_row_file(line) if coverage else None
         if row is None:
             event = structured_event(line)
-            row = None if event is None else event_file(event, coverage, lloc)
+            row = None if event is None else event_file(event, coverage, lloc, soft_band)
         if row is None:
             continue
         name = row[0][2:] if row[0].startswith("./") else row[0]
