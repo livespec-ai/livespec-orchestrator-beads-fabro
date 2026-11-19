@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.344.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.10...v0.344.0) (2026-11-19)
+
+
+### Features
+
+* admit merged proof-only resumes ([ee4dd8f](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/ee4dd8fee53486994db4a9aa80b28ef69fdd9f21))
+
+
+### Bug Fixes
+
+* record the parking record a merged proof-only resume runs under ([381a97a](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/381a97af4a3cbf66b0941c3e7669dec95d3a142f))
+
 ## [0.343.10](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.9...v0.343.10) (2026-11-19)
 
 
