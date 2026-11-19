@@ -318,7 +318,10 @@ def test_hold_is_refused_naming_the_merge_when_the_pull_request_already_merged(
 ) -> None:
     repo = _repo(tmp_path)
     runner = _Runner(
-        results=[_Run(returncode=0, stdout=_pr_json(state="MERGED", merge_sha="abc1234"))]
+        results=[
+            _Run(returncode=0, stdout=_pr_json(state="MERGED", merge_sha="abc1234")),
+            _Run(returncode=0, stdout=_ps_json()),
+        ]
     )
 
     result = run_human_valve_action(
@@ -329,12 +332,42 @@ def test_hold_is_refused_naming_the_merge_when_the_pull_request_already_merged(
     assert result["domain_error"] == "already-merged"
     assert "#7" in str(result["summary"])
     assert "abc1234" in str(result["summary"])
-    assert runner.calls == [_view_argv()]
+    assert len(runner.calls) == 2
+    assert runner.calls[0] == _view_argv()
+
+
+def test_hold_binds_to_a_live_runs_coming_pull_request_before_an_earlier_one_merged(
+    tmp_path: Path,
+) -> None:
+    """A live run gives the hold a future pull request despite a merged earlier one."""
+    repo = _repo(tmp_path)
+    runner = _Runner(
+        results=[
+            _Run(returncode=0, stdout=_pr_json(state="MERGED", merge_sha="abc1234")),
+            _Run(returncode=0, stdout=_ps_json(run_ids=("01MLIVE",))),
+        ]
+    )
+
+    result = run_human_valve_action(
+        repo=repo, action_id=f"set-merge-hold:{_ITEM_ID}:on", runner=runner
+    )
+
+    assert result["status"] == "green", result
+    assert _held()
+    assert "live run will publish a held pull request" in str(result["summary"])
+    assert len(runner.calls) == 2
+    assert runner.calls[0] == _view_argv()
+    assert runner.calls[1][-3:] == ("ps", "-a", "--json")
 
 
 def test_hold_refusal_names_the_pull_request_even_with_no_merge_commit(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    runner = _Runner(results=[_Run(returncode=0, stdout=_pr_json(state="MERGED"))])
+    runner = _Runner(
+        results=[
+            _Run(returncode=0, stdout=_pr_json(state="MERGED")),
+            _Run(returncode=0, stdout=_ps_json()),
+        ]
+    )
 
     result = run_human_valve_action(
         repo=repo, action_id=f"set-merge-hold:{_ITEM_ID}:on", runner=runner
