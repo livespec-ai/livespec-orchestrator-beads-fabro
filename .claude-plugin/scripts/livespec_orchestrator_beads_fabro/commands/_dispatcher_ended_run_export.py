@@ -27,7 +27,19 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_runs_export import (
+    LedgerComments,
+)
 from livespec_orchestrator_beads_fabro.commands._fabro_port import FabroPort
+from livespec_orchestrator_beads_fabro.effects import attempt
+from livespec_orchestrator_beads_fabro.errors import (
+    BeadsCommandError,
+    BeadsConnectionError,
+    BeadsMappingError,
+    BeadsTenantMissingError,
+    ConnectionPrefixMissingError,
+    WorkItemNotFoundError,
+)
 
 __all__: list[str] = [
     "EXPORT_CEILING_BYTES",
@@ -40,7 +52,9 @@ __all__: list[str] = [
     "EndedRunExport",
     "disk_pressure",
     "export_ended_run",
+    "export_run_before_removal",
     "prune_expired_exports",
+    "report_export_hold",
 ]
 
 EXPORT_ROOT = Path("tmp") / "ended-run-exports"
@@ -58,6 +72,15 @@ MIN_FREE_FRACTION = 0.05
 _MANIFEST_NAME = "MANIFEST.json"
 _DUMP_TIMEOUT_SECONDS = 600.0
 _DETAIL_CHARS = 500
+_HOLD_COMMENT_MARKER = "livespec-whole-record-export-held"
+_LEDGER_ERRORS = (
+    WorkItemNotFoundError,
+    BeadsCommandError,
+    BeadsConnectionError,
+    BeadsMappingError,
+    BeadsTenantMissingError,
+    ConnectionPrefixMissingError,
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -153,6 +176,60 @@ def export_ended_run(*, port: FabroPort, repo: Path, run_id: str) -> EndedRunExp
         detail="exported and read back",
         total_bytes=sum(int(entry["bytes"]) for entry in entries),
         sha256=verified,
+    )
+
+
+def export_run_before_removal(*, port: FabroPort, repo: Path, run_id: str) -> EndedRunExport:
+    """Take the whole-record precondition required before a live-run removal.
+
+    The ended-run collector deliberately removes a closed run even when this
+    export is unavailable.  Live-run removals have the opposite direction: a
+    disk-pressure skip is a failed precondition, so their callers keep the run
+    in place and journal this returned step rather than calling ``fabro rm``.
+    The dump and manifest read-back remain the one implementation above.
+    """
+    location = repo / EXPORT_ROOT / run_id
+    pressure = disk_pressure(repo=repo)
+    if pressure is not None:
+        return _failed(
+            location=location,
+            step="skipped-disk-pressure",
+            detail=(
+                "whole-record export skipped under disk pressure: "
+                f"free_bytes={pressure.free_bytes} min_free_bytes={pressure.min_free_bytes}"
+            ),
+        )
+    return export_ended_run(port=port, repo=repo, run_id=run_id)
+
+
+def report_export_hold(
+    *,
+    ledger: LedgerComments | None,
+    work_item_id: str,
+    run_id: str,
+    removal: str,
+    exported: EndedRunExport,
+) -> None:
+    """Name a held destructive removal on the work item when its export failed."""
+    if ledger is None:
+        return
+    body = "\n".join(
+        (
+            _HOLD_COMMENT_MARKER,
+            "",
+            f"work-item: {work_item_id}",
+            f"run id: {run_id}",
+            f"removal held at: {removal}",
+            f"whole-record export directory: {exported.location}",
+            f"failed step: {exported.failed_step}",
+            f"cause: {exported.detail}",
+            "",
+            "The run remains on its factory because its whole-record export did not read back.",
+        )
+    )
+    _ = attempt(
+        action=lambda: ledger.add_comment(issue_id=work_item_id, body=body),
+        exceptions=_LEDGER_ERRORS,
     )
 
 

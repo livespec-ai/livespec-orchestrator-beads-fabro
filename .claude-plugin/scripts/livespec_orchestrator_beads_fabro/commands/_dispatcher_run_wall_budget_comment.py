@@ -101,6 +101,10 @@ def run_wall_budget_comment(*, item_id: str, row: Mapping[str, object] | None) -
             f"slot-holding seconds: {_measured_field(row=row, key='elapsed_seconds')}",
             f"whole-run wall budget seconds: {_measured_field(row=row, key='budget_seconds')}",
             f"budget supplied by layer: {cancel_row_field(row=row, key='budget_layer')}",
+            "whole-record export directory: "
+            + cancel_row_field(row=row, key="whole_record_export_location"),
+            "whole-record export manifest sha256: "
+            + cancel_row_field(row=row, key="whole_record_export_sha256"),
             *_preservation_lines(row=row),
             *_publication_lines(row=row),
             "",

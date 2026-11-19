@@ -25,12 +25,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_ended_run_export import (
+    export_run_before_removal,
+    report_export_hold,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
     CommandRunner,
     JournalWriter,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import store_config
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import DispatchPlan
+from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_preserve import (
+    run_wall_ledger,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stall_cancel import (
     FABRO_RM_TIMEOUT_SECONDS,
 )
@@ -64,7 +71,29 @@ def stale_item_reap(
     item_status = _work_item_status(repo=plan.repo, work_item_id=plan.work_item_id)
     if item_status is None or item_status == "active":
         return None
-    rm = fabro_port_for_plan(plan=plan, runner=runner).rm(
+    port = fabro_port_for_plan(plan=plan, runner=runner)
+    exported = export_run_before_removal(port=port, repo=plan.repo, run_id=run_id)
+    if not exported.ok:
+        report_export_hold(
+            ledger=run_wall_ledger(repo=plan.repo),
+            work_item_id=plan.work_item_id,
+            run_id=run_id,
+            removal="stale-item reap",
+            exported=exported,
+        )
+        journal.append(
+            record={
+                "stage": "whole-record-export-held",
+                "factory": plan.fabro_factory_name,
+                "work_item_id": plan.work_item_id,
+                "run_id": run_id,
+                "removal": "stale-item reap",
+                "export_failed_step": exported.failed_step,
+                "export_detail": exported.detail,
+            }
+        )
+        return None
+    rm = port.rm(
         run_id=run_id,
         timeout_seconds=FABRO_RM_TIMEOUT_SECONDS,
     )
@@ -74,6 +103,8 @@ def stale_item_reap(
             "stage": _STALE_RUN_REAP_STAGE,
             "run_id": run_id,
             "item_status": item_status,
+            "whole_record_export_location": str(exported.location),
+            "whole_record_export_sha256": exported.sha256,
             "rm_exit_code": rm.command.exit_code,
         }
     )

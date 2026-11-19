@@ -49,6 +49,9 @@ from typing import Protocol
 
 from livespec_orchestrator_beads_fabro.commands._acp_factory_run_reader import FactoryRunReader
 from livespec_orchestrator_beads_fabro.commands._config import resolve_fabro_factory
+from livespec_orchestrator_beads_fabro.commands._dispatcher_journal_tail import (
+    journal_tail_records,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_runs_attribution import (
     NON_TERMINAL_STATUS_KINDS,
 )
@@ -88,6 +91,7 @@ class FactoryCapacity:
     run_count: int | None
     max_concurrent_runs: int | None
     unreadable: str | None
+    whole_record_export_held_count: int | None = None
 
     @property
     def free_slot(self) -> bool:
@@ -144,6 +148,7 @@ class FactoryCapacity:
             "run_count": self.run_count,
             "max_concurrent_runs": self.max_concurrent_runs,
             "unreadable": self.unreadable,
+            "whole_record_export_held_count": self.whole_record_export_held_count,
         }
 
 
@@ -184,6 +189,9 @@ def read_factory_capacity(
         run_count=_non_terminal_count(runs=runs),
         max_concurrent_runs=ceiling,
         unreadable=None,
+        whole_record_export_held_count=_whole_record_export_held_count(
+            repo=repo, factory=factory, runs=runs
+        ),
     )
 
 
@@ -198,6 +206,22 @@ def _non_terminal_count(*, runs: tuple[FabroRunSummary, ...]) -> int:
     2026-10-12, nearly all of them terminal.
     """
     return len([run for run in runs if run.status_kind in NON_TERMINAL_STATUS_KINDS])
+
+
+def _whole_record_export_held_count(
+    *, repo: Path, factory: str, runs: tuple[FabroRunSummary, ...]
+) -> int:
+    """Count still-live runs whose destructive removal waits on a failed export."""
+    live_ids = {run.run_id for run in runs if run.status_kind in NON_TERMINAL_STATUS_KINDS}
+    journal = repo / "tmp" / "fabro-dispatch-journal.jsonl"
+    held_ids = {
+        record["run_id"]
+        for record in journal_tail_records(journal_path=journal)
+        if record.get("stage") == "whole-record-export-held"
+        and record.get("factory") == factory
+        and isinstance(record.get("run_id"), str)
+    }
+    return len(live_ids & held_ids)
 
 
 def _unmeasured(*, factory: str, reason: str) -> FactoryCapacity:

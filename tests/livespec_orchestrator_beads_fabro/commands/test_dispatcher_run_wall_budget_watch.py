@@ -20,7 +20,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
 from livespec_orchestrator_beads_fabro.commands import _node_timeouts
+from livespec_orchestrator_beads_fabro.commands._dispatcher_ended_run_export import (
+    EndedRunExport,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import DispatchPlan, build_plan
 from livespec_orchestrator_beads_fabro.commands._dispatcher_preserve_reference_body import (
@@ -102,6 +106,9 @@ class _ScriptedRunner:
         self.calls.append(verb)
         stdout = {"events": _EVENTS, "inspect": _INSPECT}.get(verb, "")
         exit_code = self.dump_exit_code if verb == "dump" else 0
+        if verb == "dump" and exit_code == 0 and "-o" in argv:
+            output = Path(argv[argv.index("-o") + 1])
+            _ = (output / "events.jsonl").write_text('{"event":"run.exported"}\n', encoding="utf-8")
         return CommandResult(exit_code=exit_code, stdout=stdout, stderr="")
 
 
@@ -199,6 +206,10 @@ def test_the_pointer_is_written_and_read_back_before_the_run_is_cancelled(
     assert records[0]["elapsed_seconds"] == 3601.0
     assert records[0]["budget_seconds"] == 3600.0
     assert records[0]["budget_layer"] == REPOSITORY_LAYER
+    assert records[0]["whole_record_export_location"] == str(
+        tmp_path / "tmp" / "ended-run-exports" / _RUN_ID
+    )
+    assert records[0]["whole_record_export_sha256"] is not None
     assert records[0]["executing_stage"] == "implement"
     # Never the stall cancel's record, whatever else this run was doing.
     assert all(r.get("stage") != STALL_CANCEL_STAGE for r in journal.records)
@@ -398,3 +409,33 @@ def test_a_failed_export_dump_holds_without_writing_a_pointer(tmp_path: Path) ->
     assert "rm" not in runner.calls
     assert [record["stage"] for record in journal.records] == [RUN_WALL_BUDGET_HELD_STAGE]
     assert "selective stage-diff read failed" in str(journal.records[0]["failed_measurement"])
+
+
+def test_a_failed_whole_record_export_holds_after_the_pointer_read_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    watch = _watch()
+    failed = EndedRunExport(
+        ok=False,
+        location=tmp_path / "tmp" / "ended-run-exports" / _RUN_ID,
+        failed_step="read-back",
+        detail="manifest does not match the files on disk",
+        total_bytes=0,
+        sha256=None,
+    )
+    monkeypatch.setattr(watch, "export_run_before_removal", lambda **_: failed)
+    runner = _ScriptedRunner()
+    ledger = _FakeLedger()
+
+    verdict, journal = _cancelled(
+        tmp_path=tmp_path,
+        runner=runner,
+        ledger=ledger,
+        now_epoch=_START_EPOCH + 7200.0,
+    )
+
+    assert verdict == watch.RunWallVerdict.HELD
+    assert "rm" not in runner.calls
+    assert "whole-record export read-back" in str(journal.records[-1]["failed_measurement"])
+    assert journal.records[-2]["stage"] == "whole-record-export-held"
+    assert "livespec-whole-record-export-held" in ledger.comments[-1]["text"]

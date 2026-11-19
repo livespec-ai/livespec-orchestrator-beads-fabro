@@ -53,6 +53,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Final
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_ended_run_export import (
+    export_run_before_removal,
+    report_export_hold,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
     CommandRunner,
     JournalWriter,
@@ -61,15 +65,15 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import Dispatch
 from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_runs_export import (
     LedgerComments,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_cancel import (
+    record_wall_budget_cancel,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_hold import (
     RunWallHoldState,
     hold_run,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_preserve import (
     preserved_pointer,
-)
-from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_records import (
-    run_wall_budget_exceeded_record,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_refs import (
     PreservationRefsUnobservable,
@@ -83,15 +87,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_clock impor
     run_wall_start_from,
     slot_holding_seconds,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_stall_cancel import (
-    FABRO_RM_TIMEOUT_SECONDS,
-)
-from livespec_orchestrator_beads_fabro.commands._dispatcher_stall_run_reading import (
-    executing_stage,
-    last_publish_draft_publication,
-)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_watchdog_run_probe import (
-    WatchdogRunReading,
     watchdog_run_reading,
 )
 from livespec_orchestrator_beads_fabro.commands._fabro_port import FabroPort
@@ -178,14 +174,47 @@ def cancel_run_past_budget(  # noqa: PLR0913 — kw-only per-poll decision; the 
     ):
         return RunWallVerdict.WITHIN
     preserved = preserved_pointer(plan=plan, runner=runner, run_id=run_id, ledger=ledger)
-    # The run's own record is read BEFORE anything can destroy it, on both
-    # routes to a cancel: `rm -f` is what makes it unavailable.
+    # The record is needed to verify the fallback preservation ref.  It is
+    # still read before any removal, while the complete export is taken only
+    # on a route that can actually reach that removal.
     reading = watchdog_run_reading(port=port, run_id=run_id)
 
     def cancel(
         *, pointer: str | None, verified_ref: VerifiedPreservationRef | None
     ) -> RunWallVerdictValue:
-        _cancel(
+        whole_record = export_run_before_removal(port=port, repo=plan.repo, run_id=run_id)
+        if not whole_record.ok:
+            report_export_hold(
+                ledger=ledger,
+                work_item_id=plan.work_item_id,
+                run_id=run_id,
+                removal="whole-run wall-budget cancel",
+                exported=whole_record,
+            )
+            journal.append(
+                record={
+                    "stage": "whole-record-export-held",
+                    "factory": plan.fabro_factory_name,
+                    "work_item_id": plan.work_item_id,
+                    "run_id": run_id,
+                    "removal": "whole-run wall-budget cancel",
+                    "export_failed_step": whole_record.failed_step,
+                    "export_detail": whole_record.detail,
+                }
+            )
+            hold_run(
+                state=RunWallHoldState() if hold is None else hold,
+                plan=plan,
+                journal=journal,
+                ledger=ledger,
+                run_id=run_id,
+                elapsed_seconds=elapsed,
+                failed_measurement=(
+                    "whole-record export " f"{whole_record.failed_step}: {whole_record.detail}"
+                ),
+            )
+            return RunWallVerdict.HELD
+        record_wall_budget_cancel(
             dispatch_id=dispatch_id,
             plan=plan,
             port=port,
@@ -197,6 +226,8 @@ def cancel_run_past_budget(  # noqa: PLR0913 — kw-only per-poll decision; the 
             pointer=pointer,
             verified_ref=verified_ref,
             export_failure=preserved.failed_measurement,
+            whole_record_export_location=str(whole_record.location),
+            whole_record_export_sha256=whole_record.sha256,
         )
         return RunWallVerdict.CANCELLED
 
@@ -230,52 +261,6 @@ def _failed_measurement(*, export: str, located: PreservationRefsUnobservable | 
     if isinstance(located, PreservationRefsUnobservable):
         return f"{export}; {located.detail}"
     return export
-
-
-def _cancel(  # noqa: PLR0913 — kw-only cancel; the dispatch, the two seams, the run and the two measured figures are independent inputs.
-    *,
-    dispatch_id: str | None,
-    plan: DispatchPlan,
-    port: FabroPort,
-    journal: JournalWriter,
-    run_id: str,
-    elapsed_seconds: float,
-    start: RunWallStart,
-    reading: WatchdogRunReading,
-    pointer: str | None,
-    verified_ref: VerifiedPreservationRef | None,
-    export_failure: str,
-) -> None:
-    """Destroy the run, then write the record of the reading taken BEFORE it.
-
-    The reading is taken by the caller FIRST for the reason the stall cancel's
-    is: `rm -f` is what makes the record unavailable, and a reading taken
-    afterwards succeeds while describing nothing.
-    """
-    rm = port.rm(run_id=run_id, timeout_seconds=FABRO_RM_TIMEOUT_SECONDS)
-    journal.append(
-        record={
-            **run_wall_budget_exceeded_record(
-                work_item_id=plan.work_item_id,
-                dispatch_id=dispatch_id,
-                run_id=run_id,
-                factory=plan.fabro_factory_name,
-                executing_stage=executing_stage(events_json=reading.events_json),
-                publication=last_publish_draft_publication(
-                    events_json=reading.events_json,
-                    record_text=reading.record_text,
-                ),
-                elapsed_seconds=elapsed_seconds,
-                budget=plan.run_wall_budget,
-                start_source=start.source,
-                preserved_pointer=pointer,
-                preserved_ref=None if verified_ref is None else verified_ref.ref,
-                preserved_ref_commit=None if verified_ref is None else verified_ref.commit,
-                export_failed_measurement=export_failure,
-            ),
-            "rm_exit_code": rm.command.exit_code,
-        }
-    )
 
 
 @dataclass(kw_only=True)

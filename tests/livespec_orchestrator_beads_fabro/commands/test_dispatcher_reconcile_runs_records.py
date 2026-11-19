@@ -51,6 +51,8 @@ def test_one_reconciled_record_carries_the_whole_join_and_disposition() -> None:
             "termination_succeeded": True,
             "termination_detail": "cancel route returned 200",
             "export_comment_id": "c-9",
+            "whole_record_export_location": None,
+            "whole_record_export_sha256": None,
             "parked_seconds": None,
             "grace_seconds": None,
         }

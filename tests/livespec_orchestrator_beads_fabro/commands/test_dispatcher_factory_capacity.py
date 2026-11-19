@@ -27,11 +27,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+from livespec_orchestrator_beads_fabro.commands import _dispatcher_factory_capacity as capacity
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_capacity import (
     UNREADABLE_SERVER_UNDECLARED,
     FactoryCapacity,
     read_factory_capacity,
 )
+from livespec_orchestrator_beads_fabro.commands._fabro_port_records import FabroRunSummary
 
 _FACTORY = "hp"
 
@@ -115,4 +118,51 @@ def test_a_candidate_declaring_no_server_is_unmeasured_naming_that_fault(
         "run_count": None,
         "max_concurrent_runs": None,
         "unreadable": UNREADABLE_SERVER_UNDECLARED,
+        "whole_record_export_held_count": None,
     }
+
+
+def test_a_capacity_read_counts_live_runs_held_for_whole_record_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _ = (tmp_path / ".livespec.jsonc").write_text(
+        json.dumps(
+            {
+                "livespec-orchestrator-beads-fabro": {
+                    "dispatcher": {"factories": {_FACTORY: {"server": "https://factory.test"}}}
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    _ = (tmp_path / "tmp").mkdir()
+    _ = (tmp_path / "tmp" / "fabro-dispatch-journal.jsonl").write_text(
+        json.dumps(
+            {
+                "stage": "whole-record-export-held",
+                "factory": _FACTORY,
+                "run_id": "01HELD",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class _Reader:
+        def list_runs(self, *, factory: str) -> tuple[FabroRunSummary, ...]:
+            assert factory == _FACTORY
+            return (
+                FabroRunSummary(
+                    run_id="01HELD", status_kind="running", goal=None, total_usd_micros=None
+                ),
+            )
+
+        def scheduler_max_concurrent_runs(self, *, factory: str) -> int:
+            assert factory == _FACTORY
+            return 2
+
+    monkeypatch.setattr(capacity, "FactoryRunReader", lambda **_: _Reader())
+
+    reading = read_factory_capacity(repo=tmp_path, factory=_FACTORY)
+
+    assert (reading.run_count, reading.whole_record_export_held_count) == (1, 1)

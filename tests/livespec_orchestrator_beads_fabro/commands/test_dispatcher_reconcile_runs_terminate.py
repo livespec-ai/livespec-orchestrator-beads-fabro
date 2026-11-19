@@ -7,6 +7,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from livespec_orchestrator_beads_fabro.commands import _dispatcher_reconcile_runs_terminate as term
+from livespec_orchestrator_beads_fabro.commands._dispatcher_ended_run_export import (
+    EndedRunExport,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
 from livespec_orchestrator_beads_fabro.commands._fabro_port import FabroPort
 from livespec_orchestrator_beads_fabro.commands._fabro_port_http import FabroHttpResult
@@ -171,6 +174,30 @@ def test_a_failed_rm_fallback_is_reported_as_not_succeeded(tmp_path: Path) -> No
 
     assert outcome.succeeded is False
     assert "cancel route unavailable (status 500)" in outcome.detail
+
+
+def test_a_failed_whole_record_export_holds_the_force_remove(tmp_path: Path, monkeypatch) -> None:
+    failed = EndedRunExport(
+        ok=False,
+        location=tmp_path / "tmp" / "ended-run-exports" / "01RUNNING",
+        failed_step="skipped-disk-pressure",
+        detail="whole-record export skipped under disk pressure",
+        total_bytes=0,
+        sha256=None,
+    )
+    monkeypatch.setattr(term, "export_run_before_removal", lambda **_: failed)
+    runner = _FakeRunner()
+
+    outcome = term.terminate_orphan_run(
+        port=_port(tmp_path=tmp_path, transport=_FakeTransport(results={}), runner=runner),
+        run_id="01RUNNING",
+        status_kind="running",
+        repo=tmp_path,
+    )
+
+    assert outcome is not None and outcome.removal_held is True
+    assert outcome.whole_record_export is failed
+    assert runner.calls == []
 
 
 def test_an_unanswerable_blocked_run_falls_through_to_cancel(tmp_path: Path) -> None:

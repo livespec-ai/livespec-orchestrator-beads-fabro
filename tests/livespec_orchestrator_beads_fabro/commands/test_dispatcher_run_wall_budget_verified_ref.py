@@ -128,6 +128,9 @@ class _World:
         verb = argv[1]
         if argv[0] == "git":
             return self._git(verb=verb, argv=argv)
+        if verb == "dump" and "-o" in argv:
+            output = Path(argv[argv.index("-o") + 1])
+            _ = (output / "events.jsonl").write_text('{"event":"run.exported"}\n', encoding="utf-8")
         stdout = _inspect(tip=self.tip) if verb == "inspect" else ""
         return CommandResult(exit_code=0, stdout=stdout, stderr="")
 

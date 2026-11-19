@@ -84,6 +84,10 @@ class _ScriptedRunner:
         _ = (cwd, timeout_seconds, env)
         verb = argv[1] if len(argv) > 1 else ""
         self.calls.append(verb)
+        if verb == "dump" and self.dump_exit_code == 0:
+            output_dir = Path(argv[-1])
+            output_dir.mkdir(parents=True, exist_ok=True)
+            _ = (output_dir / "events.jsonl").write_text("{}\n", encoding="utf-8")
         return CommandResult(
             exit_code=self.dump_exit_code if verb == "dump" else 0,
             stdout=_INSPECT if verb == "inspect" else "",

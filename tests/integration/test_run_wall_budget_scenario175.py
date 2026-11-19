@@ -169,6 +169,11 @@ class _ScriptedFabro:
             if self._polls >= self.polls_before_run_returns:
                 self.run_done.set()
             return CommandResult(exit_code=0, stdout=self._record(), stderr="")
+        if verb == "dump":
+            output_dir = Path(argv[-1])
+            output_dir.mkdir(parents=True, exist_ok=True)
+            _ = (output_dir / "events.jsonl").write_text(self.events, encoding="utf-8")
+            return CommandResult(exit_code=0, stdout="", stderr="")
         assert verb == "events", verb
         return CommandResult(exit_code=0, stdout=self.events, stderr="")
 

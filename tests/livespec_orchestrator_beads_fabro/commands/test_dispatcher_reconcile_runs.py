@@ -6,6 +6,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 from livespec_orchestrator_beads_fabro.commands import _dispatcher_reconcile_one_run as one_run
@@ -14,6 +15,9 @@ from livespec_orchestrator_beads_fabro.commands import (
     _dispatcher_reconcile_runs_inputs as inputs_module,
 )
 from livespec_orchestrator_beads_fabro.commands._config import FactoryTarget
+from livespec_orchestrator_beads_fabro.commands._dispatcher_ended_run_export import (
+    EndedRunExport,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
 from livespec_orchestrator_beads_fabro.commands._dispatcher_preserve_reference_body import (
     PRESERVE_POINTER_MARKER,
@@ -26,6 +30,13 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_runs_expor
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_runs_inputs import (
     ReconcileInputs,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_runs_join import (
+    OrphanRun,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_runs_terminate import (
+    TERMINATION_ROUTE_RM,
+    TerminationOutcome,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_container_port import (
     DOCKER_BIN,
@@ -129,6 +140,9 @@ class _Runner:
             return CommandResult(
                 exit_code=0, stdout=self.inspect_by_run.get(argv[2], "[]"), stderr=""
             )
+        if argv[1] == "dump" and "-o" in argv:
+            output = Path(argv[argv.index("-o") + 1])
+            _ = (output / "events.jsonl").write_text('{"event":"run.exported"}\n', encoding="utf-8")
         return CommandResult(exit_code=0, stdout="", stderr="")
 
 
@@ -257,6 +271,129 @@ def test_a_closed_item_run_is_exported_then_terminated_and_journaled(tmp_path: P
     )
     assert [record["stage"] for record in journal.written] == ["orphan-run-reconciled"]
     assert journal.written[0]["export_comment_id"] == "c-bd-ib-orphan"
+
+
+def test_an_orphan_force_remove_is_held_when_its_whole_record_export_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = _Runner()
+    journal = _Journal()
+    ledger = _Ledger()
+    orphan = OrphanRun(
+        run_id="01ORPHAN",
+        factory_name="hp",
+        factory_server_url="https://hp.example:32276",
+        status_kind="running",
+        work_item_id="bd-ib-orphan",
+        work_item_status="closed",
+        orphan_reason="item-not-active",
+        tenant="bd-ib",
+    )
+    exported = EndedRunExport(
+        ok=False,
+        location=tmp_path / "tmp" / "ended-run-exports" / "01ORPHAN",
+        failed_step="read-back",
+        detail="manifest does not match the files on disk",
+        total_bytes=0,
+        sha256=None,
+    )
+    monkeypatch.setattr(
+        one_run,
+        "export_orphan_reference",
+        lambda **_: ExportOutcome(exported=True, comment_id="c-1", journal_body=None, detail="ok"),
+    )
+    monkeypatch.setattr(one_run, "supersession_held", lambda **_: False)
+    monkeypatch.setattr(
+        one_run,
+        "terminate_orphan_run",
+        lambda **_: TerminationOutcome(
+            route=TERMINATION_ROUTE_RM,
+            succeeded=False,
+            removal_held=True,
+            detail="whole-record export held force removal at read-back",
+            whole_record_export=exported,
+        ),
+    )
+
+    outcome = one_run.reconcile_one_run(
+        inputs=_inputs(
+            tmp_path=tmp_path,
+            runner=runner,
+            transport=_Transport(),
+            journal=journal,
+            ledger=ledger,
+            items=[],
+        ),
+        port=Mock(),
+        orphan=orphan,
+        dry_run=False,
+    )
+
+    assert outcome is not None
+    assert outcome.reason == "whole-record-export-held"
+    assert journal.written == [
+        {
+            "stage": "whole-record-export-held",
+            "factory": "hp",
+            "work_item_id": "bd-ib-orphan",
+            "run_id": "01ORPHAN",
+            "removal": "orphan force-remove",
+            "export_failed_step": "read-back",
+            "export_detail": "manifest does not match the files on disk",
+        }
+    ]
+    assert ledger.verbs == ["add_comment:bd-ib-orphan"]
+
+
+def test_an_orphan_force_remove_hold_without_export_detail_is_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    orphan = OrphanRun(
+        run_id="01ORPHAN",
+        factory_name="hp",
+        factory_server_url="https://hp.example:32276",
+        status_kind="running",
+        work_item_id="bd-ib-orphan",
+        work_item_status="closed",
+        orphan_reason="item-not-active",
+        tenant="bd-ib",
+    )
+    monkeypatch.setattr(
+        one_run,
+        "export_orphan_reference",
+        lambda **_: ExportOutcome(exported=True, comment_id="c-1", journal_body=None, detail="ok"),
+    )
+    monkeypatch.setattr(one_run, "supersession_held", lambda **_: False)
+    monkeypatch.setattr(
+        one_run,
+        "terminate_orphan_run",
+        lambda **_: TerminationOutcome(
+            route=TERMINATION_ROUTE_RM,
+            succeeded=False,
+            removal_held=True,
+            detail="whole-record export held force removal",
+        ),
+    )
+
+    outcome = one_run.reconcile_one_run(
+        inputs=_inputs(
+            tmp_path=tmp_path,
+            runner=_Runner(),
+            transport=_Transport(),
+            journal=_Journal(),
+            ledger=_Ledger(),
+            items=[],
+        ),
+        port=Mock(),
+        orphan=orphan,
+        dry_run=False,
+    )
+
+    assert outcome is not None
+    assert (outcome.reason, outcome.detail) == (
+        "whole-record-export-held",
+        "whole-record export held force removal",
+    )
 
 
 def test_every_cli_call_for_one_orphan_runs_that_factorys_declared_client(

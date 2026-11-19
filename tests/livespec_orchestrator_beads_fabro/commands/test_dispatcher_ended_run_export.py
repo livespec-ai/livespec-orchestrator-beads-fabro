@@ -13,8 +13,11 @@ import pytest
 from livespec_orchestrator_beads_fabro.commands._dispatcher_ended_run_export import (
     EXPORT_RETENTION_SECONDS,
     EXPORT_ROOT,
+    EndedRunExport,
     export_ended_run,
+    export_run_before_removal,
     prune_expired_exports,
+    report_export_hold,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
 from livespec_orchestrator_beads_fabro.commands._fabro_port import FabroPort, FabroTarget
@@ -99,6 +102,44 @@ def test_a_manifest_that_does_not_match_the_files_fails_the_read_back(
     exported = export_ended_run(port=_port(tmp_path=tmp_path), repo=tmp_path, run_id="01RUN")
 
     assert (exported.ok, exported.failed_step) == (False, "read-back")
+
+
+def test_a_live_run_removal_is_held_when_disk_pressure_skips_its_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from livespec_orchestrator_beads_fabro.commands import _dispatcher_ended_run_export
+
+    pressure = _dispatcher_ended_run_export.DiskPressure(
+        free_bytes=1,
+        total_bytes=100,
+        min_free_fraction=0.05,
+        min_free_bytes=20,
+    )
+    monkeypatch.setattr(_dispatcher_ended_run_export, "disk_pressure", lambda **_: pressure)
+
+    exported = export_run_before_removal(port=_port(tmp_path=tmp_path), repo=tmp_path, run_id="01RUN")
+
+    assert (exported.ok, exported.failed_step) == (False, "skipped-disk-pressure")
+    assert "free_bytes=1 min_free_bytes=20" in exported.detail
+
+
+def test_reporting_a_held_export_without_a_ledger_is_a_no_op(tmp_path: Path) -> None:
+    failed = EndedRunExport(
+        ok=False,
+        location=tmp_path / EXPORT_ROOT / "01RUN",
+        failed_step="dump",
+        detail="fabro dump refused",
+        total_bytes=0,
+        sha256=None,
+    )
+
+    report_export_hold(
+        ledger=None,
+        work_item_id="bd-ib-held",
+        run_id="01RUN",
+        removal="wall-budget cancel",
+        exported=failed,
+    )
 
 
 def test_pruning_ignores_a_plain_file_and_removes_only_expired_directories(tmp_path: Path) -> None:

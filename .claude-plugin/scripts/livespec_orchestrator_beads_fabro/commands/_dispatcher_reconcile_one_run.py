@@ -25,6 +25,9 @@ from __future__ import annotations
 
 import time
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_ended_run_export import (
+    report_export_hold,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_runs_export import (
     export_orphan_reference,
 )
@@ -54,9 +57,10 @@ from livespec_orchestrator_beads_fabro.commands._fabro_port import FabroPort
 __all__: list[str] = ["reconcile_one_run"]
 
 _ERROR_EXPORT_FAILED = "export-not-verified"
+_ERROR_WHOLE_RECORD_EXPORT_HELD = "whole-record-export-held"
 
 
-def reconcile_one_run(
+def reconcile_one_run(  # noqa: PLR0911 -- each precondition has a distinct held outcome.
     *,
     inputs: ReconcileInputs,
     port: FabroPort,
@@ -106,6 +110,7 @@ def reconcile_one_run(
         port=port,
         run_id=orphan.run_id,
         status_kind=orphan.status_kind,
+        repo=inputs.repo,
         destructive_action_held=lambda: supersession_held(
             orphan=orphan,
             inputs=inputs,
@@ -114,6 +119,43 @@ def reconcile_one_run(
     )
     if termination is None:
         return None
+    if termination.removal_held:
+        held = termination.whole_record_export
+        if held is None:
+            return ReconcileError(
+                factory_name=orphan.factory_name,
+                factory_server_url=orphan.factory_server_url,
+                run_id=orphan.run_id,
+                work_item_id=orphan.work_item_id,
+                reason=_ERROR_WHOLE_RECORD_EXPORT_HELD,
+                detail=termination.detail,
+            )
+        report_export_hold(
+            ledger=inputs.ledger,
+            work_item_id=orphan.work_item_id,
+            run_id=orphan.run_id,
+            removal="orphan force-remove",
+            exported=held,
+        )
+        inputs.journal.append(
+            record={
+                "stage": "whole-record-export-held",
+                "factory": orphan.factory_name,
+                "work_item_id": orphan.work_item_id,
+                "run_id": orphan.run_id,
+                "removal": "orphan force-remove",
+                "export_failed_step": held.failed_step,
+                "export_detail": held.detail,
+            }
+        )
+        return ReconcileError(
+            factory_name=orphan.factory_name,
+            factory_server_url=orphan.factory_server_url,
+            run_id=orphan.run_id,
+            work_item_id=orphan.work_item_id,
+            reason=_ERROR_WHOLE_RECORD_EXPORT_HELD,
+            detail=termination.detail,
+        )
     run = reconciled_from(
         orphan=orphan,
         termination=termination,

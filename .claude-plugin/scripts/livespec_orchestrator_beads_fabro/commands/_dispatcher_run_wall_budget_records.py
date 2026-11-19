@@ -92,6 +92,8 @@ def run_wall_budget_exceeded_record(  # noqa: PLR0913 — kw-only record rendere
     preserved_ref: str | None = None,
     preserved_ref_commit: str | None = None,
     export_failed_measurement: str | None = None,
+    whole_record_export_location: str | None = None,
+    whole_record_export_sha256: str | None = None,
 ) -> dict[str, object]:
     """Render the one record a budget cancel writes.
 
@@ -145,6 +147,8 @@ def run_wall_budget_exceeded_record(  # noqa: PLR0913 — kw-only record rendere
         "budget_seconds": budget.seconds,
         "budget_layer": budget.layer,
         "budget_start_source": start_source,
+        "whole_record_export_location": whole_record_export_location,
+        "whole_record_export_sha256": whole_record_export_sha256,
         **preservation,
     }
 

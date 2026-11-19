@@ -34,8 +34,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_ended_run_export import (
+    EndedRunExport,
+    export_run_before_removal,
+)
 from livespec_orchestrator_beads_fabro.commands._fabro_port import FabroPort
 
 __all__: list[str] = [
@@ -92,6 +97,10 @@ class TerminationOutcome:
     route: str
     succeeded: bool
     detail: str
+    removal_held: bool = False
+    whole_record_export_location: str | None = None
+    whole_record_export_sha256: str | None = None
+    whole_record_export: EndedRunExport | None = None
 
 
 def abandon_answer(*, payload: object | None) -> PendingAbandonAnswer | None:
@@ -108,12 +117,13 @@ def abandon_answer(*, payload: object | None) -> PendingAbandonAnswer | None:
     return None
 
 
-def terminate_orphan_run(
+def terminate_orphan_run(  # noqa: PLR0911 -- each ordered termination route returns its outcome.
     *,
     port: FabroPort,
     run_id: str,
     status_kind: str,
     destructive_action_held: Callable[[], bool] = lambda: False,
+    repo: Path | None = None,
 ) -> TerminationOutcome | None:
     """Terminate through the first route that works, or hold before an action."""
     server_api = port.server_api()
@@ -145,6 +155,21 @@ def terminate_orphan_run(
     unavailable = _route_detail(status=cancelled.status, error=cancelled.error)
     if destructive_action_held():
         return None
+    whole_record_export: EndedRunExport | None = None
+    if repo is not None:
+        exported = export_run_before_removal(port=port, repo=repo, run_id=run_id)
+        if not exported.ok:
+            return TerminationOutcome(
+                route=TERMINATION_ROUTE_RM,
+                succeeded=False,
+                removal_held=True,
+                detail=(
+                    "whole-record export held force removal at "
+                    f"{exported.failed_step}: {exported.detail}"
+                ),
+                whole_record_export=exported,
+            )
+        whole_record_export = exported
     removed = port.rm(run_id=run_id, timeout_seconds=_RM_TIMEOUT_SECONDS)
     return TerminationOutcome(
         route=TERMINATION_ROUTE_RM,
@@ -153,6 +178,13 @@ def terminate_orphan_run(
             f"cancel route unavailable ({unavailable}); "
             f"fabro rm -f exited {removed.command.exit_code}"
         ),
+        whole_record_export_location=(
+            None if whole_record_export is None else str(whole_record_export.location)
+        ),
+        whole_record_export_sha256=(
+            None if whole_record_export is None else whole_record_export.sha256
+        ),
+        whole_record_export=whole_record_export,
     )
 
 

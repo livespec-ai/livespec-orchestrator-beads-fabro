@@ -183,6 +183,11 @@ class _ScriptedFabroRunner:
                 stdout=_INSPECT_TEMPLATE.format(run=_RUN_ID, kind=self.status_kind),
                 stderr="",
             )
+        if verb == "dump":
+            output_dir = Path(argv[-1])
+            output_dir.mkdir(parents=True, exist_ok=True)
+            _ = (output_dir / "events.jsonl").write_text(_FROZEN_EVENTS, encoding="utf-8")
+            return CommandResult(exit_code=0, stdout="", stderr="")
         assert verb == "events", verb
         return CommandResult(exit_code=0, stdout=_FROZEN_EVENTS, stderr="")
 

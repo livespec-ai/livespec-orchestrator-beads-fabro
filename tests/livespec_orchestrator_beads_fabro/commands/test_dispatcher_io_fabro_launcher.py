@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable, Iterator
 from contextlib import suppress
 from dataclasses import dataclass
@@ -19,6 +20,9 @@ from livespec_orchestrator_beads_fabro.commands import (
     _dispatcher_io_fabro_launcher,
     _dispatcher_stale_item_reap,
     _dispatcher_watch_poll,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_ended_run_export import (
+    EndedRunExport,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
     CommandResult,
@@ -72,6 +76,9 @@ class _QueuedRunner:
             self.rm_calls.append(argv[3])
             self.reaped = True
             return CommandResult(exit_code=0, stdout="", stderr="")
+        if command == "dump" and "-o" in argv:
+            output = Path(argv[argv.index("-o") + 1])
+            _ = (output / "events.jsonl").write_text('{"event":"run.exported"}\n', encoding="utf-8")
         if command == "inspect" and self.answers_inspect:
             return CommandResult(
                 exit_code=0,
@@ -310,8 +317,75 @@ def test_watched_launcher_reaps_queued_run_after_item_closes(
             "stage": "stale-run-reap",
             "run_id": "01QUEUED",
             "item_status": "done",
+            "whole_record_export_location": str(
+                tmp_path / "tmp" / "ended-run-exports" / "01QUEUED"
+            ),
+            "whole_record_export_sha256": hashlib.sha256(
+                b"events.jsonl\0"
+                + hashlib.sha256(b'{"event":"run.exported"}\n').hexdigest().encode()
+                + b"\n"
+            ).hexdigest(),
             "rm_exit_code": 0,
         },
+    ]
+
+
+def test_stale_item_reap_holds_the_run_when_its_whole_record_export_fails(
+    *, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    failed = EndedRunExport(
+        ok=False,
+        location=tmp_path / "tmp" / "ended-run-exports" / "01QUEUED",
+        failed_step="read-back",
+        detail="manifest does not match the files on disk",
+        total_bytes=0,
+        sha256=None,
+    )
+    held: list[dict[str, object]] = []
+    monkeypatch.setattr(_dispatcher_stale_item_reap, "_work_item_status", lambda **_: "closed")
+    monkeypatch.setattr(_dispatcher_stale_item_reap, "export_run_before_removal", lambda **_: failed)
+    monkeypatch.setattr(
+        _dispatcher_stale_item_reap,
+        "report_export_hold",
+        lambda **kwargs: held.append(kwargs),
+    )
+    plan = build_plan(
+        repo=tmp_path,
+        work_item_id="bd-ib-queued",
+        workflow_toml=tmp_path / "workflow.toml",
+        goal_file=tmp_path / "goal.md",
+        fabro_bin="fabro",
+        janitor=None,
+        janitor_checkout=tmp_path / "janitor",
+    )
+    runner = _QueuedRunner(calls=[], rm_calls=[])
+    journal = _Journal(records=[])
+
+    result = _dispatcher_stale_item_reap.stale_item_reap(
+        plan=plan, runner=runner, journal=journal, run_id="01QUEUED"
+    )
+
+    assert result is None
+    assert runner.rm_calls == []
+    assert held == [
+        {
+            "ledger": None,
+            "work_item_id": "bd-ib-queued",
+            "run_id": "01QUEUED",
+            "removal": "stale-item reap",
+            "exported": failed,
+        }
+    ]
+    assert journal.records == [
+        {
+            "stage": "whole-record-export-held",
+            "factory": "default",
+            "work_item_id": "bd-ib-queued",
+            "run_id": "01QUEUED",
+            "removal": "stale-item reap",
+            "export_failed_step": "read-back",
+            "export_detail": "manifest does not match the files on disk",
+        }
     ]
 
 

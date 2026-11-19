@@ -111,6 +111,8 @@ class ReconciledRun:
     termination_succeeded: bool
     termination_detail: str
     export_comment_id: str | None
+    whole_record_export_location: str | None = None
+    whole_record_export_sha256: str | None = None
     parked_seconds: float | None = None
     grace_seconds: int | None = None
     tenant: str = ""
@@ -187,6 +189,12 @@ def reconciled_from(
             else termination.detail
         ),
         export_comment_id=export_comment_id,
+        whole_record_export_location=(
+            None if termination is None else termination.whole_record_export_location
+        ),
+        whole_record_export_sha256=(
+            None if termination is None else termination.whole_record_export_sha256
+        ),
         parked_seconds=orphan.parked_seconds,
         grace_seconds=orphan.grace_seconds,
     )
@@ -209,6 +217,8 @@ def journal_reconciled(*, journal: JournalWriter, run: ReconciledRun) -> None:
         "termination_succeeded": run.termination_succeeded,
         "termination_detail": run.termination_detail,
         "export_comment_id": run.export_comment_id,
+        "whole_record_export_location": run.whole_record_export_location,
+        "whole_record_export_sha256": run.whole_record_export_sha256,
         "parked_seconds": run.parked_seconds,
         "grace_seconds": run.grace_seconds,
     }
