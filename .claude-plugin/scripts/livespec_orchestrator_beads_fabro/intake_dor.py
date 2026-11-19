@@ -114,14 +114,13 @@ from livespec_orchestrator_beads_fabro._beads_client import (
 from livespec_orchestrator_beads_fabro._intake_factory_size_gate import (
     apply_intake_factory_size_gate,
 )
+from livespec_orchestrator_beads_fabro._intake_filing_findings import (
+    FilingFindings,
+    filing_findings,
+    taken_once,
+)
 from livespec_orchestrator_beads_fabro._store_factory_size_gate import (
     record_size_justification,
-)
-from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done_advisories import (
-    advisory_definition_of_done_findings,
-)
-from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done_findings import (
-    definition_of_done_findings,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_gate import (
     judge_item_definition_of_done,
@@ -132,16 +131,15 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_record
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_size_gate import (
     resolve_adopted_assertion_count_ceiling,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_filing_display import (
-    ADVISORY_FINDING_PREFIX,
-    MECHANICAL_FINDING_PREFIX,
-)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_policy_settings import (
     PolicySettingUnreadable,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_valves import (
     DEFAULT_ADMISSION_POLICY,
     effective_admission_policy,
+)
+from livespec_orchestrator_beads_fabro.commands._dod_governing_heading_judge import (
+    unjudged_governing_heading,
 )
 from livespec_orchestrator_beads_fabro.commands._intake_valve_claim_writes import (
     WRITER_INTAKE,
@@ -165,8 +163,6 @@ from livespec_orchestrator_beads_fabro.store import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 
 __all__: list[str] = [
@@ -207,54 +203,6 @@ class DefinitionOfReadyChecklist:
     dependency_linked: bool
     repo_targeted: bool
     above_floor: bool
-
-
-@dataclass(frozen=True, kw_only=True)
-class FilingFindings:
-    """One filed item's Definition-of-Done findings, split by what they DO.
-
-    The two tuples are kept apart rather than merged behind a flag because their
-    consequences are opposite: `mechanical` withholds `ready` and `advisory` is
-    forbidden to. A single list carrying a kind marker is one dropped marker away
-    from either holding every item out of the queue or admitting a malformed one.
-    """
-
-    mechanical: tuple[str, ...]
-    advisory: tuple[str, ...]
-
-    @property
-    def withholds_ready(self) -> bool:
-        """Whether an outstanding finding keeps this item out of `ready`."""
-        return bool(self.mechanical)
-
-    def comment_bodies(self) -> tuple[str, ...]:
-        """One ledger-comment body per finding, mechanical ones first.
-
-        The wording is the display's, imported rather than re-spelled, so the
-        comment an operator finds on the item is the sentence the filing display
-        showed them. Mechanical ones lead because they are the ones holding the
-        item back.
-        """
-        return tuple(
-            f"{MECHANICAL_FINDING_PREFIX} {finding}" for finding in self.mechanical
-        ) + tuple(f"{ADVISORY_FINDING_PREFIX} {finding}" for finding in self.advisory)
-
-
-def filing_findings(*, item: WorkItem, repo_root: Path | None) -> FilingFindings:
-    """Both halves of the host-side wall for one filed item.
-
-    A `None` repository root yields EMPTY findings rather than a refusal: both
-    halves are graded against the governed spec tree, and with no repository
-    there is no tree to grade against. That is not a fail-open on the `ready`
-    approval — the approval branch raises `TypeError` on a `None` root before it
-    can admit anything.
-    """
-    if repo_root is None:
-        return FilingFindings(mechanical=(), advisory=())
-    return FilingFindings(
-        mechanical=definition_of_done_findings(item=item, cwd=repo_root),
-        advisory=advisory_definition_of_done_findings(item=item, cwd=repo_root),
-    )
 
 
 def evaluate(*, checklist: DefinitionOfReadyChecklist) -> Verdict:
@@ -310,7 +258,8 @@ def apply_intake_dor(
         return IOSuccess(size_status)
     verdict = evaluate(checklist=checklist)
     status = _routed_status(verdict=verdict, has_dependencies=bool(item.depends_on))
-    findings = filing_findings(item=item, repo_root=path.repo_root)
+    governing = taken_once()
+    findings: FilingFindings | None = None
     factory_safety_finding = out_of_enum_factory_safety_finding(value=item.factory_safety)
     if status == _PENDING_APPROVAL_STATUS and not item.depends_on:
         repo_root = path.repo_root
@@ -369,17 +318,32 @@ def apply_intake_dor(
         # and re-filed arrives already classified, and the reuse makes the
         # second filing free.
         spec_change = classify_and_hold(item=item, repo=repo_root, path=path, stage=STAGE_FILING)
+        # The governing-heading judgement is spent only for an item that could be admitted.
+        admissible = (
+            policy == _AUTO_ADMISSION and factory_safety_finding is None and spec_change is None
+        )
+        findings = filing_findings(
+            item=item,
+            repo_root=repo_root,
+            governing=governing if admissible else unjudged_governing_heading,
+        )
         if (
-            policy == _AUTO_ADMISSION
+            admissible
             and not findings.withholds_ready
-            and factory_safety_finding is None
-            and spec_change is None
             and not judge_item_definition_of_done(
-                item=item, repo=repo_root, path=path, stage=STAGE_PRE_ADMISSION
+                item=item,
+                repo=repo_root,
+                path=path,
+                stage=STAGE_PRE_ADMISSION,
+                governing_heading=governing,
             ).holds
         ):
             status = _READY_STATUS
 
+    if findings is None:
+        findings = filing_findings(
+            item=item, repo_root=path.repo_root, governing=unjudged_governing_heading
+        )
     refused = _write_route(client=client, path=path, item=item, status=status)
     if refused is not None:
         return IOFailure(refused)

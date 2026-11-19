@@ -13,6 +13,7 @@ from livespec_orchestrator_beads_fabro.commands._dod_governing_heading_judge imp
     GoverningHeadingReader,
 )
 from livespec_orchestrator_beads_fabro.types import WorkItem
+from livespec_runtime.spec_stated import ClauseEvidence
 
 _REPOSITORY_ROOT = Path(__file__).parents[2]
 _WORKFLOW_GRAPH = (
@@ -100,6 +101,21 @@ def _taken_governing_heading(*, item: WorkItem, repo: Path) -> GoverningHeadingV
     return GoverningHeadingVerdict(kind="unstated")
 
 
+def _governing_scenario(*, item: WorkItem, repo: Path) -> GoverningHeadingVerdict:
+    """The shared judgement says the scenario, not a cited contract, governs."""
+    del item, repo
+    return GoverningHeadingVerdict(
+        kind="stated",
+        stated_by=(_SCENARIO_HEADING,),
+        evidence=(
+            ClauseEvidence(
+                heading=_SCENARIO_HEADING,
+                quote="Some prose.",
+            ),
+        ),
+    )
+
+
 def _display(
     *, item: WorkItem, cwd: Path, governing: GoverningHeadingReader = _taken_governing_heading
 ) -> list[str]:
@@ -137,3 +153,21 @@ def test_the_prescribed_single_heading_reference_remedy_has_no_definition_of_don
     lines = _display(item=item, cwd=_repo(tmp_path=tmp_path))
 
     assert lines[-1] == "definition-of-done findings: none"
+
+
+def test_a_reference_naming_no_heading_the_shared_judgement_returns_is_mechanical(
+    tmp_path: Path,
+) -> None:
+    """A valid but non-governing citation withholds ready before a run consumes it."""
+    item = _item(description=_definition_of_done(references=_SPEC_HEADING))
+
+    lines = _display(
+        item=item,
+        cwd=_repo(tmp_path=tmp_path),
+        governing=_governing_scenario,
+    )
+
+    mechanical = [
+        line for line in lines if line.startswith("definition-of-done finding (mechanical):")
+    ]
+    assert len(mechanical) == 1

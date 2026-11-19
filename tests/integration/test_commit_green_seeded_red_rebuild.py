@@ -115,6 +115,11 @@ def _commit_green(
     *, repo: Path, script: Path, resume_head: str | None
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
+    # These fixtures exercise the no-work-item-title branch of the command
+    # program.  A real factory turn supplies its current item's rendered title
+    # through this inherited variable, so remove it rather than allowing the
+    # surrounding test runner to turn this synthetic run into a dispatch.
+    env.pop("LIVESPEC_PR_TITLE", None)
     if resume_head is not None:
         env["LIVESPEC_RESUME_PUBLISHED_HEAD"] = resume_head
     return subprocess.run(
