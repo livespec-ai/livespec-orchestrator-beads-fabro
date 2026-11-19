@@ -361,6 +361,7 @@ def test_hold_binds_to_a_live_runs_coming_pull_request_before_an_earlier_one_mer
     assert _held()
     assert len(runner.calls) == 2
     assert runner.calls[0] == _view_argv()
+    assert runner.calls[1] == ("fabro", "ps", "-a", "--json")
 
 
 def test_hold_refusal_names_the_pull_request_even_with_no_merge_commit(tmp_path: Path) -> None:
