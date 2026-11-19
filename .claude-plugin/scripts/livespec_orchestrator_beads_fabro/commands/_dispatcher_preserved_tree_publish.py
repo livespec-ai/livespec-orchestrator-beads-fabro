@@ -95,6 +95,7 @@ class PreservedTree:
     file_count: int
     scope: str | None
     source: str | None
+    degraded_reason: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -175,6 +176,7 @@ def publish_preserved_tree(
         file_count=len(read.files),
         scope=read.scope,
         source=read.source,
+        degraded_reason=read.degraded_reason,
     )
 
 
