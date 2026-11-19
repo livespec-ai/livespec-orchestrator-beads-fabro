@@ -96,6 +96,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_post_run_terminal im
 from livespec_orchestrator_beads_fabro.commands._dispatcher_pr_open_diff import (
     pr_open_diff_record,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_pr_view import (
+    pr_view_unobservable_outcome,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_labels import (
     dispatch_run_label_pairs,
 )
@@ -221,11 +224,10 @@ def run_dispatch(
     publication = cast("TerminalPublication", publication)
     hold, view = publication.hold, publication.view
     if publication.pr_view_error is not None:
-        return failed_outcome(
+        return pr_view_unobservable_outcome(
             outcome_type=DispatchOutcome,
             plan=plan,
-            stage="pr-view",
-            detail=f"pull-request read unobservable: {publication.pr_view_error}",
+            error=publication.pr_view_error,
             fabro_run_id=run_id,
         )
     if view is None:

@@ -15,10 +15,14 @@ caller is going to compare them, so the ordinary green dispatch pays nothing.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, cast
 
-from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_journal import journal_stage
+from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_journal import (
+    failed_outcome,
+    journal_stage,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import (
     DispatchPlan,
     PrView,
@@ -31,6 +35,7 @@ if TYPE_CHECKING:
     from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
         CommandResult,
         CommandRunner,
+        DispatchOutcome,
         JournalWriter,
     )
 
@@ -38,6 +43,8 @@ __all__: list[str] = [
     "GH_TIMEOUT_SECONDS",
     "PrViewReading",
     "merge_queue_entry_argv",
+    "pr_view_unobservable_outcome",
+    "unknown_json_field",
     "view_pr",
 ]
 
@@ -45,6 +52,10 @@ GH_TIMEOUT_SECONDS = 300.0
 # `headRefOid` already rides the ordinary view, so only the branch name and the
 # owning repository have to be added for a publication comparison.
 _PUBLICATION_FIELDS = ",headRefName,headRepository"
+# The fields the engine cannot route without: a pull request's identity, state and merge commit.
+# Every other requested field is optional, so a gh build that does not list it is read around.
+_ESSENTIAL_FIELDS = frozenset({"number", "state", "mergeCommit"})
+_UNKNOWN_FIELD = re.compile(r'Unknown JSON field: "(?P<field>[A-Za-z]+)"')
 _MERGE_QUEUE_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!) {"
     " repository(owner: $owner, name: $name) {"
@@ -77,6 +88,25 @@ def view_pr(
         timeout_seconds=GH_TIMEOUT_SECONDS,
     )
     journal_stage(journal=journal, plan=plan, stage="pr-view", result=result)
+    rejected = unknown_json_field(error=result.stderr) if result.exit_code != 0 else None
+    if (
+        rejected is not None
+        and rejected not in _ESSENTIAL_FIELDS
+        and rejected in argv[-1].split(",")
+    ):
+        # gh's refusal of a field its build does not list is a tool incompatibility, not an
+        # absent or unreadable pull request: drop that one optional field and read once more.
+        kept = ",".join(field for field in argv[-1].split(",") if field != rejected)
+        argv = [*argv[:-1], kept]
+        journal.append(
+            record={
+                "work_item_id": plan.work_item_id,
+                "stage": "pr-view-field-dropped",
+                "field": rejected,
+            }
+        )
+        result = runner.run(argv=argv, cwd=plan.repo, timeout_seconds=GH_TIMEOUT_SECONDS)
+        journal_stage(journal=journal, plan=plan, stage="pr-view", result=result)
     if result.exit_code != 0:
         return PrViewReading(view=None, error=_pr_view_error(result=result))
     view = parse_pr_view(stdout=result.stdout)
@@ -147,6 +177,45 @@ def merge_queue_entry_argv(*, number: int) -> list[str]:
         "-f",
         f"query={_MERGE_QUEUE_QUERY}",
     ]
+
+
+def unknown_json_field(*, error: str | None) -> str | None:
+    """The field gh named in an `Unknown JSON field` refusal, or None for any other error."""
+    match = _UNKNOWN_FIELD.search(error or "")
+    return match.group("field") if match else None
+
+
+def pr_view_unobservable_outcome(
+    *,
+    outcome_type: type[DispatchOutcome],
+    plan: DispatchPlan,
+    error: str,
+    fabro_run_id: str | None,
+) -> DispatchOutcome:
+    """The ending for a pull-request read that could not be taken.
+
+    A gh refusal of a field its build does not list is a deterministic tool incompatibility, not a
+    run failure, so it ends `blocked` naming the field: a failed outcome would feed retry and
+    stop-at-second counting for a fault no retry can change. Any other unreadable read stays failed.
+    """
+    field = unknown_json_field(error=error)
+    if field is None:
+        return failed_outcome(
+            outcome_type=outcome_type,
+            plan=plan,
+            stage="pr-view",
+            detail=f"pull-request read unobservable: {error}",
+            fabro_run_id=fabro_run_id,
+        )
+    return outcome_type(
+        work_item_id=plan.work_item_id,
+        status="blocked",
+        stage="pr-view",
+        pr_number=None,
+        merge_sha=None,
+        detail=f"pull-request read blocked: the host gh does not list the field {field}: {error}",
+        fabro_run_id=fabro_run_id,
+    )
 
 
 def _pr_view_error(*, result: CommandResult) -> str | None:
