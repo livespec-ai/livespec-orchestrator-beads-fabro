@@ -185,7 +185,7 @@ def test_local_fallback_records_evidence_only_for_a_passing_same_tree_aggregate(
     )
     assert any(
         call.startswith("check-skipping check-codex-skill-picker")
-        and call.endswith("check-no-workflow-edits")
+        and call.endswith("check-no-workflow-edits check-fleet-launch")
         for call in clean_log.read_text(encoding="utf-8").splitlines()
     )
 

@@ -62,6 +62,30 @@ py_staged=$(echo "$staged" | grep -E '\.py$' || true)
 # its changed set and cannot run if the hook sends that commit down doc-only.
 staged_with_deletions=$(git diff --cached --name-only --diff-filter=ACDMR)
 authoring_py_staged=$(echo "$staged_with_deletions" | grep -E '\.py$' || true)
+# `check-fleet-launch` is expensive because it runs the hermetic launcher
+# harness. The harness and every script it sources live below fleet-launch/.
+# The remaining paths are the target's declared execution chain: its recipe
+# and inventory, the aggregate declaration reader and runner, and its driver.
+is_fleet_launch_input() {
+    case "$1" in
+        fleet-launch/* | check-targets.txt | justfile | dev-tooling/aggregate-targets.sh | dev-tooling/just-check.sh | dev-tooling/just-check-fleet-launch.sh)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+fleet_launch_input_staged=''
+while IFS= read -r staged_path; do
+    if is_fleet_launch_input "$staged_path"; then
+        fleet_launch_input_staged+="${staged_path}"$'\n'
+    fi
+done <<<"$staged_with_deletions"
+fleet_launch_skips=()
+if [[ -z "$fleet_launch_input_staged" ]]; then
+    fleet_launch_skips+=(check-fleet-launch)
+fi
 test_staged=$(echo "$staged" | grep -E '^tests/.*\.py$' || true)
 impl_staged=$(echo "$staged" | grep -E '^(\.claude-plugin/scripts/|dev-tooling/checks/).*\.py$' || true)
 green_amend_staged=$(echo "$py_staged" | grep -Ev '^tests/' || true)
@@ -119,6 +143,10 @@ if [[ "$merge_in_progress" == false ]] \
         echo ":: staged pre-check phase refused the commit" >&2
         exit 1
     fi
+    if [[ -n "$fleet_launch_input_staged" ]] && ! just check-fleet-launch; then
+        echo ":: fleet-launch gate refused the commit" >&2
+        exit 1
+    fi
     set +e
     just check-changed
     changed_status=$?
@@ -148,7 +176,7 @@ if [[ "$merge_in_progress" == false ]] \
     fi
     echo ":: staged pre-check and staged tests passed; running the gate once"
     echo ":: skipping no-arg check-red-green-replay and same-repo live TUI picker gate"
-    if ! just check-skipping check-red-green-replay check-codex-skill-picker "${sandbox_skips[@]}" "${delegated_skip_targets[@]}"; then
+    if ! just check-skipping check-red-green-replay check-codex-skill-picker "${sandbox_skips[@]}" "${delegated_skip_targets[@]}" "${fleet_launch_skips[@]}"; then
         echo ":: gate phase refused the commit" >&2
         exit 1
     fi
@@ -157,7 +185,12 @@ fi
 if [[ -z "$py_staged" ]]; then
     echo ":: doc-only mode detected (zero .py files staged): running just check-pre-commit-doc-only"
     echo ":: pre-push + CI keep the full aggregate as the load-bearing safety net"
-    just check-pre-commit-doc-only
+    if ! just check-pre-commit-doc-only; then
+        exit 1
+    fi
+    if [[ -n "$fleet_launch_input_staged" ]]; then
+        just check-fleet-launch
+    fi
     exit $?
 fi
 if [[ "$merge_in_progress" == false ]] && [[ "$test_count" -eq 1 ]] && [[ "$impl_count" -eq 0 ]]; then
@@ -176,7 +209,8 @@ if [[ "$merge_in_progress" == false ]] && [[ "$test_count" -eq 1 ]] && [[ "$impl
         check-per-file-coverage \
         check-check-coverage-incremental \
         check-codex-skill-picker \
-        "${sandbox_skips[@]}" "${delegated_skip_targets[@]}"
+        "${sandbox_skips[@]}" \
+        "${delegated_skip_targets[@]}" "${fleet_launch_skips[@]}"
     exit $?
 fi
 if [[ "$merge_in_progress" == false ]] \
@@ -185,14 +219,14 @@ if [[ "$merge_in_progress" == false ]] \
     && ! grep -q 'TDD-Green-Verified-At:' <<<"$head_msg"; then
     echo ":: Green-amend shape detected (impl staged; HEAD carries Red-only trailers)"
     echo ":: skipping no-arg check-red-green-replay and same-repo live TUI picker gate"
-    just check-skipping check-red-green-replay check-codex-skill-picker "${sandbox_skips[@]}" "${delegated_skip_targets[@]}"
+    just check-skipping check-red-green-replay check-codex-skill-picker "${sandbox_skips[@]}" "${delegated_skip_targets[@]}" "${fleet_launch_skips[@]}"
     exit $?
 fi
 echo ":: pre-push: skipping same-repo live TUI picker gate; run just check-codex-skill-picker explicitly for live Codex picker acceptance"
 aggregate_log=$(mktemp "$(git rev-parse --git-path livespec-pre-commit-aggregate.XXXXXX)")
 staged_tree=$(git write-tree)
 set +e
-just check-skipping check-codex-skill-picker "${sandbox_skips[@]}" "${delegated_skip_targets[@]}" 2>&1 | tee "$aggregate_log"
+just check-skipping check-codex-skill-picker "${sandbox_skips[@]}" "${delegated_skip_targets[@]}" "${fleet_launch_skips[@]}" 2>&1 | tee "$aggregate_log"
 aggregate_status=${PIPESTATUS[0]}
 set -e
 # The local aggregate reads the working tree, so it can certify the staged tree
