@@ -40,7 +40,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from livespec_runtime.credentials import CREDENTIAL_REEXEC_SENTINEL, Reexec
+from livespec_runtime.credentials import (
+    CREDENTIAL_REEXEC_ARGV_MARKER,
+    CREDENTIAL_REEXEC_SENTINEL,
+    Reexec,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPTS_DIR = _REPO_ROOT / ".claude-plugin" / "scripts"
@@ -274,6 +278,7 @@ def test_forwarded_argv_places_the_env_operand_after_the_wrapper_separator(
         f"{_MARKER}=1",
         "/usr/bin/python3",
         "next.py",
+        CREDENTIAL_REEXEC_ARGV_MARKER,
     ]
 
 
@@ -300,6 +305,7 @@ def test_forwarded_argv_preserves_every_agent_session_identity(
         *(f"{name}={value}" for name, value in session_values.items()),
         "/usr/bin/python3",
         "next.py",
+        CREDENTIAL_REEXEC_ARGV_MARKER,
     ]
 
 
@@ -314,6 +320,7 @@ def test_forwarded_argv_is_unchanged_for_an_attended_session(
         _WRAPPER_SEPARATOR,
         "/usr/bin/python3",
         "next.py",
+        CREDENTIAL_REEXEC_ARGV_MARKER,
     ]
 
 

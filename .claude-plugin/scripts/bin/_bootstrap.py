@@ -26,7 +26,7 @@ import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from _payload import (
     PayloadRefusal,
@@ -34,6 +34,9 @@ from _payload import (
     release_payload,
     retain_payload,
 )
+
+if TYPE_CHECKING:
+    from livespec_runtime.credentials import CredentialDecision
 
 __all__: list[str] = ["bootstrap"]
 
@@ -70,9 +73,18 @@ _PLAN_UNATTENDED_ENV_NAME = "LIVESPEC_PLAN_UNATTENDED"
 _AGENT_SESSION_ENV_VARS = ("CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "PI_SESSION_ID")
 # `env` is the POSIX command that runs its own operand with NAME=value applied.
 _ENV_COMMAND = "env"
+# The target-owner App is projected by every livespec-ai target's committed
+# credential wrapper.  It remains distinct from the host-default App so the
+# post-wrapper entry can prove the projection actually took effect.
+_TARGET_APP_ID_ENV = "GITHUB_APP_ID_ORG"
 
 
-def bootstrap(*, required: tuple[str, ...] = _REQUIRED_CREDENTIALS) -> None:
+def bootstrap(
+    *,
+    required: tuple[str, ...] = _REQUIRED_CREDENTIALS,
+    force_credential_wrapper: bool = False,
+    force_credential_wrapper_for_command: str | None = None,
+) -> None:
     """Set up sys.path, then run the credential self-heal chokepoint.
 
     `required` names the secret env vars THIS bin wrapper needs at call
@@ -104,10 +116,18 @@ def bootstrap(*, required: tuple[str, ...] = _REQUIRED_CREDENTIALS) -> None:
     # payload this process OWNS, so the tree outlives every child the
     # invocation waits on and is removed exactly once, by its creator.
     _ = atexit.register(release_payload, payload=payload)
+    selected_command = sys.argv[1] if len(sys.argv) > 1 else None
     _self_heal_credentials(
         required=_effective_required(required=required, cwd=Path.cwd()),
         argv=payload_relative_argv(
             argv=sys.argv, source_root=source_root, payload_root=payload.root
+        ),
+        force_credential_wrapper=(
+            force_credential_wrapper
+            or (
+                force_credential_wrapper_for_command is not None
+                and selected_command == force_credential_wrapper_for_command
+            )
         ),
     )
 
@@ -223,8 +243,98 @@ def _marker_forwarded_argv(
     ]
 
 
+def _credential_decision(
+    *,
+    required: tuple[str, ...],
+    credential_wrapper: list[str],
+    argv: list[str],
+    force_credential_wrapper: bool,
+) -> "CredentialDecision":
+    """Choose credentials, preferring the target projection when requested."""
+    from livespec_runtime.credentials import (
+        CREDENTIAL_REEXEC_ARGV_MARKER,
+        CREDENTIAL_REEXEC_SENTINEL,
+        Fail,
+        Proceed,
+        Reexec,
+        decide_credentials,
+    )
+
+    decision = decide_credentials(
+        required=required,
+        credential_wrapper=credential_wrapper,
+        environ=os.environ,
+        executable=sys.executable,
+        argv=argv,
+    )
+    already_reexeced = (
+        CREDENTIAL_REEXEC_ARGV_MARKER in argv or os.environ.get(CREDENTIAL_REEXEC_SENTINEL) == "1"
+    )
+    if not force_credential_wrapper:
+        return decision
+    if already_reexeced:
+        expected_app_id = os.environ.get(_TARGET_APP_ID_ENV)
+        actual_app_id = os.environ.get("GITHUB_APP_ID")
+        if isinstance(decision, Proceed) and expected_app_id and actual_app_id != expected_app_id:
+            return Fail(
+                message=(
+                    "target repository App identity mismatch before run creation: "
+                    f"expected App id {expected_app_id}, received App id "
+                    f"{actual_app_id or '<absent>'}."
+                )
+            )
+        return decision
+    if not credential_wrapper:
+        return Fail(
+            message=(
+                "target repository App selection requires a credential_wrapper "
+                "in .livespec.jsonc."
+            )
+        )
+    return Reexec(argv=(*credential_wrapper, sys.executable, *argv))
+
+
+def _strip_credential_reexec_marker(*, marker: str) -> None:
+    if marker in sys.argv:
+        sys.argv[:] = [arg for arg in sys.argv if arg != marker]
+
+
+def _run_credential_wrapper(
+    *,
+    reexec_argv: Sequence[str],
+    credential_wrapper: Sequence[str],
+    required: tuple[str, ...],
+) -> subprocess.CompletedProcess[bytes]:
+    """Run the credential wrapper or fail cleanly when it cannot start."""
+    from livespec_runtime.credentials import (
+        CREDENTIAL_REEXEC_ARGV_MARKER,
+        wrapper_launch_failure,
+    )
+
+    try:
+        return subprocess.run(  # noqa: S603
+            _marker_forwarded_argv(
+                reexec_argv=[*reexec_argv, CREDENTIAL_REEXEC_ARGV_MARKER],
+                credential_wrapper=credential_wrapper,
+                environ=os.environ,
+            ),
+            capture_output=True,
+            check=False,
+        )
+    except (FileNotFoundError, PermissionError):
+        failure = wrapper_launch_failure(
+            required=required,
+            credential_wrapper=credential_wrapper,
+        )
+        _ = sys.stderr.write(failure.message + "\n")
+        raise SystemExit(_CREDENTIAL_FAIL_EXIT) from None
+
+
 def _self_heal_credentials(
-    *, required: tuple[str, ...] = _REQUIRED_CREDENTIALS, argv: list[str] | None = None
+    *,
+    required: tuple[str, ...] = _REQUIRED_CREDENTIALS,
+    argv: list[str] | None = None,
+    force_credential_wrapper: bool = False,
 ) -> None:
     """Decide-and-perform the credential self-heal at the bin chokepoint.
 
@@ -240,23 +350,23 @@ def _self_heal_credentials(
     # Deferred imports: the vendored tree is on sys.path only AFTER
     # `bootstrap()`'s inserts run.
     from livespec_runtime.credentials import (
+        CREDENTIAL_REEXEC_ARGV_MARKER,
         CREDENTIAL_REEXEC_SENTINEL,
         Fail,
         Proceed,
         Reexec,
-        decide_credentials,
-        wrapper_launch_failure,
     )
     from typing_extensions import assert_never
 
     credential_wrapper = _read_credential_wrapper()
-    decision = decide_credentials(
+    decision_argv = sys.argv if argv is None else argv
+    decision = _credential_decision(
         required=required,
         credential_wrapper=credential_wrapper,
-        environ=os.environ,
-        executable=sys.executable,
-        argv=sys.argv if argv is None else argv,
+        argv=decision_argv,
+        force_credential_wrapper=force_credential_wrapper,
     )
+    _strip_credential_reexec_marker(marker=CREDENTIAL_REEXEC_ARGV_MARKER)
     match decision:
         case Proceed():
             return
@@ -268,23 +378,11 @@ def _self_heal_credentials(
                 "livespec: required credential env absent; re-invoking under credential_wrapper\n"
             )
             os.environ[CREDENTIAL_REEXEC_SENTINEL] = "1"
-            try:
-                completed = subprocess.run(  # noqa: S603
-                    _marker_forwarded_argv(
-                        reexec_argv=reexec_argv,
-                        credential_wrapper=credential_wrapper,
-                        environ=os.environ,
-                    ),
-                    capture_output=True,
-                    check=False,
-                )
-            except (FileNotFoundError, PermissionError):
-                fail = wrapper_launch_failure(
-                    required=required,
-                    credential_wrapper=credential_wrapper,
-                )
-                _ = sys.stderr.write(fail.message + "\n")
-                raise SystemExit(_CREDENTIAL_FAIL_EXIT) from None
+            completed = _run_credential_wrapper(
+                reexec_argv=reexec_argv,
+                credential_wrapper=credential_wrapper,
+                required=required,
+            )
             stdout = completed.stdout or b""
             stderr = completed.stderr or b""
             if stdout:

@@ -6,7 +6,10 @@ from _bootstrap import bootstrap
 # The Dispatcher's factory GitHub auth resolves ONLY via the governed
 # project's credential_wrapper into the App-token provider (github-app-auth
 # Pillars 1+2), so the App env joins the tenant secret in the self-heal set.
-bootstrap(required=("BEADS_DOLT_PASSWORD", "GITHUB_APP_ID", "GITHUB_PRIVATE_KEY"))
+bootstrap(
+    required=("BEADS_DOLT_PASSWORD", "GITHUB_APP_ID", "GITHUB_PRIVATE_KEY"),
+    force_credential_wrapper_for_command="resume",
+)
 
 from livespec_orchestrator_beads_fabro.commands.dispatcher import main
 
