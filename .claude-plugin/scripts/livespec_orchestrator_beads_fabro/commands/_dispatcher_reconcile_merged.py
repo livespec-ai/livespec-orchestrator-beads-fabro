@@ -178,6 +178,7 @@ def run_reconcile_merged_command(
             runner=command_runner,
             journal=journal,
             selected_pr=selected_pr,
+            proof_only_reaccept=getattr(args, "proof_only_reaccept", False),
         )
     else:
         outcome = _janitor_and_accept(
@@ -256,7 +257,7 @@ def _janitor_and_accept(
     )
 
 
-def _reaccept_in_acceptance(
+def _reaccept_in_acceptance(  # noqa: PLR0913 — the re-accept arm's independent inputs.
     *,
     repo: Path,
     item: WorkItem,
@@ -264,6 +265,7 @@ def _reaccept_in_acceptance(
     runner: CommandRunner,
     journal: JournalFile,
     selected_pr: int | None,
+    proof_only_reaccept: bool = False,
 ) -> DispatchOutcome | int:
     """Re-run ONLY the acceptance pass for an item already resting in `acceptance`.
 
@@ -300,7 +302,13 @@ def _reaccept_in_acceptance(
     )
     return outcome_after_acceptance(
         outcome=outcome,
-        disposition=complete_and_accept(repo=repo, item=item, outcome=outcome, journal=journal),
+        disposition=complete_and_accept(
+            repo=repo,
+            item=item,
+            outcome=outcome,
+            journal=journal,
+            park_unreproduced_factory_captured=proof_only_reaccept,
+        ),
     )
 
 

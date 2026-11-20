@@ -48,6 +48,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_post_verdict import 
     reflector_oob_after_verdict,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_reflection import reflect
+from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_merged import (
+    run_reconcile_merged_command,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_turn_guard import (
     append_run_turn_checks,
 )
@@ -109,4 +112,41 @@ def dispatch_tail_exit(
         spans_path=spans_path(args=args, repo=repo),
     )
     reflector_oob_after_verdict(args=args, repo=repo, journal=journal)
+    if (
+        getattr(args, "resume_proof_only", False)
+        and outcome.status == "green"
+        and outcome.stage == "done"
+    ):
+        reconcile_proof_only_acceptance(args=args, repo=repo, outcome=outcome, journal=journal)
     return exit_code
+
+
+def reconcile_proof_only_acceptance(
+    *,
+    args: argparse.Namespace,
+    repo: Path,
+    outcome: DispatchOutcome,
+    journal: JournalFile,
+) -> None:
+    """Re-run acceptance after a completed proof-only arm has published its record.
+
+    The arm's proof stages have ended before this tail reaches the call, so the
+    re-accept arm reads the newly published `proof_verify` record through the
+    ordinary acceptance reader and writes its pointer from that same read.  The
+    originating dispatch lock is still held while its tail runs, which is why
+    this internal, serialized invocation carries `force` rather than being
+    refused as though it were an unrelated operator recovery.
+    """
+    reconcile_args = argparse.Namespace(
+        repo=str(repo),
+        item=outcome.work_item_id,
+        janitor=None,
+        journal=str(journal.path),
+        invoker=getattr(args, "invoker", None),
+        force=True,
+        regrade=False,
+        as_json=getattr(args, "as_json", False),
+        pr=outcome.pr_number,
+        proof_only_reaccept=True,
+    )
+    _ = run_reconcile_merged_command(args=reconcile_args)

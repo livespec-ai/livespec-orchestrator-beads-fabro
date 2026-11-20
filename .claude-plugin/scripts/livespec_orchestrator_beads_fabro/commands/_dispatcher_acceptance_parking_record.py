@@ -43,6 +43,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_evidence impor
     HOST_CAPTURED_EVIDENCE_LEG,
     HUMAN_ATTESTED_EVIDENCE_LEG,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done import (
+    PROOF_MODE_FACTORY_CAPTURED,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_leg import (
     PROOF_RECORD_EVIDENCE_LEG,
 )
@@ -52,6 +55,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_record import 
     VERDICT_HOST_RECORDED,
     VERDICT_HOST_VERIFIED,
     VERDICT_HUMAN_ATTESTED,
+    VERDICT_NOT_REPRODUCED,
     VERDICT_VERIFIED,
 )
 
@@ -232,6 +236,7 @@ def _pending_legs(
         for leg in result.absent_evidence
     ]
     if result.proof is not None:
+        legs.extend(_unreproduced_factory_captured_legs(proof=result.proof))
         legs.extend(
             PendingLeg(
                 name=f"{HOST_CAPTURED_EVIDENCE_LEG} for {text!r}",
@@ -251,6 +256,26 @@ def _pending_legs(
             for text in result.proof.pending_human_attested
         )
     return tuple(legs)
+
+
+def _unreproduced_factory_captured_legs(*, proof: ProofLeg) -> tuple[PendingLeg, ...]:
+    """Name a negative proof-only observation in the park that preserves it."""
+    record = proof.record
+    if record is None or record.verdict != VERDICT_NOT_REPRODUCED:
+        return ()
+    return tuple(
+        PendingLeg(
+            name=f"factory-captured assertion {assertion.text!r} was not reproduced",
+            action=(
+                f"The proof-only arm's {PROOF_RECORD_TITLE} record {record.url} lists this"
+                " assertion as not reproduced; it remains parked for human disposition."
+            ),
+        )
+        for assertion in proof.assertions
+        if assertion.proof_mode == PROOF_MODE_FACTORY_CAPTURED
+        and assertion.check is not None
+        and not assertion.check.passed
+    )
 
 
 def _captured_only(*, proof: ProofLeg | None) -> ProofRecord | None:

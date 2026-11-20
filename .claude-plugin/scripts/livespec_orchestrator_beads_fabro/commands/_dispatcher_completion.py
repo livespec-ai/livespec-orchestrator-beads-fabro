@@ -39,6 +39,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_completion_close imp
 from livespec_orchestrator_beads_fabro.commands._dispatcher_decision_journal import (
     auto_disposition_journal_record,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done import (
+    PROOF_MODE_FACTORY_CAPTURED,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_effective_criteria import (
     effective_criteria,
 )
@@ -65,6 +68,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import store_c
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import (
     is_non_convergence_outcome,
     item_sizing_warnings,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_record import (
+    VERDICT_NOT_REPRODUCED,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stall_window import (
     resolve_stall_window,
@@ -95,6 +101,7 @@ def complete_and_accept(  # noqa: PLR0911, PLR0915 — one return per dispositio
     item: WorkItem,
     outcome: DispatchOutcome,
     journal: JournalFile,
+    park_unreproduced_factory_captured: bool = False,
 ) -> AcceptanceDisposition:
     """Run the post-merge acceptance valve for a green dispatch.
 
@@ -190,6 +197,24 @@ def complete_and_accept(  # noqa: PLR0911, PLR0915 — one return per dispositio
             journal=journal,
         )
         return AcceptanceDisposition(verdict=acceptance_pass.verdict, closed=False)
+    if (
+        park_unreproduced_factory_captured
+        and _proof_only_arm_did_not_reproduce_factory_assertion(acceptance_pass=acceptance_pass)
+    ):
+        # A proof-only resume is evidence gathering after the item's merge, not
+        # a new implementation attempt.  Its negative factory observation
+        # therefore stays in acceptance under every policy: it neither changes
+        # the item's status nor spends an acceptance rework attempt or starts a
+        # fix stage.
+        park_in_acceptance(
+            repo=repo,
+            item_id=item.id,
+            policy=decision.policy,
+            acceptance_pass=acceptance_pass,
+            outcome=outcome,
+            journal=journal,
+        )
+        return AcceptanceDisposition(verdict=acceptance_pass.verdict, closed=False)
     verdict = acceptance_pass.verdict
     if verdict == NO_CHANGE_NEEDED_VERDICT and decision.to_done:
         refused = claim.hold_for_close(intent="close-no-change-needed")
@@ -269,6 +294,21 @@ def complete_and_accept(  # noqa: PLR0911, PLR0915 — one return per dispositio
         journal=journal,
     )
     return AcceptanceDisposition(verdict=acceptance_pass.verdict, closed=False)
+
+
+def _proof_only_arm_did_not_reproduce_factory_assertion(
+    *, acceptance_pass: AcceptancePassResult
+) -> bool:
+    """Whether this re-accept read a negative factory result from the proof-only arm."""
+    proof = acceptance_pass.proof
+    if proof is None or proof.record is None or proof.record.verdict != VERDICT_NOT_REPRODUCED:
+        return False
+    return any(
+        assertion.proof_mode == PROOF_MODE_FACTORY_CAPTURED
+        and assertion.check is not None
+        and not assertion.check.passed
+        for assertion in proof.assertions
+    )
 
 
 def _pending_legs(*, item: WorkItem, acceptance_pass: AcceptancePassResult) -> tuple[str, ...]:
