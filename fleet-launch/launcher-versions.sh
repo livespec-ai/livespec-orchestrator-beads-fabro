@@ -38,15 +38,17 @@ read_ppid() {
   local status_file=$1 line
   PPID_READBACK=""
   [ -r "$status_file" ] || return 1
-  while IFS= read -r line; do
-    case $line in
-      PPid:*)
-        PPID_READBACK=${line#PPid:}
-        PPID_READBACK=${PPID_READBACK//[[:space:]]/}
-        return 0
-        ;;
-    esac
-  done < "$status_file" 2>/dev/null
+  {
+    while IFS= read -r line; do
+      case $line in
+        PPid:*)
+          PPID_READBACK=${line#PPid:}
+          PPID_READBACK=${PPID_READBACK//[[:space:]]/}
+          return 0
+          ;;
+      esac
+    done < "$status_file"
+  } 2>/dev/null
   return 1
 }
 
