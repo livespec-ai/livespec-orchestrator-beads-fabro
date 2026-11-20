@@ -629,6 +629,10 @@ def test_the_completion_gate_reads_the_green_response_text(tmp_path: Path) -> No
 
     checkout = tmp_path / "checkout"
     _ = subprocess.run(("git", "init", "--quiet", str(checkout)), check=True)
+    # The gate refuses a handoff with no recorded preview result.
+    _ = (checkout / ".git" / "livespec-implement-gate-preview-green-result.json").write_text(
+        '{"failed_targets": [], "preview_ran": true, "status": 0}\n', encoding="utf-8"
+    )
     text = (
         "Warning: Skill descriptions were shortened to fit the skills context budget.\n\n"
         'Every assertion holds on the tree.{"definition_of_done_complete":true}'
