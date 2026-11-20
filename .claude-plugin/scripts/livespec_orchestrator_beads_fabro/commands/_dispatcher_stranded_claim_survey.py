@@ -48,6 +48,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from livespec_orchestrator_beads_fabro._store_dispatch_claim import ClaimStamp
+from livespec_orchestrator_beads_fabro.commands import (
+    _dispatcher_stranded_claim_succeeded_recovery as succeeded_recovery,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_current_merge_hold import (
     memoized_current_merge_hold,
 )
@@ -58,6 +61,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_stale_assignee_surve
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_grade import (
     ACTION_ABSENT_RUN_REPEATED,
+    ACTION_SUCCEEDED_RUN_RECONCILE_MERGED,
     ACTION_TERMINAL_COMPLETION,
     ATTRIBUTION_PENDING_REMEDY,
     FORGE_CLOSED_UNMERGED_PR,
@@ -251,6 +255,18 @@ def _measure_and_act(
                 factory_server_url=inventory.server_url,
                 action=graded.action,
                 reading=measured.handoff,
+            ),
+            now_iso=inputs.now_iso,
+        )
+    if graded.action == ACTION_SUCCEEDED_RUN_RECONCILE_MERGED:
+        return succeeded_recovery.recover_succeeded_merged_claim(
+            repo=inputs.repo,
+            journal=inputs.journal,
+            request=succeeded_recovery.SucceededRunRecoveryRequest(
+                item=item,
+                run_id=attributed.run_id,
+                factory_name=inventory.name,
+                factory_server_url=inventory.server_url,
             ),
             now_iso=inputs.now_iso,
         )

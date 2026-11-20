@@ -237,24 +237,47 @@ def _survey_succeeded_run(*, tmp_path: Path, forge_stdout: str) -> object:
 
 
 @pytest.mark.parametrize(
-    ("forge_stdout", "expected_remedy"),
+    ("forge_stdout", "expected_remedy", "expected_route"),
     [
-        ('[{"number": 4008, "state": "CLOSED", "title": "x"}]', f"move:{_ITEM_ID}:ready"),
-        ('[{"number": 4008, "state": "OPEN", "title": "x"}]', f"move:{_ITEM_ID}:ready"),
-        ('[{"number": 4008, "state": "MERGED", "title": "x"}]', None),
-        ("[]", f"move:{_ITEM_ID}:ready"),
+        (
+            '[{"number": 4008, "state": "CLOSED", "title": "x"}]',
+            f"move:{_ITEM_ID}:ready",
+            None,
+        ),
+        (
+            '[{"number": 4008, "state": "OPEN", "title": "x"}]',
+            f"move:{_ITEM_ID}:ready",
+            None,
+        ),
+        (
+            '[{"number": 4008, "state": "MERGED", "title": "x"}]',
+            None,
+            "succeeded-run-reconcile-merged",
+        ),
+        ("[]", f"move:{_ITEM_ID}:ready", None),
     ],
 )
-def test_a_succeeded_runs_claim_names_the_move_valve_unless_its_pull_request_merged(
-    tmp_path: Path, forge_stdout: str, expected_remedy: str | None
+def test_a_succeeded_runs_claim_names_the_move_valve_or_reconciles_its_merged_pull_request(
+    tmp_path: Path, forge_stdout: str, expected_remedy: str | None, expected_route: str | None
 ) -> None:
     survey = _survey_succeeded_run(tmp_path=tmp_path, forge_stdout=forge_stdout)
 
-    assert survey.recovered == ()
+    assert [recovered.route for recovered in survey.recovered] == (
+        [] if expected_route is None else [expected_route]
+    )
     assert [
         (held.work_item_id, held.run_id, held.hold_reason, held.remedy) for held in survey.held
-    ] == [(_ITEM_ID, _RUN_ID, "run-succeeded", expected_remedy)]
+    ] == ([(_ITEM_ID, _RUN_ID, "run-succeeded", expected_remedy)] if expected_route is None else [])
     # Reporting the hold writes nothing: the item stays `active` under its claim,
     # so the run's committed tree stays available as a publish source.
     held_item = next(iter(read_work_items(path=_config())))
     assert (held_item.status, held_item.assignee) == ("active", "fabro")
+
+
+def test_a_succeeded_run_with_an_unreadable_forge_is_held(tmp_path: Path) -> None:
+    survey = _survey_succeeded_run(tmp_path=tmp_path, forge_stdout="{}")
+
+    assert survey.recovered == ()
+    assert [(held.hold_reason, held.remedy) for held in survey.held] == [
+        ("forge-unobservable", None)
+    ]
