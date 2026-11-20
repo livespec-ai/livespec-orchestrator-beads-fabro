@@ -18,6 +18,7 @@ from livespec_orchestrator_beads_fabro._incident_authority_payload import (
     decode_attempt,
     decode_record,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_types import CommandResult
 from livespec_orchestrator_beads_fabro.effects import _incident_authority_chain as chain_module
 from livespec_orchestrator_beads_fabro.effects import (
     _incident_authority_transition as transition_module,
@@ -39,6 +40,25 @@ from livespec_orchestrator_beads_fabro.incident_authority import (
 
 REPOSITORY = "owner/repository"
 ITEM = "test-incident"
+
+
+class _CommentRunner:
+    """The command seam answering the attestation comment read with a fixed payload."""
+
+    def __init__(self, *, stdout: str) -> None:
+        self._stdout = stdout
+
+    def run(
+        self,
+        *,
+        argv: list[str],
+        cwd: Path,
+        timeout_seconds: float,
+        env: dict[str, str | None] | None = None,
+        stdin: int | None = None,
+    ) -> CommandResult:
+        _ = argv, cwd, timeout_seconds, env, stdin
+        return CommandResult(exit_code=0, stdout=self._stdout, stderr="")
 
 
 def _json(value: object) -> str:
@@ -218,13 +238,26 @@ def test_human_attested_receipt_alone_can_write_workflow_scope() -> None:
     observed = _read(client)
     assert isinstance(observed, IncidentReading)
 
+    line = (
+        f"livespec-workflow-attestation: item={ITEM} operation=human-attestation-1 "
+        f"paths={workflow}"
+    )
+    comment = {
+        "user": {"login": "maintainer", "type": "User"},
+        "author_association": "OWNER",
+        "body": line,
+    }
     attested = attest_workflow_paths(
         client=client,
         observed=observed,
         receipt=HumanAttestedWorkflowReceipt(
             operation_id="human-attestation-1",
             workflow_paths=(workflow,),
+            attester_login="maintainer",
+            comment_id=1,
         ),
+        runner=_CommentRunner(stdout=json.dumps(comment)),
+        repo=Path(),
     )
 
     assert isinstance(attested, IncidentReading)

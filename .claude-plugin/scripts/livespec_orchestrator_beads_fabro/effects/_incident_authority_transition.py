@@ -39,6 +39,10 @@ from livespec_orchestrator_beads_fabro.effects._incident_authority_reader import
 from livespec_orchestrator_beads_fabro.effects._incident_entry_writer import (
     require_current_generation,
 )
+from livespec_orchestrator_beads_fabro.effects._incident_workflow_attestation import (
+    attestation_line,
+    unverified_reason,
+)
 from livespec_orchestrator_beads_fabro.errors import (
     BeadsCommandError,
     BeadsConnectionError,
@@ -48,7 +52,10 @@ from livespec_orchestrator_beads_fabro.errors import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from livespec_orchestrator_beads_fabro._beads_client import BeadsClient
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_types import CommandRunner
 
 __all__: list[str] = [
     "HumanAttestedWorkflowReceipt",
@@ -67,10 +74,16 @@ _LEDGER_ERRORS = (
 
 @dataclass(frozen=True, kw_only=True)
 class HumanAttestedWorkflowReceipt:
-    """A maintainer receipt authorizing one exact workflow-path scope."""
+    """A request to record one exact workflow-path scope a maintainer attested.
+
+    The receipt carries no authority of its own: it names the forge comment, by
+    the maintainer `attester_login`, that the writer reads before recording.
+    """
 
     operation_id: str
     workflow_paths: tuple[str, ...]
+    attester_login: str
+    comment_id: int
     operation: Literal["human_attested"] = "human_attested"
 
 
@@ -256,19 +269,52 @@ def _attested_successor(
     )
 
 
+def _verified_successor(
+    *,
+    observed: IncidentReading,
+    receipt: HumanAttestedWorkflowReceipt,
+    runner: CommandRunner,
+    repo: Path,
+) -> IncidentAttempt | AuthorityRefusal:
+    """The scoped successor, only once the forge shows a maintainer attested it."""
+    decoded = _attested_successor(observed=observed, receipt=receipt)
+    if isinstance(decoded, AuthorityRefusal):
+        return decoded
+    unverified = unverified_reason(
+        runner=runner,
+        repo=repo,
+        repository=decoded.repository,
+        comment_id=receipt.comment_id,
+        attester_login=receipt.attester_login,
+        expected_line=attestation_line(
+            item_id=decoded.item_id,
+            operation_id=receipt.operation_id,
+            workflow_paths=receipt.workflow_paths,
+        ),
+    )
+    if unverified is None:
+        return decoded
+    return AuthorityRefusal(code="incident-workflow-attestation-unverified", detail=unverified)
+
+
 def attest_workflow_paths(
     *,
     client: BeadsClient,
     observed: IncidentReading,
     receipt: HumanAttestedWorkflowReceipt,
+    runner: CommandRunner,
+    repo: Path,
 ) -> IncidentReading | AuthorityRefusal:
     """Record one maintainer-attested workflow scope on the next generation.
 
     Ordinary transition callers cannot select a non-empty workflow scope.  This
-    separate receipt operation constructs the only valid scoped successor, then
-    takes the same server-side generation fence and idempotent replay path.
+    separate receipt operation first reads the named comment on the forge and
+    refuses unless a human maintainer posted the exact attestation line, so a
+    caller-built receipt alone never writes the scope.  It then constructs the
+    only valid scoped successor and takes the same server-side generation fence
+    and idempotent replay path.
     """
-    decoded = _attested_successor(observed=observed, receipt=receipt)
+    decoded = _verified_successor(observed=observed, receipt=receipt, runner=runner, repo=repo)
     if isinstance(decoded, AuthorityRefusal):
         return decoded
     recovered = _read(client=client, attempt=decoded, historical=True)
