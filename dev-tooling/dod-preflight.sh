@@ -68,11 +68,11 @@ PY
 # (bd-ib-tka3wb). The verdict and any check 6 findings go to a side file, because
 # stdout here is the prompt.
 judgement_input=$(mktemp)
-trap 'rm -f "$judgement_input" "$judgement_input.last" "$judgement_input.judge" "$judgement_input.stderr" "$judgement_input.governing" "$judgement_input.findings" "$judgement_input.section_findings" "$judgement_input.record"' EXIT
+trap 'rm -f "$judgement_input" "$judgement_input.last" "$judgement_input.judge" "$judgement_input.stderr" "$judgement_input.governing" "$judgement_input.findings" "$judgement_input.section_findings" "$judgement_input.unavailable" "$judgement_input.record"' EXIT
 python3 - "$install_root" "$repo_root" "$item" "$override" "$judgement_input" > "$judgement_input" <<'PROMPT_PY'
 import json
 import sys
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 sys.path.insert(0, f"{sys.argv[1]}/scripts")
@@ -118,8 +118,12 @@ try:
     from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_preflight_reuse import (
         identity_for_dod_taking,
     )
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_governing_reuse import (
+        governing_heading_subject_digest,
+    )
 except ImportError:
     identity_for_dod_taking = None
+    governing_heading_subject_digest = None
 
 # The reading is the package's own seam: a recorded verdict the component's reuse
 # rule still allows decides and starts no judge candidate, as at the gate. The
@@ -198,6 +202,14 @@ reading = preflight_governing_heading_reading(
 )
 governing = reading.verdict
 Path(f"{side}.governing").write_text("\n".join(reading.report) + "\n", encoding="utf-8")
+# A missing component verdict is not an "unstated" verdict. Passing it to the
+# enclosing rubric would invite a second, independent search and could PASS
+# bytes the launch-time gate refuses. Stop before constructing that subject.
+if governing is None:
+    Path(f"{side}.unavailable").write_text(
+        "DID-NOT-RUN governing-heading judgement could not be taken\n", encoding="utf-8"
+    )
+    raise SystemExit(0)
 # The omission HOLDS only when the reference line names none of the headings the
 # verdict returns. Otherwise each finding is advisory: printed with its remedy,
 # holding nothing.
@@ -225,6 +237,12 @@ Path(f"{side}.record").write_text(
             "spec_identity_form": identity.form,
             "spec_identity": identity.value,
             "records_verdict": identity_for_dod_taking is not None,
+            "governing": asdict(governing) if governing_heading_subject_digest else None,
+            "governing_subject_digest": (
+                governing_heading_subject_digest(item=item, comments=comments)
+                if governing_heading_subject_digest
+                else None
+            ),
             "subject_characters": len(subject),
             "carried_rider_count": sum(
                 not is_receipt_comment(body=comment) for comment in comments
@@ -239,9 +257,13 @@ if [ -s "$judgement_input.section_findings" ]; then
   cat "$judgement_input.section_findings"
   exit 1
 fi
-[ -s "$judgement_input" ] || exit 2
 [ -f "$judgement_input.governing" ] || exit 2
 cat "$judgement_input.governing"
+if [ -s "$judgement_input.unavailable" ]; then
+  cat "$judgement_input.unavailable"
+  exit 2
+fi
+[ -s "$judgement_input" ] || exit 2
 # A check 6 finding that HOLDS — the References line names no governing heading —
 # holds the item at the gate whatever the rubric says, so the candidate legs
 # would spend two model calls to change nothing. An advisory one was printed with
@@ -287,10 +309,51 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_spec_identity im
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import ShellCommandRunner
 from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import store_config
 from livespec_orchestrator_beads_fabro._store_comments import append_work_item_comment
+from livespec_runtime.spec_stated import ClauseEvidence
+
+try:
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_record import (
+        GoverningHeadingReceipt,
+    )
+    from livespec_orchestrator_beads_fabro.commands._dod_governing_heading import (
+        GoverningHeadingVerdict,
+    )
+    from livespec_orchestrator_beads_fabro.commands._spec_tree_condensation import CondensedClause
+except ImportError:
+    GoverningHeadingReceipt = None
+    GoverningHeadingVerdict = None
+    CondensedClause = None
 
 repo = Path(sys.argv[2])
 prompt = Path(sys.argv[3]).read_text(encoding="utf-8")
 record = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
+
+
+def governing_receipt(*, record: dict[str, object]) -> GoverningHeadingReceipt:
+    """Rebuild the observed component verdict for the shared receipt."""
+    assert GoverningHeadingReceipt is not None
+    assert GoverningHeadingVerdict is not None
+    assert CondensedClause is not None
+    payload = record["governing"]
+    assert isinstance(payload, dict)
+    selected = payload["selected_clauses"]
+    named = payload["named_clauses"]
+    evidence = payload["evidence"]
+    assert isinstance(selected, list)
+    assert isinstance(named, list)
+    assert isinstance(evidence, list)
+    return GoverningHeadingReceipt(
+        verdict=GoverningHeadingVerdict(
+            kind=str(payload["kind"]),
+            stated_by=tuple(str(heading) for heading in payload["stated_by"]),
+            generalization_target=payload["generalization_target"],
+            selected_clauses=tuple(CondensedClause(**clause) for clause in selected),
+            named_clauses=tuple(CondensedClause(**clause) for clause in named),
+            provenance_complete=bool(payload["provenance_complete"]),
+            evidence=tuple(ClauseEvidence(**entry) for entry in evidence),
+        ),
+        subject_digest=str(record["governing_subject_digest"]),
+    )
 
 
 def candidates(*, cwd: Path) -> tuple[AcpCandidate, ...] | None:
@@ -354,6 +417,7 @@ if record["records_verdict"]:
             spec_identity=SpecIdentity(
                 form=record["spec_identity_form"], value=record["spec_identity"]
             ),
+            governing=governing_receipt(record=record),
         ),
     )
 outcome = judgement.outcome
