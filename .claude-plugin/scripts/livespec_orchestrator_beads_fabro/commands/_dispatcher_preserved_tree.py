@@ -35,6 +35,9 @@ from livespec_orchestrator_beads_fabro.commands._fabro_run_files import (
     RunFilesUnreadable,
     read_run_files,
 )
+from livespec_orchestrator_beads_fabro.commands._fabro_stage_diffs import (
+    stage_diffs_from_run_state,
+)
 from livespec_orchestrator_beads_fabro.commands._unified_patch_apply import (
     PatchRefused,
     apply_unified_patch,
@@ -44,6 +47,7 @@ from livespec_orchestrator_beads_fabro.commands._unified_patch_apply import (
 __all__: list[str] = ["preserved_tree_message", "publish_run_tree"]
 
 _FORGE_TIMEOUT_SECONDS = 120.0
+_STATE_READ_TIMEOUT_SECONDS = 300.0
 
 
 def preserved_tree_message(*, work_item_id: str, run_id: str) -> str:
@@ -88,6 +92,9 @@ def publish_run_tree(
     read = read_run_files(port=port, run_id=run_id)
     if isinstance(read, RunFilesUnreadable):
         return PublishFailure(step=STEP_FILES_READ, detail=read.detail)
+    discrepancy = _empty_run_files_discrepancy(port=port, run_id=run_id, file_count=len(read.files))
+    if discrepancy is not None:
+        return PublishFailure(step=STEP_FILES_READ, detail=discrepancy, discrepancy=True)
     resolved = _resolved_files(runner=runner, repo=repo, base_commit=base_commit, files=read.files)
     if isinstance(resolved, PublishFailure):
         return resolved
@@ -98,6 +105,32 @@ def publish_run_tree(
         base_commit=base_commit,
         read=replace(read, files=resolved),
         message=preserved_tree_message(work_item_id=work_item_id, run_id=run_id),
+    )
+
+
+def _empty_run_files_discrepancy(
+    *, port: FabroHttpPort, run_id: str, file_count: int
+) -> str | None:
+    """Refuse an empty run-files answer when run state retains stage diffs.
+
+    An empty files list is normally a valid account of a run that changed
+    nothing.  It becomes unsafe only when the same factory's run state still
+    carries a non-empty stage-diff artifact: publishing then would manufacture
+    a preservation ref whose tree says the run changed nothing despite the
+    retained evidence to the contrary.
+    """
+    if file_count != 0:
+        return None
+    state = port.run_state(run_id=run_id, timeout_seconds=_STATE_READ_TIMEOUT_SECONDS)
+    if not state.succeeded:
+        return None
+    stage_diffs = stage_diffs_from_run_state(run_state=state.payload)
+    retained = tuple(stage_diff for stage_diff in stage_diffs if stage_diff.payload)
+    if not retained:
+        return None
+    return (
+        f"run-files read for {run_id} reported zero changed files, but the run state retains"
+        f" {len(retained)} non-empty stage diff artifact(s); refusing to publish an empty tree"
     )
 
 

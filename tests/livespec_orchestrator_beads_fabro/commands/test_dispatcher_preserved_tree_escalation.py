@@ -217,6 +217,47 @@ class _Transport:
         )
 
 
+@dataclass(kw_only=True)
+class _DiscrepantTransport:
+    """A lost sandbox says no files while its run state retains a stage patch."""
+
+    urls: list[str] = field(default_factory=list[str])
+
+    def send(
+        self,
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes | None,
+        timeout_seconds: float,
+    ) -> FabroHttpResult:
+        _ = (method, headers, body, timeout_seconds)
+        self.urls.append(url)
+        if url.endswith(f"/runs/{_RUN}/files"):
+            payload: dict[str, object] = {
+                "data": [],
+                "meta": {"scope": "committed", "source": "final_patch"},
+            }
+        else:
+            assert url.endswith(f"/runs/{_RUN}/state"), url
+            payload = {
+                "stages": {
+                    "implement@1": {
+                        "first_event_seq": 50,
+                        "diff": "diff --git a/a.py b/a.py\n+old\n+new\n",
+                    }
+                }
+            }
+        return FabroHttpResult(
+            status=200,
+            body=json.dumps(payload),
+            error=None,
+            payload=None,
+            succeeded=True,
+        )
+
+
 def _args(*, server: str | None = _SERVER, factory: str = _FACTORY) -> argparse.Namespace:
     return argparse.Namespace(
         fabro_bin="/home/ubuntu/.fabro/bin/fabro",
@@ -326,6 +367,34 @@ def test_a_refused_run_files_read_is_recorded_as_the_files_read_step(tmp_path: P
     # The server's own words reach the journal and never the append-only comment.
     assert "Authentication required" in str(row["detail"])
     assert "Authentication required" not in bodies[0]
+
+
+def test_an_empty_run_files_read_that_disagrees_with_stage_diffs_never_publishes_an_empty_tree(
+    tmp_path: Path,
+) -> None:
+    """The preservation is either rebuilt from the patch or honestly reported as discrepant."""
+    transport = _DiscrepantTransport()
+    journal, _, _, bodies = _preserved(tmp_path=tmp_path, transport=transport)  # type: ignore[arg-type]
+
+    assert transport.urls == [
+        f"{_SERVER}/api/v1/runs/{_RUN}/files",
+        f"{_SERVER}/api/v1/runs/{_RUN}/state",
+    ]
+    published = journal.row(stage=PRESERVED_TREE_STAGE)
+    unpreserved = journal.row(stage=PRESERVED_TREE_UNPRESERVED_STAGE)
+    assert (published is None) != (unpreserved is None)
+    assert len(bodies) == 1
+    assert _RUN in bodies[0]
+    assert _FACTORY in bodies[0]
+    if published is not None:
+        assert published["changed_file_count"] == 1
+        assert "changed files published: 1" in bodies[0]
+    else:
+        assert unpreserved is not None
+        assert unpreserved["failed_step"] == "files-read"
+        assert "run-files" in str(unpreserved["detail"])
+        assert "stage diff" in str(unpreserved["detail"])
+        assert "discrepancy" in bodies[0]
 
 
 def test_a_refused_forge_write_is_recorded_as_the_publication_step_that_failed(
