@@ -300,7 +300,7 @@ def _descendant_forge(state: _Tenant, *, earlier_green: bool = False) -> tuple[s
         ),
     }
     successful_runs: list[dict[str, object]] = [
-        _ci_row(head_sha=descendant_head, status="completed", conclusion="success")
+        _ci_row(id=13, head_sha=descendant_head, status="completed", conclusion="success")
     ]
     earlier: str | None = None
     if earlier_green:
@@ -604,6 +604,37 @@ def test_enter_repayment_refuses_a_descendant_when_an_earlier_green_descendant_e
         "incident-repayment-master-ci-outstanding: "
         "condition-4: an earlier successful descendant master run exists"
     )
+
+
+def test_descendant_verifier_refuses_an_earlier_green_run_at_the_selected_head_only(
+    tenant: _Tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reading, master_ci, descendant_head = _descendant_context(tenant)
+    monkeypatch.setattr(
+        descendant,
+        "read_history",
+        lambda **_: _attributed_history(observed=reading.attempt, head=descendant_head),
+    )
+
+    def green(run_id: int | str) -> dict[str, object]:
+        return _ci_row(
+            id=run_id, head_sha=descendant_head, status="completed", conclusion="success"
+        )
+
+    # An earlier green rerun at the very same head already is the first green descendant run.
+    tenant.forge.api[_runs_url(head=None)] = _runs_page(green(9), green(13))
+    refusal = _verify_descendant(tenant, reading, master_ci)
+    assert isinstance(refusal, AuthorityRefusal)
+    assert refusal.code == "incident-repayment-master-ci-outstanding"
+    assert refusal.detail == "condition-4: an earlier successful descendant master run exists"
+    # Control: only the selected run, or a LATER rerun at that head, leaves it the first.
+    tenant.forge.api[_runs_url(head=None)] = _runs_page(green(13), green(14))
+    assert isinstance(_verify_descendant(tenant, reading, master_ci), MasterCiRun)
+    # A same-head run whose id cannot be compared is unreadable, never skipped.
+    tenant.forge.api[_runs_url(head=None)] = _runs_page(green(13), green("not-a-number"))
+    unreadable = _verify_descendant(tenant, reading, master_ci)
+    assert isinstance(unreadable, AuthorityRefusal)
+    assert "condition-4" in unreadable.detail
 
 
 def test_enter_repayment_refuses_a_descendant_run_that_is_not_the_normal_master_ci_run(

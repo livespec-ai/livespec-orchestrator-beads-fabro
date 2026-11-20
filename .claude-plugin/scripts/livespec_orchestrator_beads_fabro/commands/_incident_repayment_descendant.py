@@ -182,19 +182,25 @@ def verify_descendant_master_ci(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR09
     if candidates is None:
         return _refuse(detail="condition-4: successful master-run history is unreadable")
     for row in candidates:
-        head, status, conclusion = (
+        head, status, conclusion, candidate_id = (
             row.get("head_sha"),
             row.get("status"),
             row.get("conclusion"),
+            row.get("id"),
         )
-        if (
-            not isinstance(head, str)
-            or not isinstance(status, str)
-            or not isinstance(conclusion, str)
-            or head == master_ci.head
-        ):
+        if not isinstance(head, str) or not isinstance(status, str):
+            continue
+        if not isinstance(conclusion, str) or str(candidate_id) == master_ci.run_id:
             continue
         if status != _COMPLETE or conclusion != _SUCCESS:
+            continue
+        if head == master_ci.head:
+            if not isinstance(candidate_id, int):
+                return _refuse(detail="condition-4: a run at the admitted head has no readable id")
+            if candidate_id < int(master_ci.run_id):
+                return _refuse(
+                    detail="condition-4: an earlier successful descendant master run exists"
+                )
             continue
         from_landed = is_ancestor(
             runner=runner, repo=repo, repository=repository, ancestor=landed, descendant=head
