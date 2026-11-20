@@ -134,12 +134,15 @@ def record_needs_human_cause(
     outcome: DispatchOutcome,
     journal: JournalFile,
 ) -> None:
-    """Append the causal record for a needs-human ending, once.
+    """Append the causal record for a non-green Fabro terminal, once.
 
-    Returns without writing for any other outcome. The writer runs inside the
-    shared post-run disposition sequence, which every outcome passes through,
-    so the status guard is what keeps this record an account of an ending that
-    actually happened rather than a note on every dispatch.
+    Returns without writing for any outcome other than a failed or blocked
+    terminal carrying the causal verdict. The writer runs inside the shared
+    post-run disposition sequence, which every outcome passes through, so the
+    status guard is what keeps this record an account of an ending that
+    actually happened rather than a note on every dispatch. A non-zero Fabro
+    terminal can be a direct failure as well as a needs-human block; both need
+    the same durable causal account on the item.
 
     A ledger write failure is JOURNALED and never raised. The run has already
     ended and the lifecycle write that matters — `blocked` / `needs-human` —
@@ -147,7 +150,7 @@ def record_needs_human_cause(
     costs an operator the durable account, which is worth a journal row and is
     not worth converting into a dispatch failure after the fact.
     """
-    if outcome.status != "blocked":
+    if outcome.status not in {"blocked", "failed"}:
         return
     if outcome.needs_human_kind is None:
         return
