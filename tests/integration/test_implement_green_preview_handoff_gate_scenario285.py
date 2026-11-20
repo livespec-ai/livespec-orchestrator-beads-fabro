@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -133,10 +134,17 @@ def test_a_clean_seeded_green_with_preview_exit_two_ends_already_satisfied(
         "{{ inputs.default_branch }}", "master"
     )
     terminal = subprocess.run(
-        ["sh", "-c", terminal_script], cwd=repo, check=False, capture_output=True, text=True
+        ["sh", "-c", terminal_script],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "LIVESPEC_PUBLISH_BRANCH": "feat/bd-ib-bnxzbk"},
     )
     assert terminal.returncode == 0, terminal.stderr
-    assert f"LIVESPEC_ALREADY_SATISFIED: base={base}" in terminal.stderr
+    assert f"LIVESPEC_ALREADY_SATISFIED: base={base} " in terminal.stderr
+    assert "work item bd-ib-bnxzbk" in terminal.stderr
+    assert "red declared" not in terminal.stderr
 
 
 def _seed_clean_green_records(*, repo: Path) -> None:
