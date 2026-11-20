@@ -104,6 +104,7 @@ class PublishFailure:
 
     step: str
     detail: str
+    discrepancy: bool = False
 
 
 def publish_preserved_tree(

@@ -170,6 +170,11 @@ def unpreserved_tree_body(
     It carries no excerpt of the step's own output; see the module docstring.
     The journal row beside it carries that.
     """
+    discrepancy = (
+        ["discrepancy: the run-files read and retained stage diff artifacts disagree"]
+        if failure.discrepancy
+        else []
+    )
     return "\n".join(
         [
             PRESERVED_TREE_MARKER,
@@ -180,6 +185,7 @@ def unpreserved_tree_body(
             "preservation ref: none -- the tree was NOT preserved",
             f"failed step: {failure.step}",
             f"the step was: {_STEP_PROSE.get(failure.step, 'an unnamed publication step')}",
+            *discrepancy,
             "",
             _WORDS_ARE_IN_THE_JOURNAL,
         ]

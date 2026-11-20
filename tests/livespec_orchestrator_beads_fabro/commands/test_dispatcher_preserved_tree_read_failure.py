@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
 from livespec_orchestrator_beads_fabro.commands._dispatcher_preserved_tree import (
+    _empty_run_files_discrepancy,
     preserved_tree_message,
     publish_run_tree,
 )
@@ -50,6 +51,37 @@ class _RefusingTransport:
 
 
 @dataclass(kw_only=True)
+class _EmptyFilesTransport:
+    """A zero-file response whose state is unavailable or has no retained patch."""
+
+    state_succeeded: bool
+    state_payload: object
+
+    def send(
+        self,
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes | None,
+        timeout_seconds: float,
+    ) -> FabroHttpResult:
+        _ = method
+        _ = headers
+        _ = body
+        _ = timeout_seconds
+        if url.endswith("/state"):
+            return FabroHttpResult(
+                status=200 if self.state_succeeded else 503,
+                body="{}",
+                error=None,
+                payload=self.state_payload,
+                succeeded=self.state_succeeded,
+            )
+        raise AssertionError(f"unexpected request: {url}")
+
+
+@dataclass(kw_only=True)
 class _RefusingRunner:
     """Any call here is a defect: nothing may be published after a failed read."""
 
@@ -87,6 +119,25 @@ def test_a_factory_that_refuses_the_read_fails_at_the_files_read_step_and_publis
     assert isinstance(failed, PublishFailure)
     assert failed.step == STEP_FILES_READ
     assert "401" in failed.detail
+
+
+@pytest.mark.parametrize(
+    ("state_succeeded", "state_payload"),
+    [
+        (False, None),
+        (True, {"stages": {"implement@1": {"diff": ""}}}),
+    ],
+)
+def test_an_empty_run_files_read_without_a_retained_stage_diff_is_not_a_discrepancy(
+    *, state_succeeded: bool, state_payload: object
+) -> None:
+    port = FabroHttpPort(
+        target=FabroTarget(server_url="https://factory.example:32276"),
+        transport=_EmptyFilesTransport(
+            state_succeeded=state_succeeded, state_payload=state_payload
+        ),
+    )
+    assert _empty_run_files_discrepancy(port=port, run_id=_RUN_ID, file_count=0) is None
 
 
 def test_the_refusing_runner_would_have_fired_so_the_case_above_is_not_vacuous() -> None:
