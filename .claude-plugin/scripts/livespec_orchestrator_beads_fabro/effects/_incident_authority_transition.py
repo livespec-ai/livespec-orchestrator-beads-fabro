@@ -85,6 +85,10 @@ def _valid_successor(*, before: IncidentAttempt, after: IncidentAttempt) -> bool
         and after.generation == before.generation + 1
         and before.operation_id != after.operation_id
         and set(before.original_paths).issubset(after.original_paths)
+        # Ordinary transitions are agent-written authority records.  A workflow
+        # attestation expires with its recorded generation: only the separate
+        # maintainer receipt operation may put it on a successor.
+        and not after.workflow_paths
         # No writer discharges the incident from anything but a merged repayment.
         and closure_successor_allowed(before=before, after=after)
         and (

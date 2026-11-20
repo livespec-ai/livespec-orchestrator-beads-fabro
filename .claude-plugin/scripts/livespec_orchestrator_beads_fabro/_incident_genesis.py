@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any, cast
 
 from livespec_orchestrator_beads_fabro._incident_authority_payload import (
     GENESIS_MARKER,
+    attempt_record,
     decode_attempt,
 )
 from livespec_orchestrator_beads_fabro._incident_authority_types import (
@@ -120,6 +121,9 @@ def _initial(*, attempt: IncidentAttempt, repository: str, item_id: str, operati
         and attempt.generation == 1
         and attempt.phase == "repair"
         and isinstance(attempt.carrier, BranchReserved)
+        # Initial authority is agent-authored. Workflow scope first appears only
+        # through the separately attested receipt operation.
+        and not attempt.workflow_paths
     )
 
 
@@ -155,7 +159,7 @@ def request_digest(*, request: GenesisRequest) -> str:
                 "schema": 1,
                 "principal": request.principal,
                 "expected_claim": request.expected_claim,
-                "attempt": asdict(request.attempt),
+                "attempt": attempt_record(attempt=request.attempt),
             }
         ).encode()
     ).hexdigest()

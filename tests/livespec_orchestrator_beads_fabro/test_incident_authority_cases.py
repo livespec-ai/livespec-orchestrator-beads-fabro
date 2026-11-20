@@ -14,6 +14,7 @@ from livespec_orchestrator_beads_fabro._incident_authority_payload import (
     GENESIS_MARKER,
     TOKEN_TITLE,
     TRANSITION_MARKER,
+    attempt_record,
     decode_attempt,
     decode_record,
 )
@@ -193,6 +194,20 @@ def test_malformed_attempts_never_become_authority(key: str, value: object) -> N
 @pytest.mark.parametrize("value", [None, [], {}, _attempt(extra="field")])
 def test_incomplete_or_extended_attempt_schema_is_refused(value: object) -> None:
     assert decode_attempt(value=value) is None
+
+
+def test_workflow_paths_are_decoded_and_preserved_in_the_authority_record() -> None:
+    workflow = ".github/workflows/incident.yml"
+    snapshot = _attempt(
+        original_paths=["app.py", workflow],
+        workflow_paths=[workflow],
+    )
+
+    decoded = decode_attempt(value=snapshot)
+
+    assert decoded is not None
+    assert decoded.workflow_paths == (workflow,)
+    assert attempt_record(attempt=decoded) == snapshot
 
 
 @pytest.mark.parametrize(
