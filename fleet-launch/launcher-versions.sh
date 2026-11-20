@@ -21,22 +21,52 @@
 # nothing; it always exits 0.
 set -u
 
-script_version() { sha256sum < "$1" 2>/dev/null | cut -c1-12; }
+script_version() { { sha256sum < "$1"; } 2>/dev/null | cut -c1-12; }
+
+has_signal_supervisor() {
+  local environment_file=$1 value
+  local -a environment=()
+  [ -r "$environment_file" ] || return 1
+  { mapfile -d '' -t environment < "$environment_file"; } 2>/dev/null || return 1
+  for value in "${environment[@]}"; do
+    [ "$value" = 'FLEET_LAUNCH_SIGNAL_SUPERVISOR=1' ] && return 0
+  done
+  return 1
+}
+
+read_ppid() {
+  local status_file=$1 line
+  PPID_READBACK=""
+  [ -r "$status_file" ] || return 1
+  while IFS= read -r line; do
+    case $line in
+      PPid:*)
+        PPID_READBACK=${line#PPid:}
+        PPID_READBACK=${PPID_READBACK//[[:space:]]/}
+        return 0
+        ;;
+    esac
+  done < "$status_file" 2>/dev/null
+  return 1
+}
 
 rows=""
 for dir in /proc/[0-9]*; do
   pid=${dir#/proc/}
   argv=()
-  mapfile -d '' -t argv < "$dir/cmdline" 2>/dev/null || continue
+  [ -r "$dir/cmdline" ] || continue
+  { mapfile -d '' -t argv < "$dir/cmdline"; } 2>/dev/null || continue
   script_dir=$dir
-  if tr '\0' '\n' < "$dir/environ" 2>/dev/null | grep -qx 'FLEET_LAUNCH_SIGNAL_SUPERVISOR=1'; then
+  if has_signal_supervisor "$dir/environ"; then
     worker=""
     for child_dir in /proc/[0-9]*; do
       child_pid=${child_dir#/proc/}
-      child_ppid=$(sed -n 's/^PPid:[[:space:]]*//p' "$child_dir/status" 2>/dev/null)
+      read_ppid "$child_dir/status" || continue
+      child_ppid=$PPID_READBACK
       [ "$child_ppid" = "$pid" ] || continue
       child_argv=()
-      mapfile -d '' -t child_argv < "$child_dir/cmdline" 2>/dev/null || continue
+      [ -r "$child_dir/cmdline" ] || continue
+      { mapfile -d '' -t child_argv < "$child_dir/cmdline"; } 2>/dev/null || continue
       [ "${#child_argv[@]}" -ge 2 ] || continue
       case ${child_argv[0]##*/} in bash|sh|dash) ;; *) continue ;; esac
       case ${child_argv[1]##*/} in dispatch-dual*.sh|resume-capped*.sh) worker=$child_pid; argv=("${child_argv[@]}"); script_dir=$child_dir; break ;; esac
@@ -49,11 +79,14 @@ for dir in /proc/[0-9]*; do
   script=${argv[1]}
   case ${script##*/} in dispatch-dual*.sh|resume-capped*.sh) ;; *) continue ;; esac
   # A command substitution forks a copy of the launcher with the same argv; only the original counts.
-  ppid=$(sed -n 's/^PPid:[[:space:]]*//p' "$dir/status" 2>/dev/null)
+  read_ppid "$dir/status" || continue
+  ppid=$PPID_READBACK
   parent_argv=()
-  if [ -n "$ppid" ]; then mapfile -d '' -t parent_argv < "/proc/$ppid/cmdline" 2>/dev/null; fi
+  if [ -n "$ppid" ] && [ -r "/proc/$ppid/cmdline" ]; then
+    { mapfile -d '' -t parent_argv < "/proc/$ppid/cmdline"; } 2>/dev/null || :
+  fi
   [ "${parent_argv[1]:-}" = "$script" ] && continue
-  if [ -n "$ppid" ] && tr '\0' '\n' < "/proc/$ppid/environ" 2>/dev/null | grep -qx 'FLEET_LAUNCH_SIGNAL_SUPERVISOR=1'; then continue; fi
+  if [ -n "$ppid" ] && has_signal_supervisor "/proc/$ppid/environ"; then continue; fi
   case $script in
     /*) path=$script ;;
     *) path="$(readlink "$script_dir/cwd" 2>/dev/null)/$script" ;;
