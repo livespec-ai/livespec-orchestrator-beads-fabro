@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from livespec_orchestrator_beads_fabro._incident_authority_payload import attempt_record
 from livespec_orchestrator_beads_fabro.commands import incident_authority as command
 from livespec_orchestrator_beads_fabro.incident_authority import (
     AuthorityRefusal,
@@ -109,6 +110,57 @@ def test_refusal_has_named_code_nonzero_exit_and_no_normal_fallback(
     assert response["result"]["code"] == "incident-authority-unavailable"
     assert response["authorizes_current_effects"] is False
     assert response["normal_factory_proof"] is False
+
+
+def test_read_history_returns_every_recorded_generation_of_an_incident_attempt(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    earlier = IncidentAttempt(
+        repository="owner/repo",
+        item_id="item-1",
+        attempt_id="attempt-1",
+        phase="repair",
+        operation_id="operation-1",
+        generation=1,
+        owner="operator:alice",
+        base="a" * 40,
+        head="b" * 40,
+        pr_number=7,
+        landed_commits=(),
+        landed_trees=(),
+        original_paths=("app.py",),
+        deferred_work=("normal-factory-proof",),
+        repayment_required=True,
+    )
+    closed = IncidentAttempt(
+        **asdict(earlier)
+        | dict(phase="closed", operation_id="operation-2", generation=2, head="c" * 40)
+    )
+    history = (earlier, closed)
+    closed_token = f"{closed.phase}-token"
+    open_token = f"{earlier.phase}-token"
+
+    monkeypatch.setattr(command, "store_config", lambda **_kwargs: None)
+    monkeypatch.setattr(command, "make_beads_client", lambda **_kwargs: "client")
+    monkeypatch.setattr(
+        command,
+        "read_incident_authority",
+        lambda **_kwargs: IncidentReading(
+            attempt=closed,
+            committed_token_id=closed_token,
+            current_token_id=open_token,
+            is_current=True,
+        ),
+    )
+    monkeypatch.setattr(command, "read_incident_history", lambda **_kwargs: history, raising=False)
+
+    assert command.main(argv=_argv(action="read-history", root=tmp_path)) == 0
+    response = json.loads(capsys.readouterr().out)
+
+    assert response["result"] == {
+        "history": [attempt_record(attempt=earlier), attempt_record(attempt=closed)]
+    }
+    assert response["authorizes_current_effects"] is False
 
 
 @pytest.mark.parametrize("action", ["read-current", "read-history"])
