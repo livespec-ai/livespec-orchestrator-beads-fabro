@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -19,7 +20,27 @@ _HANDOFF = "livespec-implement-handoff.md"
 def _gate_script() -> str:
     graph = parse_dot_graph(text=_GRAPH.read_text(encoding="utf-8"))
     assert not isinstance(graph, str), graph
-    return graph.nodes[_GATE]["script"]
+    return graph.nodes[_GATE]["script"].replace("{{ inputs.default_branch }}", "master")
+
+
+def _clean_seeded_repo(*, tmp_path: Path) -> tuple[Path, str]:
+    repo = tmp_path / "clone"
+    repo.mkdir()
+    _ = subprocess.run(["git", "init", "--quiet", "--initial-branch=master"], cwd=repo, check=True)
+    _ = subprocess.run(["git", "config", "user.name", "Fixture"], cwd=repo, check=True)
+    _ = subprocess.run(
+        ["git", "config", "user.email", "fixture@example.invalid"], cwd=repo, check=True
+    )
+    _ = (repo / "unchanged.txt").write_text("dispatch base\n", encoding="utf-8")
+    _ = subprocess.run(["git", "add", "unchanged.txt"], cwd=repo, check=True)
+    _ = subprocess.run(["git", "commit", "--quiet", "-m", "dispatch base"], cwd=repo, check=True)
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    _ = subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/master", "HEAD"], cwd=repo, check=True
+    )
+    return repo, base
 
 
 def test_a_failed_recorded_preview_refuses_the_green_handoff(tmp_path: Path) -> None:
@@ -58,3 +79,131 @@ def test_a_failed_recorded_preview_refuses_the_green_handoff(tmp_path: Path) -> 
     assert json.loads(completed.stdout) == {"preferred_next_label": "incomplete"}
     assert "check-per-file-coverage" in completed.stderr
     assert "## green-preview-refused" in handoff_path.read_text(encoding="utf-8")
+
+
+def test_a_clean_seeded_green_with_preview_exit_two_ends_already_satisfied(
+    tmp_path: Path,
+) -> None:
+    """A no-change seeded Green accepts its no-staged-change preview and takes the clean terminal."""
+    repo, base = _clean_seeded_repo(tmp_path=tmp_path)
+
+    graph = parse_dot_graph(text=_GRAPH.read_text(encoding="utf-8"))
+    assert not isinstance(graph, str), graph
+    git_dir = repo / ".git"
+    _ = (git_dir / _PREVIEW_RECORD).write_text(
+        json.dumps({"failed_targets": [], "preview_ran": True, "status": 2}) + "\n",
+        encoding="utf-8",
+    )
+    handoff_path = git_dir / _HANDOFF
+    _ = handoff_path.write_text(
+        "## seeded-red-passes\nThe seeded Red test passes.\n\n"
+        "## green\npreview exit status: 2; failed targets: none\n",
+        encoding="utf-8",
+    )
+
+    completion = subprocess.run(
+        ["sh", "-c", _gate_script()],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        input=_COMPLETION,
+        text=True,
+    )
+
+    assert completion.returncode == 0, completion.stderr
+    assert json.loads(completion.stdout) == {"preferred_next_label": "already-satisfied"}
+    assert "## green-preview-refused" not in handoff_path.read_text(encoding="utf-8")
+
+    clean_route = next(
+        edge.destination
+        for edge in graph.edges
+        if edge.source == _GATE
+        and edge.attributes.get("condition") == "preferred_label=already-satisfied"
+    )
+    assert clean_route == "already_satisfied_route"
+    route_script = graph.nodes[clean_route]["script"].replace(
+        "{{ inputs.default_branch }}", "master"
+    )
+    route = subprocess.run(
+        ["sh", "-c", route_script], cwd=repo, check=False, capture_output=True, text=True
+    )
+
+    assert route.returncode == 0, route.stderr
+    assert json.loads(route.stdout) == {"preferred_next_label": "unchanged"}
+    terminal_script = graph.nodes["already_satisfied"]["script"].replace(
+        "{{ inputs.default_branch }}", "master"
+    )
+    terminal = subprocess.run(
+        ["sh", "-c", terminal_script],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "LIVESPEC_PUBLISH_BRANCH": "feat/bd-ib-bnxzbk"},
+    )
+    assert terminal.returncode == 0, terminal.stderr
+    assert f"LIVESPEC_ALREADY_SATISFIED: base={base} " in terminal.stderr
+    assert "work item bd-ib-bnxzbk" in terminal.stderr
+    assert "red declared" not in terminal.stderr
+
+
+def _seed_clean_green_records(*, repo: Path) -> None:
+    git_dir = repo / ".git"
+    _ = (git_dir / _PREVIEW_RECORD).write_text(
+        json.dumps({"failed_targets": [], "preview_ran": True, "status": 2}) + "\n",
+        encoding="utf-8",
+    )
+    _ = (git_dir / _HANDOFF).write_text(
+        "## seeded-red-passes\nThe seeded Red test passes.\n\n"
+        "## green\npreview exit status: 2; failed targets: none\n",
+        encoding="utf-8",
+    )
+
+
+def _run_gate(*, repo: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["sh", "-c", _gate_script()],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        input=_COMPLETION,
+        text=True,
+    )
+
+
+def test_a_seeded_green_is_never_judged_clean_against_a_non_dispatch_remote_branch(
+    tmp_path: Path,
+) -> None:
+    """With origin/HEAD absent, an unrelated remote branch is not the dispatch base."""
+    repo, _base = _clean_seeded_repo(tmp_path=tmp_path)
+    _ = (repo / "changed.txt").write_text("seeded green change\n", encoding="utf-8")
+    _ = subprocess.run(["git", "add", "changed.txt"], cwd=repo, check=True)
+    _ = subprocess.run(["git", "commit", "--quiet", "-m", "green change"], cwd=repo, check=True)
+    _ = subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/aaa-feature", "HEAD"], cwd=repo, check=True
+    )
+    _seed_clean_green_records(repo=repo)
+
+    completion = _run_gate(repo=repo)
+
+    assert completion.returncode == 0, completion.stderr
+    assert json.loads(completion.stdout) == {"preferred_next_label": "incomplete"}
+
+
+def test_a_seeded_green_fails_closed_when_the_dispatch_base_ref_is_missing(
+    tmp_path: Path,
+) -> None:
+    """A missing origin/<default branch> leaves the clean-tree guard unable to pass."""
+    repo, _base = _clean_seeded_repo(tmp_path=tmp_path)
+    _ = subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/aaa-feature", "HEAD"], cwd=repo, check=True
+    )
+    _ = subprocess.run(
+        ["git", "update-ref", "-d", "refs/remotes/origin/master"], cwd=repo, check=True
+    )
+    _seed_clean_green_records(repo=repo)
+
+    completion = _run_gate(repo=repo)
+
+    assert completion.returncode == 0, completion.stderr
+    assert json.loads(completion.stdout) == {"preferred_next_label": "incomplete"}
