@@ -192,12 +192,18 @@ def _journal_rest(
             "preserved_ref_commit": None if row is None else row.get("preserved_ref_commit"),
         }
     )
+    cut = "a no-progress cut" if _is_no_progress_cut(row=row) else "its whole-run wall budget"
     _ = write_stderr(
         text=(
-            f"SURFACE: work-item {item.id} held a factory slot past its whole-run wall "
-            f"budget; its run was exported and cancelled, it rests at blocked / "
+            f"SURFACE: work-item {item.id} reached {cut}; its run was exported and "
+            f"cancelled, it rests at blocked / "
             f"needs-human, and no further dispatch or resume is invoked automatically. "
             f"The cancellation is NOT non-convergence and the slice was not bounced to "
             f"backlog.\n"
         )
     )
+
+
+def _is_no_progress_cut(*, row: Mapping[str, object] | None) -> bool:
+    """The row carries this field only after the measured empty-diff cut."""
+    return row is not None and isinstance(row.get("no_progress_consecutive_stage_count"), int)
