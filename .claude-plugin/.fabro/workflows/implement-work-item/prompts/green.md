@@ -44,6 +44,11 @@ named targets and run the gate preview below before ending.
    every failed target the preview names that is within this turn's scope, then
    run the preview again after each fix. The preview does not decide whether a
    commit succeeds.
+   The preview prints a progress line naming the running hook step at least
+   every 30 seconds and can take many minutes. If your tool call ends before it
+   finishes, the preview keeps running: run the same command again to follow
+   it to its verdict, or add `--status` to read its record without waiting
+   (exit 75 while it runs). Record the verdict, never a preview still running.
 4. Append, never rewrite an earlier section, using a `## green` section that
    states what changed, which tests ran, and the exit status and failed target
    names of the last gate preview run. If no preview ran, state that and why.
