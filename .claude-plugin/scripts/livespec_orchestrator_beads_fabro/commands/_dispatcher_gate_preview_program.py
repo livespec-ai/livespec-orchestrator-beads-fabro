@@ -340,14 +340,21 @@ def running_just_command(pid):
 
 
 def current_step(output, pid):
+    """Name the hook step that is running.
+
+    The hook runner prints a step's header only when that step FINISHES (measured on
+    v1.13.6 writing to a pipe), so the newest header names the step before the
+    running one.  The running step's own command is the outermost `just`
+    process below the worker, so that leads; the header is reported as what it is.
+    """
     headers = LEFTHOOK_STEP.findall(output)
     running = running_just_command(pid)
-    parts = []
-    if headers:
-        parts.append(f"hook step {headers[-1]}")
+    finished = f"the hook runner last reported {headers[-1]} as finished" if headers else ""
     if running:
-        parts.append(f"`{running}`")
-    return ", ".join(parts) or "preparing the preview worktree (no hook step started yet)"
+        return f"`{running}`" + (f" ({finished})" if finished else "")
+    if finished:
+        return f"the hook ({finished})"
+    return "preparing the preview worktree (no hook step started yet)"
 
 
 def progress_seconds():
