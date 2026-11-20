@@ -283,7 +283,7 @@ def _descendant_forge(state: _Tenant, *, earlier_green: bool = False) -> tuple[s
     """Program the forge evidence for a green run following another incident's fix."""
     parent, descendant_head, job = "a" * 40, BROKEN_MASTER, "export-telemetry"
     state.forge.runs |= {
-        "descendant": dict(headSha=descendant_head, status="completed", conclusion="success"),
+        "13": dict(headSha=descendant_head, status="completed", conclusion="success"),
         "11": dict(
             databaseId=11,
             headSha=MASTER_HEAD,
@@ -310,6 +310,7 @@ def _descendant_forge(state: _Tenant, *, earlier_green: bool = False) -> tuple[s
         _runs_url(head=MASTER_HEAD): _runs_page(_ci_row(id=11)),
         f"repos/{REPOSITORY}/commits/{MASTER_HEAD}": {"parents": [dict(sha=parent)]},
         _runs_url(head=parent): _runs_page(_ci_row(id=12)),
+        _runs_url(head=descendant_head): _runs_page(_ci_row(id=13)),
         _runs_url(head=None): _runs_page(*successful_runs),
         f"repos/{REPOSITORY}/compare/{MASTER_HEAD}...{descendant_head}": {"status": "ahead"},
         f"repos/{REPOSITORY}/compare/{descendant_head}...{MASTER_HEAD}": {"status": "behind"},
@@ -350,7 +351,7 @@ def _descendant_context(state: _Tenant) -> tuple[IncidentReading, MasterCiRun, s
     assert isinstance(reading, IncidentReading)
     return (
         reading,
-        MasterCiRun(run_id="descendant", head=descendant_head, conclusion="success", complete=True),
+        MasterCiRun(run_id="13", head=descendant_head, conclusion="success", complete=True),
         descendant_head,
     )
 
@@ -509,7 +510,7 @@ def test_enter_repayment_admits_the_first_green_descendant_only_with_attributed_
             "enter-repayment",
             observed,
             "--master-run",
-            "descendant",
+            "13",
             "--target-ref",
             REPAYMENT_REF,
             "--attributed-incident",
@@ -532,7 +533,7 @@ def test_enter_repayment_admits_the_first_green_descendant_only_with_attributed_
         evidence.landed_failed_run_id,
         evidence.preexisting_jobs,
     ) == (
-        "descendant",
+        "13",
         descendant_head,
         MASTER_HEAD,
         "11",
@@ -558,7 +559,7 @@ def test_enter_repayment_refuses_a_descendant_with_an_unattributed_failed_job(
             "enter-repayment",
             observed,
             "--master-run",
-            "descendant",
+            "13",
             "--target-ref",
             REPAYMENT_REF,
         )
@@ -591,7 +592,7 @@ def test_enter_repayment_refuses_a_descendant_when_an_earlier_green_descendant_e
             "enter-repayment",
             observed,
             "--master-run",
-            "descendant",
+            "13",
             "--target-ref",
             REPAYMENT_REF,
             "--attributed-incident",
@@ -602,6 +603,71 @@ def test_enter_repayment_refuses_a_descendant_when_an_earlier_green_descendant_e
     assert refusal == (
         "incident-repayment-master-ci-outstanding: "
         "condition-4: an earlier successful descendant master run exists"
+    )
+
+
+def test_enter_repayment_refuses_a_descendant_run_that_is_not_the_normal_master_ci_run(
+    tenant: _Tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed = _merged_repair(tenant)
+    _, descendant_head, _ = _descendant_forge(tenant)
+    monkeypatch.setattr(
+        descendant,
+        "read_history",
+        lambda **_: _attributed_history(observed=observed, head=descendant_head),
+    )
+    tenant.forge.api[_runs_url(head=descendant_head)] = _runs_page(
+        _ci_row(id=13, name="Release Please"), _ci_row(id=14)
+    )
+
+    refusal = _refused(
+        tenant.cli(
+            "enter-repayment",
+            observed,
+            "--master-run",
+            "13",
+            "--target-ref",
+            REPAYMENT_REF,
+            "--attributed-incident",
+            "attributed-incident",
+        )
+    )
+
+    assert refusal == (
+        "incident-repayment-master-ci-outstanding: "
+        f"admitted-run: run 13 is not a normal master CI run at {descendant_head}"
+    )
+    assert tenant.client.show_issue(issue_id=ITEM)["status"] == "active"
+
+
+def test_enter_repayment_refuses_a_descendant_whose_normal_run_listing_is_unreadable(
+    tenant: _Tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed = _merged_repair(tenant)
+    _, descendant_head, _ = _descendant_forge(tenant)
+    monkeypatch.setattr(
+        descendant,
+        "read_history",
+        lambda **_: _attributed_history(observed=observed, head=descendant_head),
+    )
+    del tenant.forge.api[_runs_url(head=descendant_head)]
+
+    refusal = _refused(
+        tenant.cli(
+            "enter-repayment",
+            observed,
+            "--master-run",
+            "13",
+            "--target-ref",
+            REPAYMENT_REF,
+            "--attributed-incident",
+            "attributed-incident",
+        )
+    )
+
+    assert refusal == (
+        "incident-repayment-master-ci-outstanding: "
+        "admitted-run: the normal master CI runs at the admitted head are unreadable"
     )
 
 
