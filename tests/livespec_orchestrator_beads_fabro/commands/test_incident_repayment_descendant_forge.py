@@ -109,3 +109,91 @@ def test_latest_landed_ancestor_keeps_unreadable_and_absent_distinct(
         )
         == expected
     )
+
+
+_REPOSITORY = "owner/repository"
+
+
+def _row(run_id: int, **changes: object) -> dict[str, object]:
+    return {
+        "id": run_id,
+        "name": "CI",
+        "head_branch": "master",
+        "event": "push",
+        "head_sha": "a" * 40,
+        "status": "completed",
+        "conclusion": "success",
+    } | changes
+
+
+@dataclass
+class _Pages:
+    """A forge that serves `actions/runs` one page at a time, recording each request."""
+
+    pages: dict[int, list[dict[str, object]]]
+    total: int
+    requested: list[str]
+
+    def run(self, *, argv: list[str], **_: object) -> CommandResult:
+        path = argv[2]
+        self.requested.append(path)
+        page = int(path.rsplit("page=", 1)[1].split("&")[0])
+        reply = {"total_count": self.total, "workflow_runs": self.pages.get(page, [])}
+        return CommandResult(exit_code=0, stdout=json.dumps(reply), stderr="")
+
+
+def _pages(*pages: list[dict[str, object]], total: int | None = None) -> _Pages:
+    return _Pages(
+        pages={number: rows for number, rows in enumerate(pages, start=1)},
+        total=sum(len(rows) for rows in pages) if total is None else total,
+        requested=[],
+    )
+
+
+def _runs_at(forge_double: _Pages) -> tuple[str, ...] | None:
+    return forge.runs_at(
+        runner=forge_double, repo=Path.cwd(), repository=_REPOSITORY, head="a" * 40
+    )
+
+
+def test_runs_at_reads_every_page_of_the_run_history() -> None:
+    first = [_row(number) for number in range(1, 101)]
+    second = [_row(number) for number in range(101, 151)]
+    double = _pages(first, second)
+    assert _runs_at(double) == tuple(str(number) for number in range(1, 151))
+    assert len(double.requested) == 2
+
+
+def test_runs_at_keeps_only_the_normal_master_ci_runs() -> None:
+    double = _pages(
+        [
+            _row(1),
+            _row(2, name="Release Please"),
+            _row(3, head_branch="feature"),
+            _row(4, event="pull_request"),
+            _row(5),
+        ]
+    )
+    assert _runs_at(double) == ("1", "5")
+
+
+def test_runs_at_asks_the_forge_for_master_push_runs_at_the_commit() -> None:
+    double = _pages([_row(1)])
+    assert _runs_at(double) == ("1",)
+    (path,) = double.requested
+    assert f"head_sha={'a' * 40}" in path
+    assert "branch=master" in path
+    assert "event=push" in path
+
+
+def test_runs_at_refuses_a_history_the_forge_truncated() -> None:
+    double = _pages([_row(number) for number in range(1, 101)], total=150)
+    assert _runs_at(double) is None
+
+
+def test_normal_runs_without_a_head_pages_the_whole_master_history() -> None:
+    double = _pages([_row(1, head_sha="b" * 40)], [_row(2, name="Other")], total=2)
+    rows = forge.normal_runs(runner=double, repo=Path.cwd(), repository=_REPOSITORY, head=None)
+    assert rows is not None
+    assert [row["id"] for row in rows] == [1]
+    assert not any("head_sha" in path for path in double.requested)
