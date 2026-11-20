@@ -89,6 +89,7 @@ __all__: list[str] = [
 ]
 
 EXIT_CANNOT_SCOPE = 75
+PREVIEW_VARIABLE = "LIVESPEC_GATE_PREVIEW"
 WORKFLOW_FILE_NAME = "workflow.fabro"
 # A change to one of these cannot be mapped to the tests it affects: each is read
 # by the whole suite or by the gate itself.
@@ -145,7 +146,7 @@ def _is_shared(*, path: str) -> bool:
     )
 
 
-def select(*, root: Path, changed: list[str]) -> Selection | Unscoped:
+def select(*, root: Path, changed: list[str], preview: bool = False) -> Selection | Unscoped:
     """The tests and the product modules measured for `changed`, or why it cannot be scoped."""
     shared = [path for path in changed if _is_shared(path=path)]
     if shared:
@@ -159,13 +160,14 @@ def select(*, root: Path, changed: list[str]) -> Selection | Unscoped:
     seeds = {path for path in changed if path in scan.graph}
     tests = {path for path in seeds if is_test(path=path)}
     for path in sorted(seeds):
-        reached = tests_reaching(seeds={path}, scan=scan) | _mirror_tests(
-            root=root, path=path, pairings=layout["mirror_pairings"]
-        )
-        if not reached:
+        if is_test(path=path):
+            continue
+        mirrors = _mirror_tests(root=root, path=path, pairings=layout["mirror_pairings"])
+        reached = mirrors if preview else tests_reaching(seeds={path}, scan=scan) | mirrors
+        if not reached and not preview:
             return Unscoped(reason=f"no test module imports or names {path}")
         tests |= reached
-    if any(Path(path).name == WORKFLOW_FILE_NAME for path in changed):
+    if not preview and any(Path(path).name == WORKFLOW_FILE_NAME for path in changed):
         reading = tests_reaching(seeds=scan.named.get(WORKFLOW_FILE_NAME, set()), scan=scan)
         if not reading:
             return Unscoped(reason=f"no test module reads {WORKFLOW_FILE_NAME}")
@@ -205,6 +207,9 @@ def _run_gate(*, root: Path, selection: Selection) -> int:
     data_dir = tempfile.mkdtemp(prefix="livespec-affected-tests-")
     data_file = str(Path(data_dir) / "coverage.dat")
     env = {k: v for k, v in os.environ.items() if not k.startswith("COV_CORE_")}
+    # Preview selection belongs to this outer gate only.  Test fixtures can
+    # invoke the selector themselves and must retain its ordinary semantics.
+    _ = env.pop(PREVIEW_VARIABLE, None)
     env["COVERAGE_FILE"] = data_file
     workers = subprocess.run(
         ["bash", "dev-tooling/just-test-nprocs.sh"],
@@ -255,7 +260,11 @@ def main() -> int:
     outcome = (
         Unscoped(reason="the changed-file diff could not be taken")
         if changed is None
-        else select(root=root, changed=changed)
+        else select(
+            root=root,
+            changed=changed,
+            preview=os.environ.get(PREVIEW_VARIABLE) == "1",
+        )
     )
     if isinstance(outcome, Unscoped):
         log.warning("affected-tests gate cannot scope this change", reason=outcome.reason)
