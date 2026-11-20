@@ -3331,5 +3331,13 @@
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
     "test": "tests.bin.test_credential_reexec_passthrough.test_reexecuted_dispatcher_refusal_preserves_its_exit_and_stderr"
+  },
+  {
+    "heading": "## Scenario 383 — An item-only read-history returns every generation of an incident from its work-item id and computes the closed generation's outstanding list",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-l4dowx",
+    "reason": "A real test at the integration tier or above is owed for this heading: the incident authority CLI driven with an item-only read-history against an incident of several attempts and generations, a closed head with a computed outstanding list, an unknown item, and the unchanged full-identity invocation. bd-ib-l4dowx owns it."
   }
 ]
