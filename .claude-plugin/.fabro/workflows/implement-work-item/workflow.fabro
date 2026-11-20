@@ -644,10 +644,10 @@ chmod 755 \"$runner\""
     ]
 
     already_satisfied [
-        label="Already satisfied: Red left the dispatch base unchanged"
+        label="Already satisfied: the turn left the dispatch base unchanged"
         shape=parallelogram
         timeout="1800s"
-        script="if git diff --quiet \"origin/{{ inputs.default_branch }}...HEAD\"; then echo \"LIVESPEC_ALREADY_SATISFIED: base=$(git rev-parse \"origin/{{ inputs.default_branch }}\") red declared the work already satisfied on the unchanged dispatch base\" >&2; exit 0; fi; echo 'LIVESPEC_ALREADY_SATISFIED_UNPROVABLE: red declared already-satisfied but the tree differs from dispatch base' >&2; exit 1"
+        script="if git diff --quiet \"origin/{{ inputs.default_branch }}...HEAD\"; then item=\"${LIVESPEC_PUBLISH_BRANCH:-}\"; item=\"${item#feat/}\"; echo \"LIVESPEC_ALREADY_SATISFIED: base=$(git rev-parse \"origin/{{ inputs.default_branch }}\") work item ${item:-unnamed} is already satisfied: the turn left the tree unchanged on the dispatch base\" >&2; exit 0; fi; echo 'LIVESPEC_ALREADY_SATISFIED_UNPROVABLE: an already-satisfied ending was reached but the tree differs from dispatch base' >&2; exit 1"
     ]
 
     test_wrong_reset [
