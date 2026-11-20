@@ -11,6 +11,9 @@ from livespec_orchestrator_beads_fabro._beads_client import FakeBeadsClient
 from livespec_orchestrator_beads_fabro._incident_authority_types import AuthorityRefusal
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_types import CommandResult
 from livespec_orchestrator_beads_fabro.effects import _incident_authority_transition as transition
+from livespec_orchestrator_beads_fabro.effects._incident_workflow_receipt import (
+    attested_successor,
+)
 from livespec_orchestrator_beads_fabro.incident_authority import (
     HumanAttestedWorkflowReceipt,
     IncidentReading,
@@ -97,6 +100,21 @@ def _attest(
         runner=answering,
         repo=Path(),
     )
+
+
+def test_attested_successor_retains_the_cumulative_diff_scope() -> None:
+    client, _, _ = _chain()
+    observed = _read(client)
+    assert isinstance(observed, IncidentReading)
+    observed = replace(
+        observed,
+        attempt=replace(observed.attempt, original_paths=("app.py", _WORKFLOW)),
+    )
+
+    successor = attested_successor(observed=observed, receipt=_receipt())
+
+    assert isinstance(successor, type(observed.attempt))
+    assert successor.workflow_paths == (_WORKFLOW,)
 
 
 def test_attestation_rejects_an_empty_workflow_scope() -> None:
