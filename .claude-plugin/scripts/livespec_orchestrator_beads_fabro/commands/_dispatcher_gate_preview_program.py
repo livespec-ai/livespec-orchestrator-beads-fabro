@@ -132,6 +132,30 @@ def skipped_environment():
     return environment, names
 
 
+def just_exports(*, cwd, environment):
+    """Return the environment a hook recipe receives from the repository's justfile.
+
+    The commit hook starts its checks through ``just``, whose exported variables
+    become part of the check process environment.  The preview calls the hook
+    directly, so it must materialize those exports first or it can approve a
+    worker-sensitive test that the real hook rejects.
+    """
+    if not environment.get("JUST_JUSTFILE") and not any(
+        (cwd / name).is_file() for name in ("justfile", "Justfile", ".justfile", ".Justfile")
+    ):
+        return {}, 0
+    result = command("just", "--command", "env", cwd=cwd, env=environment, check=False)
+    if result.returncode:
+        sys.stderr.write(result.stdout + result.stderr)
+        return None, result.returncode
+    exports = {}
+    for line in result.stdout.splitlines():
+        name, separator, value = line.partition("=")
+        if separator:
+            exports[name] = value
+    return exports, 0
+
+
 def preview_parent():
     """The directory the disposable worktree is made in, never the system temp directory.
 
@@ -185,6 +209,10 @@ def preview(stage, test_file):
         if trust.returncode:
             sys.stderr.write(trust_output)
             return trust.returncode, [], unset, False
+        exports, exports_status = just_exports(cwd=preview_root, environment=environment)
+        if exports_status:
+            return exports_status, [], unset, False
+        environment.update(exports)
         result = command(str(hook), cwd=preview_root, env=environment, check=False)
         output = result.stdout + result.stderr
         sys.stdout.write(output)
