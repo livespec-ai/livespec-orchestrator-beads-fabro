@@ -77,6 +77,7 @@ _ENV_COMMAND = "env"
 # credential wrapper.  It remains distinct from the host-default App so the
 # post-wrapper entry can prove the projection actually took effect.
 _TARGET_APP_ID_ENV = "GITHUB_APP_ID_ORG"
+_REPO_FLAG = "--repo"
 
 
 def bootstrap(
@@ -117,8 +118,10 @@ def bootstrap(
     # invocation waits on and is removed exactly once, by its creator.
     _ = atexit.register(release_payload, payload=payload)
     selected_command = sys.argv[1] if len(sys.argv) > 1 else None
+    repo = _target_repo(argv=sys.argv)
     _self_heal_credentials(
-        required=_effective_required(required=required, cwd=Path.cwd()),
+        required=_effective_required(required=required, cwd=repo),
+        repo=repo,
         argv=payload_relative_argv(
             argv=sys.argv, source_root=source_root, payload_root=payload.root
         ),
@@ -130,6 +133,23 @@ def bootstrap(
             )
         ),
     )
+
+
+def _target_repo(*, argv: Sequence[str]) -> Path:
+    """Return the governed repository: the `--repo` argument, else the cwd.
+
+    The credential projection and the ledger mode belong to the TARGET
+    repository, and this runs before either entry point parses its arguments,
+    so the flag is read from `argv` directly in both spellings. Like argparse,
+    the last occurrence wins.
+    """
+    repo = Path.cwd()
+    for index, arg in enumerate(argv):
+        if arg == _REPO_FLAG and index + 1 < len(argv):
+            repo = Path.cwd() / argv[index + 1]
+        elif arg.startswith(_REPO_FLAG + "="):
+            repo = Path.cwd() / arg[len(_REPO_FLAG) + 1 :]
+    return repo
 
 
 def _tenant_secret_required(*, cwd: Path) -> bool:
@@ -162,9 +182,10 @@ def _effective_required(*, required: tuple[str, ...], cwd: Path) -> tuple[str, .
     return tuple(name for name in required if name != _TENANT_ENV_NAME)
 
 
-def _read_credential_wrapper() -> list[str]:
+def _read_credential_wrapper(*, repo: Path | None = None) -> list[str]:
     """Return the top-level `credential_wrapper` argv-prefix from the governed
-    project's `.livespec.jsonc`, tolerating any read/parse quirk as `[]`.
+    project's `.livespec.jsonc` (the `repo` target, else the cwd), tolerating
+    any read/parse quirk as `[]`.
 
     Fail-open toward "no wrapper": a missing file, malformed JSONC, a
     non-object root, or a non-list value all yield `[]` — which, when the
@@ -175,7 +196,7 @@ def _read_credential_wrapper() -> list[str]:
     # inserts run, so this cannot be a module-level import.
     from livespec_orchestrator_beads_fabro.commands._jsonc import JsoncParseError, loads
 
-    config_path = Path.cwd() / _LIVESPEC_CONFIG_FILENAME
+    config_path = (Path.cwd() if repo is None else repo) / _LIVESPEC_CONFIG_FILENAME
     try:
         raw_text = config_path.read_text(encoding="utf-8")
     except OSError:
@@ -335,6 +356,7 @@ def _self_heal_credentials(
     required: tuple[str, ...] = _REQUIRED_CREDENTIALS,
     argv: list[str] | None = None,
     force_credential_wrapper: bool = False,
+    repo: Path | None = None,
 ) -> None:
     """Decide-and-perform the credential self-heal at the bin chokepoint.
 
@@ -358,7 +380,7 @@ def _self_heal_credentials(
     )
     from typing_extensions import assert_never
 
-    credential_wrapper = _read_credential_wrapper()
+    credential_wrapper = _read_credential_wrapper(repo=repo)
     decision_argv = sys.argv if argv is None else argv
     decision = _credential_decision(
         required=required,

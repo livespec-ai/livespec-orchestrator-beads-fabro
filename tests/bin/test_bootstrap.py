@@ -639,3 +639,74 @@ def test_bootstrap_embedded_ledger_proceeds_without_tenant_secret(
         )
         is None
     )
+
+
+def test_bootstrap_takes_the_credential_wrapper_of_the_repo_argument_not_the_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A shared `drive.py --repo <target>` projects the TARGET's App, not the caller's.
+
+    The cwd holds a different repository whose wrapper must be ignored; only the
+    `--repo` target's committed `credential_wrapper` may re-exec the process.
+    """
+    caller = tmp_path / "caller"
+    target = tmp_path / "target"
+    caller.mkdir()
+    target.mkdir()
+    _ = (caller / ".livespec.jsonc").write_text(
+        '{"credential_wrapper": ["/caller-wrapper", "--"]}', encoding="utf-8"
+    )
+    _ = (target / ".livespec.jsonc").write_text(
+        '{"credential_wrapper": ["/target-wrapper", "--"]}', encoding="utf-8"
+    )
+    monkeypatch.chdir(caller)
+    monkeypatch.setattr(sys, "argv", ["drive.py", "--repo", str(target), "--action", "impl:x"])
+    monkeypatch.delenv(CREDENTIAL_REEXEC_SENTINEL, raising=False)
+    monkeypatch.delenv("LIVESPEC_PLAN_UNATTENDED", raising=False)
+    for name in ("CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "PI_SESSION_ID"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("GITHUB_APP_ID", "retired-app")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY", "test-not-a-real-secret")
+    recorded: dict[str, list[str]] = {}
+
+    def _fake_run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        recorded["args"] = args
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    bootstrap_module = _import_bootstrap()
+    with pytest.raises(SystemExit) as excinfo:
+        bootstrap_module.bootstrap(  # type: ignore[attr-defined]
+            required=("GITHUB_APP_ID", "GITHUB_PRIVATE_KEY"),
+            force_credential_wrapper=True,
+        )
+
+    assert excinfo.value.code == 0
+    assert recorded["args"][:2] == ["/target-wrapper", "--"]
+
+
+@pytest.mark.parametrize("spelling", ["separate", "equals"])
+def test_bootstrap_reads_the_ledger_mode_of_the_repo_argument_not_the_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, spelling: str
+) -> None:
+    """The tenant-secret requirement follows the `--repo` target's ledger mode."""
+    caller = tmp_path / "caller"
+    target = tmp_path / "target"
+    caller.mkdir()
+    target.mkdir()
+    _write_beads_config(cwd=caller, body="dolt.mode: server\n")
+    _write_beads_config(cwd=target, body="dolt.auto-start: true\n")
+    monkeypatch.chdir(caller)
+    repo_args = ["--repo", str(target)] if spelling == "separate" else [f"--repo={target}"]
+    monkeypatch.setattr(sys, "argv", ["drive.py", *repo_args])
+    monkeypatch.delenv("BEADS_DOLT_PASSWORD", raising=False)
+    monkeypatch.delenv(CREDENTIAL_REEXEC_SENTINEL, raising=False)
+    monkeypatch.setenv("GITHUB_APP_ID", "42")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY", "stub-pem")
+    bootstrap_module = _import_bootstrap()
+    assert (
+        bootstrap_module.bootstrap(  # type: ignore[attr-defined]
+            required=("BEADS_DOLT_PASSWORD", "GITHUB_APP_ID", "GITHUB_PRIVATE_KEY")
+        )
+        is None
+    )
