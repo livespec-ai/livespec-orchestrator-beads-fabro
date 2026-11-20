@@ -21,6 +21,7 @@ from unittest.mock import Mock
 
 import pytest
 from livespec_runtime.credentials import (
+    CREDENTIAL_REEXEC_ARGV_MARKER,
     CREDENTIAL_REEXEC_SENTINEL,
     Fail,
     Proceed,
@@ -300,13 +301,122 @@ def test_self_heal_reexec_supervises_subprocess_and_propagates_output_and_exit(
     with pytest.raises(SystemExit) as excinfo:
         bootstrap_module._self_heal_credentials()  # type: ignore[attr-defined]  # noqa: SLF001
     assert os.environ[CREDENTIAL_REEXEC_SENTINEL] == "1"
-    assert recorded["args"] == list(reexec_argv)
+    assert recorded["args"] == [*reexec_argv, CREDENTIAL_REEXEC_ARGV_MARKER]
     assert recorded["kwargs"] == {"capture_output": True, "check": False}
     assert excinfo.value.code == 17
     captured = capsys.readouterr()
     assert captured.out == '{"ok": false}\n'
     assert "wrapped cli stderr" in captured.err
     assert "credential_wrapper could not run" not in captured.err
+
+
+def test_self_heal_forces_the_target_credential_wrapper_when_credentials_exist(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A selected dispatch must not trust an inherited App identity.
+
+    The force is the direct-drive and direct-resume boundary: it deliberately
+    takes the target repository's credential projection even when the host
+    already supplied every required credential.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(CREDENTIAL_REEXEC_SENTINEL, raising=False)
+    monkeypatch.delenv("LIVESPEC_PLAN_UNATTENDED", raising=False)
+    for name in ("CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "PI_SESSION_ID"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("GITHUB_APP_ID", "retired-app")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY", "test-not-a-real-secret")
+    _ = (tmp_path / ".livespec.jsonc").write_text(
+        '{"credential_wrapper": ["/target-wrapper", "--"]}', encoding="utf-8"
+    )
+    recorded: dict[str, object] = {}
+
+    def _fake_run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        recorded["args"] = args
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    bootstrap_module = _import_bootstrap()
+    with pytest.raises(SystemExit) as excinfo:
+        bootstrap_module._self_heal_credentials(  # type: ignore[attr-defined]  # noqa: SLF001
+            required=("GITHUB_APP_ID", "GITHUB_PRIVATE_KEY"),
+            argv=["drive.py"],
+            force_credential_wrapper=True,
+        )
+
+    assert excinfo.value.code == 0
+    assert recorded["args"] == [
+        "/target-wrapper",
+        "--",
+        sys.executable,
+        "drive.py",
+        CREDENTIAL_REEXEC_ARGV_MARKER,
+    ]
+
+
+def test_self_heal_refuses_a_selected_dispatch_without_a_target_wrapper(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Target selection cannot silently retain an ambient App without a wrapper."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(CREDENTIAL_REEXEC_SENTINEL, raising=False)
+    monkeypatch.setenv("GITHUB_APP_ID", "retired-app")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY", "test-not-a-real-secret")
+    bootstrap_module = _import_bootstrap()
+
+    with pytest.raises(SystemExit) as excinfo:
+        bootstrap_module._self_heal_credentials(  # type: ignore[attr-defined]  # noqa: SLF001
+            required=("GITHUB_APP_ID", "GITHUB_PRIVATE_KEY"),
+            force_credential_wrapper=True,
+        )
+
+    assert excinfo.value.code == _EXIT_CODE_CREDENTIAL_FAIL
+    assert (
+        "target repository App selection requires a credential_wrapper" in capsys.readouterr().err
+    )
+
+
+def test_self_heal_refuses_a_target_app_mismatch_after_the_projection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A wrapper that leaves a retired App selected cannot create a run."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_APP_ID", "retired-app")
+    monkeypatch.setenv("GITHUB_APP_ID_ORG", "target-owner-app")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY", "test-not-a-real-secret")
+    monkeypatch.setattr(sys, "argv", ["drive.py", CREDENTIAL_REEXEC_ARGV_MARKER])
+    bootstrap_module = _import_bootstrap()
+
+    with pytest.raises(SystemExit) as excinfo:
+        bootstrap_module._self_heal_credentials(  # type: ignore[attr-defined]  # noqa: SLF001
+            required=("GITHUB_APP_ID", "GITHUB_PRIVATE_KEY"),
+            force_credential_wrapper=True,
+        )
+
+    assert excinfo.value.code == _EXIT_CODE_CREDENTIAL_FAIL
+    captured = capsys.readouterr()
+    assert "target-owner-app" in captured.err
+    assert "retired-app" in captured.err
+
+
+def test_self_heal_accepts_a_matching_target_app_after_the_projection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A selected App that matches the target projection proceeds unchanged."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(CREDENTIAL_REEXEC_SENTINEL, "1")
+    monkeypatch.setenv("GITHUB_APP_ID", "target-owner-app")
+    monkeypatch.setenv("GITHUB_APP_ID_ORG", "target-owner-app")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY", "test-not-a-real-secret")
+    bootstrap_module = _import_bootstrap()
+
+    assert (
+        bootstrap_module._self_heal_credentials(  # type: ignore[attr-defined]  # noqa: SLF001
+            required=("GITHUB_APP_ID", "GITHUB_PRIVATE_KEY"),
+            force_credential_wrapper=True,
+        )
+        is None
+    )
 
 
 def test_self_heal_reexec_nonzero_empty_stdout_forwards_child_stderr(
