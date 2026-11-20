@@ -16,6 +16,7 @@ from livespec_orchestrator_beads_fabro._incident_authority_payload import (
     TRANSITION_MARKER,
     decode_attempt,
     decode_record,
+    unsupported_carrier,
 )
 from livespec_orchestrator_beads_fabro.effects import _incident_authority_chain as chain_module
 from livespec_orchestrator_beads_fabro.effects import (
@@ -125,6 +126,7 @@ def test_current_attempt_binds_every_identity_and_the_complete_landed_set() -> N
     assert isinstance(result, IncidentReading)
     assert asdict(result.attempt) == _attempt() | {
         "carrier": None,
+        "repayment_master_ci_evidence": None,
         "landed_commits": ("b" * 40,),
         "landed_trees": ("c" * 40,),
         "original_paths": ("app.py",),
@@ -193,6 +195,96 @@ def test_malformed_attempts_never_become_authority(key: str, value: object) -> N
 @pytest.mark.parametrize("value", [None, [], {}, _attempt(extra="field")])
 def test_incomplete_or_extended_attempt_schema_is_refused(value: object) -> None:
     assert decode_attempt(value=value) is None
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        {},
+        {
+            "admitted_run_id": "17",
+            "admitted_head": "bad",
+            "landed_commit": "b" * 40,
+            "landed_failed_run_id": "11",
+            "preexisting_jobs": [
+                {
+                    "job": "export-telemetry",
+                    "preexisting_run_id": "12",
+                    "attributed_item_id": "other-incident",
+                    "attributed_landed_commit": "c" * 40,
+                }
+            ],
+        },
+        {
+            "admitted_run_id": "17",
+            "admitted_head": "d" * 40,
+            "landed_commit": "b" * 40,
+            "landed_failed_run_id": "11",
+            "preexisting_jobs": [],
+        },
+        {
+            "admitted_run_id": "17",
+            "admitted_head": "d" * 40,
+            "landed_commit": "b" * 40,
+            "landed_failed_run_id": "11",
+            "preexisting_jobs": [None],
+        },
+        {
+            "admitted_run_id": "17",
+            "admitted_head": "d" * 40,
+            "landed_commit": "b" * 40,
+            "landed_failed_run_id": "11",
+            "preexisting_jobs": [
+                {
+                    "job": "",
+                    "preexisting_run_id": "12",
+                    "attributed_item_id": "other-incident",
+                    "attributed_landed_commit": "c" * 40,
+                }
+            ],
+        },
+        {
+            "admitted_run_id": "17",
+            "admitted_head": "d" * 40,
+            "landed_commit": "b" * 40,
+            "landed_failed_run_id": "11",
+            "preexisting_jobs": [
+                {
+                    "job": "export-telemetry",
+                    "preexisting_run_id": "12",
+                    "attributed_item_id": "other-incident",
+                    "attributed_landed_commit": "bad",
+                }
+            ],
+        },
+        {
+            "admitted_run_id": "17",
+            "admitted_head": "d" * 40,
+            "landed_commit": "b" * 40,
+            "landed_failed_run_id": "11",
+            "preexisting_jobs": [
+                {
+                    "job": "export-telemetry",
+                    "preexisting_run_id": "12",
+                    "attributed_item_id": "other-incident",
+                    "attributed_landed_commit": "c" * 40,
+                },
+                {
+                    "job": "export-telemetry",
+                    "preexisting_run_id": "13",
+                    "attributed_item_id": "other-incident",
+                    "attributed_landed_commit": "c" * 40,
+                },
+            ],
+        },
+    ],
+)
+def test_malformed_descendant_repayment_evidence_is_refused(evidence: object) -> None:
+    assert decode_attempt(value=_attempt(repayment_master_ci_evidence=evidence)) is None
+
+
+def test_non_record_carrier_does_not_claim_unsupported_capability() -> None:
+    assert unsupported_carrier(value=None) is False
 
 
 @pytest.mark.parametrize(

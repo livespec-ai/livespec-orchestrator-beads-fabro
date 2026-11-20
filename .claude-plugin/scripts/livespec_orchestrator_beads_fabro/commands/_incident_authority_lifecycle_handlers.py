@@ -37,6 +37,9 @@ from livespec_orchestrator_beads_fabro.commands._incident_authority_merge import
 from livespec_orchestrator_beads_fabro.commands._incident_authority_unmerged import (
     correct_unmerged_action,
 )
+from livespec_orchestrator_beads_fabro.commands._incident_repayment_descendant import (
+    verify_descendant_master_ci,
+)
 from livespec_orchestrator_beads_fabro.commands._incident_rollback_conflict import (
     RollbackConflict,
     RollbackResolution,
@@ -118,6 +121,17 @@ def _enter(
 ) -> LifecycleReply:
     master_ci = observe_master_run(
         runner=runner, repo=args.repo, repository=args.repository, run_id=args.master_run
+    )
+    if isinstance(master_ci, AuthorityRefusal):
+        return master_ci
+    master_ci = verify_descendant_master_ci(
+        client=client,
+        runner=runner,
+        repo=args.repo,
+        repository=args.repository,
+        reading=reading,
+        master_ci=master_ci,
+        attributed_item_ids=tuple(args.attributed_incident),
     )
     if isinstance(master_ci, AuthorityRefusal):
         return master_ci

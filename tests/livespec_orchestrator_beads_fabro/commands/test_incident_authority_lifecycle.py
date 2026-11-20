@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -23,6 +23,7 @@ from livespec_orchestrator_beads_fabro._incident_authority_payload import (
 )
 from livespec_orchestrator_beads_fabro._incident_authority_types import IncidentAttempt
 from livespec_orchestrator_beads_fabro._incident_genesis import decode_genesis_request
+from livespec_orchestrator_beads_fabro._incident_repayment_plan import MasterCiRun
 from livespec_orchestrator_beads_fabro._store_dispatch_claim import (
     CLAIM_TOKEN_METADATA_KEY,
     ClaimStamp,
@@ -30,8 +31,10 @@ from livespec_orchestrator_beads_fabro._store_dispatch_claim import (
     claim_stamp_metadata,
     create_claim_token,
 )
+from livespec_orchestrator_beads_fabro.commands import _incident_repayment_descendant as descendant
 from livespec_orchestrator_beads_fabro.commands import incident_authority as command
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_types import CommandResult
+from livespec_orchestrator_beads_fabro.commands._incident_repayment_descendant_forge import Run
 from livespec_orchestrator_beads_fabro.incident_authority import (
     AuthorityRefusal,
     IncidentReading,
@@ -58,13 +61,19 @@ def _json(value: object) -> str:
 
 @dataclass
 class _Forge:
-    """`gh run view` as the forge answers it: the one fake effect."""
+    """The authenticated run and API reads made by an incident lifecycle action."""
 
-    runs: dict[str, dict[str, str]] = field(default_factory=dict)
+    runs: dict[str, dict[str, object]] = field(default_factory=dict)
+    api: dict[str, object] = field(default_factory=dict)
     calls: list[list[str]] = field(default_factory=list)
 
     def run(self, *, argv: list[str], **_: object) -> CommandResult:
         self.calls.append(argv)
+        if argv[:2] == ["gh", "api"]:
+            reply = self.api.get(argv[2])
+            if reply is None:
+                return CommandResult(exit_code=1, stdout="", stderr="API route not found")
+            return CommandResult(exit_code=0, stdout=json.dumps(reply), stderr="")
         reply = self.runs.get(argv[3])
         if reply is None:
             return CommandResult(exit_code=1, stdout="", stderr="run not found")
@@ -254,6 +263,103 @@ def _green(state: _Tenant) -> None:
     )
 
 
+def _descendant_forge(state: _Tenant, *, earlier_green: bool = False) -> tuple[str, str, str]:
+    """Program the forge evidence for a green run following another incident's fix."""
+    parent, descendant_head, job = "a" * 40, BROKEN_MASTER, "export-telemetry"
+    state.forge.runs |= {
+        "descendant": dict(headSha=descendant_head, status="completed", conclusion="success"),
+        "11": dict(
+            databaseId=11,
+            headSha=MASTER_HEAD,
+            status="completed",
+            conclusion="failure",
+            jobs=[dict(name=job, conclusion="failure")],
+        ),
+        "12": dict(
+            databaseId=12,
+            headSha=parent,
+            status="completed",
+            conclusion="failure",
+            jobs=[dict(name=job, conclusion="failure")],
+        ),
+    }
+    successful_runs: list[dict[str, str]] = [
+        dict(head_sha=descendant_head, status="completed", conclusion="success")
+    ]
+    earlier: str | None = None
+    if earlier_green:
+        earlier = "1" * 40
+        successful_runs.append(dict(head_sha=earlier, status="completed", conclusion="success"))
+    state.forge.api |= {
+        f"repos/{REPOSITORY}/actions/runs?head_sha={MASTER_HEAD}&per_page=100": {
+            "workflow_runs": [dict(id=11)]
+        },
+        f"repos/{REPOSITORY}/commits/{MASTER_HEAD}": {"parents": [dict(sha=parent)]},
+        f"repos/{REPOSITORY}/actions/runs?head_sha={parent}&per_page=100": {
+            "workflow_runs": [dict(id=12)]
+        },
+        f"repos/{REPOSITORY}/actions/runs?per_page=100": {"workflow_runs": successful_runs},
+        f"repos/{REPOSITORY}/compare/{MASTER_HEAD}...{descendant_head}": {"status": "ahead"},
+        f"repos/{REPOSITORY}/compare/{descendant_head}...{MASTER_HEAD}": {"status": "behind"},
+    }
+    if earlier_green:
+        assert earlier is not None
+        state.forge.api[f"repos/{REPOSITORY}/compare/{MASTER_HEAD}...{earlier}"] = {
+            "status": "ahead"
+        }
+        state.forge.api[f"repos/{REPOSITORY}/compare/{earlier}...{descendant_head}"] = {
+            "status": "ahead"
+        }
+    return parent, descendant_head, job
+
+
+def _attributed_history(*, observed: IncidentAttempt, head: str) -> tuple[IncidentAttempt, ...]:
+    return (
+        replace(
+            observed,
+            item_id="attributed-incident",
+            attempt_id="attributed-attempt",
+            operation_id="attributed-operation",
+            landed_commits=(head,),
+            landed_trees=("9" * 40,),
+        ),
+    )
+
+
+def _descendant_context(state: _Tenant) -> tuple[IncidentReading, MasterCiRun, str]:
+    observed = _merged_repair(state)
+    _, descendant_head, _ = _descendant_forge(state)
+    reading = read_incident_authority(
+        client=state.client,
+        repository=REPOSITORY,
+        item_id=observed.item_id,
+        query={key: getattr(observed, key) for key in _IDENTITY},
+    )
+    assert isinstance(reading, IncidentReading)
+    return (
+        reading,
+        MasterCiRun(run_id="descendant", head=descendant_head, conclusion="success", complete=True),
+        descendant_head,
+    )
+
+
+def _verify_descendant(
+    state: _Tenant,
+    reading: IncidentReading,
+    master_ci: MasterCiRun,
+    attributed_item_ids: tuple[str, ...] = ("attributed-incident",),
+) -> MasterCiRun | AuthorityRefusal:
+    return descendant.verify_descendant_master_ci(
+        client=state.client,
+        runner=state.forge,
+        repo=state.root,
+        repository=REPOSITORY,
+        reading=reading,
+        master_ci=master_ci,
+        attributed_item_ids=attributed_item_ids,
+    )
+
+
 def _admitted(state: _Tenant) -> tuple[IncidentAttempt, IncidentAttempt]:
     observed = _merged_repair(state)
     _green(state)
@@ -371,6 +477,348 @@ def test_enter_repayment_refuses_while_master_ci_is_incomplete_then_records_admi
     assert tenant.client.show_issue(issue_id=ITEM)["status"] == "pending-approval"
 
 
+def test_enter_repayment_admits_the_first_green_descendant_only_with_attributed_authority_evidence(
+    tenant: _Tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed = _merged_repair(tenant)
+    _, descendant_head, job = _descendant_forge(tenant)
+
+    def attributed_history(**_: object) -> tuple[IncidentAttempt, ...]:
+        return _attributed_history(observed=observed, head=descendant_head)
+
+    monkeypatch.setattr(
+        descendant,
+        "read_history",
+        attributed_history,
+    )
+
+    admitted = _verified(
+        tenant.cli(
+            "enter-repayment",
+            observed,
+            "--master-run",
+            "descendant",
+            "--target-ref",
+            REPAYMENT_REF,
+            "--attributed-incident",
+            "attributed-incident",
+        )
+    )
+
+    assert admitted.carrier is not None
+    assert (admitted.base, admitted.head, admitted.carrier.input_parent) == (
+        MASTER_HEAD,
+        MASTER_HEAD,
+        MASTER_HEAD,
+    )
+    evidence = admitted.repayment_master_ci_evidence
+    assert evidence is not None
+    assert (
+        evidence.admitted_run_id,
+        evidence.admitted_head,
+        evidence.landed_commit,
+        evidence.landed_failed_run_id,
+        evidence.preexisting_jobs,
+    ) == (
+        "descendant",
+        descendant_head,
+        MASTER_HEAD,
+        "11",
+        (
+            descendant.RepaymentPreexistingJob(
+                job=job,
+                preexisting_run_id="12",
+                attributed_item_id="attributed-incident",
+                attributed_landed_commit=descendant_head,
+            ),
+        ),
+    )
+
+
+def test_enter_repayment_refuses_a_descendant_with_an_unattributed_failed_job(
+    tenant: _Tenant,
+) -> None:
+    observed = _merged_repair(tenant)
+    _, _, job = _descendant_forge(tenant)
+
+    refusal = _refused(
+        tenant.cli(
+            "enter-repayment",
+            observed,
+            "--master-run",
+            "descendant",
+            "--target-ref",
+            REPAYMENT_REF,
+        )
+    )
+
+    assert (
+        refusal
+        == f"incident-repayment-master-ci-outstanding: condition-3: job {job} has no attributed incident fix"
+    )
+    assert tenant.client.show_issue(issue_id=ITEM)["status"] == "active"
+
+
+def test_enter_repayment_refuses_a_descendant_when_an_earlier_green_descendant_exists(
+    tenant: _Tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed = _merged_repair(tenant)
+    _, descendant_head, _ = _descendant_forge(tenant, earlier_green=True)
+
+    def attributed_history(**_: object) -> tuple[IncidentAttempt, ...]:
+        return _attributed_history(observed=observed, head=descendant_head)
+
+    monkeypatch.setattr(
+        descendant,
+        "read_history",
+        attributed_history,
+    )
+
+    refusal = _refused(
+        tenant.cli(
+            "enter-repayment",
+            observed,
+            "--master-run",
+            "descendant",
+            "--target-ref",
+            REPAYMENT_REF,
+            "--attributed-incident",
+            "attributed-incident",
+        )
+    )
+
+    assert refusal == (
+        "incident-repayment-master-ci-outstanding: "
+        "condition-4: an earlier successful descendant master run exists"
+    )
+
+
+def test_descendant_verifier_refuses_each_unreadable_contract_fact(  # noqa: PLR0915 - one matrix records contract boundaries.
+    tenant: _Tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reading, master_ci, descendant_head = _descendant_context(tenant)
+
+    def verify() -> AuthorityRefusal:
+        result = _verify_descendant(tenant, reading, master_ci)
+        assert isinstance(result, AuthorityRefusal)
+        return result
+
+    assert isinstance(
+        _verify_descendant(tenant, reading, replace(master_ci, complete=False)), MasterCiRun
+    )
+    with monkeypatch.context() as patch:
+        patch.setattr(descendant, "latest_landed_ancestor", lambda **_: None)
+        assert isinstance(_verify_descendant(tenant, reading, master_ci), MasterCiRun)
+    with monkeypatch.context() as patch:
+        patch.setattr(descendant, "latest_landed_ancestor", lambda **_: MASTER_HEAD)
+        patch.setattr(descendant, "runs_at", lambda **_: None)
+        assert "condition-1" in verify().detail
+    with monkeypatch.context() as patch:
+        patch.setattr(descendant, "latest_landed_ancestor", lambda **_: MASTER_HEAD)
+        patch.setattr(descendant, "runs_at", lambda **_: ("11",))
+        patch.setattr(descendant, "run", lambda **_: None)
+        assert "condition-1" in verify().detail
+    with monkeypatch.context() as patch:
+        patch.setattr(descendant, "latest_landed_ancestor", lambda **_: MASTER_HEAD)
+        patch.setattr(descendant, "runs_at", lambda **_: ("11",))
+        patch.setattr(
+            descendant,
+            "run",
+            lambda **_: Run(
+                run_id="11", head=MASTER_HEAD, status="completed", conclusion="success", jobs=()
+            ),
+        )
+        assert "condition-1" in verify().detail
+    with monkeypatch.context() as patch:
+        patch.setattr(descendant, "api", lambda **_: {})
+        assert "condition-2" in verify().detail
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            descendant,
+            "runs_at",
+            lambda *, head, **_: ("11",) if head == MASTER_HEAD else None,
+        )
+        assert "condition-2" in verify().detail
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            descendant,
+            "runs_at",
+            lambda *, head, **_: ("11",) if head == MASTER_HEAD else ("12",),
+        )
+        patch.setattr(
+            descendant,
+            "run",
+            lambda *, run_id, **_: (
+                Run(
+                    run_id="11",
+                    head=MASTER_HEAD,
+                    status="completed",
+                    conclusion="failure",
+                    jobs=(("export-telemetry", "failure"),),
+                )
+                if run_id == "11"
+                else None
+            ),
+        )
+        assert "condition-2" in verify().detail
+    with monkeypatch.context() as patch:
+        patch.setattr(descendant, "read_history", lambda **_: ())
+        assert (
+            "condition-3"
+            in _verify_descendant(tenant, reading, master_ci, (reading.attempt.item_id,)).detail
+        )
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            descendant,
+            "read_history",
+            lambda **_: AuthorityRefusal(code="unreadable", detail="history"),
+        )
+        assert "condition-3" in verify().detail
+    with monkeypatch.context() as patch:
+        patch.setattr(descendant, "latest_landed_ancestor", lambda **_: MASTER_HEAD)
+        patch.setattr(
+            descendant,
+            "read_history",
+            lambda **_: _attributed_history(observed=reading.attempt, head=descendant_head),
+        )
+        patch.setattr(descendant, "is_ancestor", lambda **_: None)
+        assert "condition-3" in verify().detail
+    with monkeypatch.context() as patch:
+        patch.setitem(tenant.forge.runs["12"], "jobs", [])
+        patch.setattr(
+            descendant,
+            "read_history",
+            lambda **_: _attributed_history(observed=reading.attempt, head=descendant_head),
+        )
+        assert "condition-2" in verify().detail
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            descendant,
+            "read_history",
+            lambda **_: _attributed_history(observed=reading.attempt, head=descendant_head),
+        )
+        patch.setattr(
+            descendant,
+            "api",
+            lambda *, path, **_: {"parents": [{"sha": "a" * 40}]} if "/commits/" in path else None,
+        )
+        assert "condition-4" in verify().detail
+
+
+def test_descendant_verifier_exhausts_nonmatching_history_and_later_candidates(  # noqa: PLR0915 - exhaustive failure proof.
+    tenant: _Tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reading, master_ci, descendant_head = _descendant_context(tenant)
+
+    def verify() -> AuthorityRefusal:
+        result = _verify_descendant(tenant, reading, master_ci)
+        assert isinstance(result, AuthorityRefusal)
+        return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            descendant,
+            "read_history",
+            lambda **_: (replace(reading.attempt, landed_commits=(), landed_trees=()),),
+        )
+        result = _verify_descendant(tenant, reading, master_ci)
+        assert isinstance(result, AuthorityRefusal) and "condition-3" in result.detail
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            descendant,
+            "read_history",
+            lambda **_: (
+                replace(
+                    reading.attempt,
+                    item_id="attributed-incident",
+                    landed_commits=(MASTER_HEAD,),
+                    landed_trees=("e" * 40,),
+                ),
+            ),
+        )
+        result = _verify_descendant(tenant, reading, master_ci)
+        assert isinstance(result, AuthorityRefusal) and "condition-3" in result.detail
+    candidate = "e" * 40
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            descendant,
+            "read_history",
+            lambda **_: _attributed_history(observed=reading.attempt, head=descendant_head),
+        )
+        patch.setattr(
+            descendant,
+            "api",
+            lambda *, path, **_: {"parents": [{"sha": "a" * 40}]}
+            if "/commits/" in path
+            else {
+                "workflow_runs": [
+                    {"head_sha": candidate, "status": "completed", "conclusion": "success"}
+                ]
+            },
+        )
+        patch.setitem(
+            tenant.forge.api,
+            f"repos/{REPOSITORY}/compare/{MASTER_HEAD}...{candidate}",
+            {"status": "behind"},
+        )
+        patch.setitem(
+            tenant.forge.api,
+            f"repos/{REPOSITORY}/compare/{candidate}...{descendant_head}",
+            {"status": "ahead"},
+        )
+        assert isinstance(_verify_descendant(tenant, reading, master_ci), MasterCiRun)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            descendant,
+            "read_history",
+            lambda **_: _attributed_history(observed=reading.attempt, head=descendant_head),
+        )
+        patch.setattr(
+            descendant,
+            "api",
+            lambda *, path, **_: {"parents": [{"sha": "a" * 40}]}
+            if "/commits/" in path
+            else {"workflow_runs": [None]},
+        )
+        assert "condition-4" in verify().detail
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            descendant,
+            "read_history",
+            lambda **_: _attributed_history(observed=reading.attempt, head=descendant_head),
+        )
+        patch.setattr(
+            descendant,
+            "api",
+            lambda *, path, **_: {"parents": [{"sha": "a" * 40}]}
+            if "/commits/" in path
+            else {
+                "workflow_runs": [
+                    {"head_sha": "e" * 40, "status": "queued", "conclusion": "failure"}
+                ]
+            },
+        )
+        assert isinstance(_verify_descendant(tenant, reading, master_ci), MasterCiRun)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            descendant,
+            "read_history",
+            lambda **_: _attributed_history(observed=reading.attempt, head=descendant_head),
+        )
+        patch.setattr(
+            descendant,
+            "api",
+            lambda *, path, **_: {"parents": [{"sha": "a" * 40}]}
+            if "/commits/" in path
+            else {
+                "workflow_runs": [
+                    {"head_sha": "e" * 40, "status": "completed", "conclusion": "success"}
+                ]
+            },
+        )
+        assert "condition-4" in verify().detail
+
+
 def test_advance_repayment_moves_the_admitted_repayment_one_phase_and_names_a_refused_phase(
     tenant: _Tenant,
 ) -> None:
@@ -400,6 +848,17 @@ def test_advance_repayment_moves_the_admitted_repayment_one_phase_and_names_a_re
     )
     enter = ("--master-run", "master-run-1", "--target-ref", REPAYMENT_REF)
     assert tenant.cli("enter-repayment", ready, *enter, "--admission-complete")[0] == 2
+    assert (
+        tenant.cli(
+            "advance-repayment",
+            admission,
+            "--to-phase",
+            "repayment-ready",
+            "--attributed-incident",
+            "other-incident",
+        )[0]
+        == 2
+    )
 
 
 @pytest.mark.parametrize("closed", [False, True])
