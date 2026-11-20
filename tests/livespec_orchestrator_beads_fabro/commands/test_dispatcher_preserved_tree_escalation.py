@@ -19,13 +19,19 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pytest
 from livespec_orchestrator_beads_fabro._store_comments import read_work_item_comments
 from livespec_orchestrator_beads_fabro.commands import (
+    _dispatcher_loop_selection as loop_selection,
+)
+from livespec_orchestrator_beads_fabro.commands import (
     _dispatcher_preserved_tree_escalation as escalation,
+)
+from livespec_orchestrator_beads_fabro.commands import (
+    _dispatcher_terminal_preservation as terminal_preservation,
 )
 from livespec_orchestrator_beads_fabro.commands._config import FactoryTarget
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
@@ -47,7 +53,11 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_preserved_tree_recor
 )
 from livespec_orchestrator_beads_fabro.commands._fabro_port_http import FabroHttpResult
 from livespec_orchestrator_beads_fabro.errors import BeadsConnectionError
-from livespec_orchestrator_beads_fabro.store import append_work_item
+from livespec_orchestrator_beads_fabro.store import (
+    append_work_item,
+    materialize_work_items,
+    read_work_items,
+)
 from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 
 _ITEM = "bd-ib-na2xvm"
@@ -395,6 +405,85 @@ def test_an_empty_run_files_read_that_disagrees_with_stage_diffs_never_publishes
         assert "run-files" in str(unpreserved["detail"])
         assert "stage diff" in str(unpreserved["detail"])
         assert "discrepancy" in bodies[0]
+
+
+def test_a_discrepant_read_is_recorded_before_the_dispatcher_rests_the_active_item(  # noqa: PLR0915
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The terminal path writes the discrepancy, then performs the ledger rest.
+
+    The preservation leg deliberately owns neither lifecycle transition nor
+    outcome mapping: it must append its durable discrepancy account before the
+    Dispatcher turns the terminal into the active item's blocked/needs-human
+    rest.  Seeding an already-blocked item would make that order unobservable.
+    """
+    _write_config(tmp_path)
+    active_item = replace(_item(), status="active", blocked_reason=None)
+    append_work_item(path=_config(), item=active_item)
+    journal = _Journal()
+    journal.path = tmp_path / "journal.jsonl"  # type: ignore[attr-defined]
+    runner = _Runner()
+    transport = _DiscrepantTransport()
+    args = _args()
+    args.close_on_merge = False
+
+    def _preserve_tree(**kwargs: object) -> None:
+        escalation.preserve_checkpoint_failed_tree(
+            args=kwargs["args"],  # type: ignore[arg-type]
+            repo=kwargs["repo"],  # type: ignore[arg-type]
+            item=kwargs["item"],  # type: ignore[arg-type]
+            outcome=kwargs["outcome"],  # type: ignore[arg-type]
+            journal=kwargs["journal"],  # type: ignore[arg-type]
+            inputs=PreservationInputs(
+                journal_records=(
+                    {"stage": SOURCE_STAGE, "work_item_id": _ITEM, "staged_at": _BASE},
+                ),
+                runner=runner,
+                transport=transport,
+            ),
+        )
+
+    monkeypatch.setattr(
+        terminal_preservation, "preserve_checkpointed_work_reference", lambda **_: None
+    )
+    monkeypatch.setattr(terminal_preservation, "preserve_checkpoint_failed_tree", _preserve_tree)
+    monkeypatch.setattr(loop_selection, "record_provider_exhaustion_if_observed", lambda **_: None)
+    monkeypatch.setattr(
+        loop_selection, "record_dead_implementer_truncation_if_observed", lambda **_: None
+    )
+    monkeypatch.setattr(loop_selection, "record_groom_draft", lambda **_: False)
+    monkeypatch.setattr(loop_selection, "record_base_advanced_after_arming", lambda **_: None)
+    monkeypatch.setattr(loop_selection, "record_merge_wait_handed_off", lambda **_: None)
+    monkeypatch.setattr(loop_selection, "record_needs_human_cause", lambda **_: None)
+    monkeypatch.setattr(loop_selection, "dispose_terminal_routing", lambda **_: None)
+    monkeypatch.setattr(loop_selection, "emit_calibration", lambda **_: None)
+    monkeypatch.setattr(loop_selection, "record_wip_capture_receipt", lambda **_: None)
+
+    _ = loop_selection.post_run_dispositions(
+        args=args,
+        repo=tmp_path,
+        item=active_item,
+        outcome=_outcome(),
+        journal=journal,  # type: ignore[arg-type]
+        wall_clock_seconds=1.0,
+        dispatch_context_size=1,
+        token_supplier=lambda: "token",
+    )
+
+    stored = materialize_work_items(records=read_work_items(path=_config()))[_ITEM]
+    assert (stored.status, stored.blocked_reason) == ("blocked", "needs-human")
+    unpreserved = journal.row(stage=PRESERVED_TREE_UNPRESERVED_STAGE)
+    blocked = journal.row(stage="needs-human-blocked")
+    assert unpreserved is not None
+    assert blocked is not None
+    assert journal.records.index(unpreserved) < journal.records.index(blocked)
+    bodies = [
+        comment.text
+        for comment in read_work_item_comments(path=_config(), work_item_id=_ITEM)
+        if comment.text.startswith(PRESERVED_TREE_MARKER)
+    ]
+    assert len(bodies) == 1
+    assert all(token in bodies[0] for token in (_RUN, _FACTORY, "discrepancy"))
 
 
 def test_a_refused_forge_write_is_recorded_as_the_publication_step_that_failed(
