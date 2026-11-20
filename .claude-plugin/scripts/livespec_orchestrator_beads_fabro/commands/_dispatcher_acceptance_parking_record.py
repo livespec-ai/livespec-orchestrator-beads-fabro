@@ -43,11 +43,11 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_evidence impor
     HOST_CAPTURED_EVIDENCE_LEG,
     HUMAN_ATTESTED_EVIDENCE_LEG,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done import (
-    PROOF_MODE_FACTORY_CAPTURED,
-)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_leg import (
     PROOF_RECORD_EVIDENCE_LEG,
+    captured_only,
+    captured_record_note,
+    unreproduced_factory_captured_pending_legs,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_record import (
     PROOF_RECORD_TITLE,
@@ -55,7 +55,6 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_record import 
     VERDICT_HOST_RECORDED,
     VERDICT_HOST_VERIFIED,
     VERDICT_HUMAN_ATTESTED,
-    VERDICT_NOT_REPRODUCED,
     VERDICT_VERIFIED,
 )
 
@@ -227,7 +226,7 @@ def _pending_legs(
     this record could not name. They are listed in the order the deliverable policy
     ranks the modes, host before human.
     """
-    captured = _captured_only(proof=result.proof)
+    captured = captured_only(proof=result.proof)
     legs = [
         PendingLeg(
             name=leg,
@@ -236,7 +235,12 @@ def _pending_legs(
         for leg in result.absent_evidence
     ]
     if result.proof is not None:
-        legs.extend(_unreproduced_factory_captured_legs(proof=result.proof))
+        legs.extend(
+            unreproduced_factory_captured_pending_legs(
+                proof=result.proof,
+                create=lambda name, action: PendingLeg(name=name, action=action),
+            )
+        )
         legs.extend(
             PendingLeg(
                 name=f"{HOST_CAPTURED_EVIDENCE_LEG} for {text!r}",
@@ -258,45 +262,8 @@ def _pending_legs(
     return tuple(legs)
 
 
-def _unreproduced_factory_captured_legs(*, proof: ProofLeg) -> tuple[PendingLeg, ...]:
-    """Name a negative proof-only observation in the park that preserves it."""
-    record = proof.record
-    if record is None or record.verdict != VERDICT_NOT_REPRODUCED:
-        return ()
-    return tuple(
-        PendingLeg(
-            name=f"factory-captured assertion {assertion.text!r} was not reproduced",
-            action=(
-                f"The proof-only arm's {PROOF_RECORD_TITLE} record {record.url} lists this"
-                " assertion as not reproduced; it remains parked for human disposition."
-            ),
-        )
-        for assertion in proof.assertions
-        if assertion.proof_mode == PROOF_MODE_FACTORY_CAPTURED
-        and assertion.check is not None
-        and not assertion.check.passed
-    )
-
-
-def _captured_only(*, proof: ProofLeg | None) -> ProofRecord | None:
-    """The `captured` record, when it is the only factory record the merge has.
-
-    A `verified` record that is present but lacks an assertion's verdict is a
-    different fault with a different remedy, so it is excluded here.
-    """
-    if proof is None or proof.record is not None:
-        return None
-    return proof.captured
-
-
 def _captured_note(*, proof: ProofLeg) -> str:
-    captured = _captured_only(proof=proof)
-    if captured is None:
-        return ""
-    return (
-        f"; the only factory record is the {VERDICT_CAPTURED} record {captured.url},"
-        " which carries no per-assertion verdict and grades nothing"
-    )
+    return captured_record_note(proof=proof)
 
 
 def _action(

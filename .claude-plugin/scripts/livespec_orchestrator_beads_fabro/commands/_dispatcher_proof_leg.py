@@ -27,24 +27,36 @@ verified host record sitting on its pull request.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TypeVar
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_acceptance_criteria import (
     CriterionCheck,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done import (
+    PROOF_MODE_FACTORY_CAPTURED,
     PROOF_MODE_HUMAN_ATTESTED,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_host_leg import HostLeg
-from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_record import ProofRecord
+from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_record import (
+    VERDICT_CAPTURED,
+    VERDICT_NOT_REPRODUCED,
+    ProofRecord,
+)
 
 __all__: list[str] = [
     "PROOF_RECORD_EVIDENCE_LEG",
     "AssertionEvidence",
     "ProofLeg",
+    "captured_only",
+    "captured_record_note",
+    "unreproduced_factory_captured_assertions",
+    "unreproduced_factory_captured_pending_legs",
 ]
 
 PROOF_RECORD_EVIDENCE_LEG = "proof of done record"
+_Pending = TypeVar("_Pending")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -149,3 +161,59 @@ class ProofLeg:
             "pending_human_attested": list(self.pending_human_attested),
             "assertions": [one.as_record() for one in self.assertions],
         }
+
+
+def captured_only(*, proof: ProofLeg | None) -> ProofRecord | None:
+    """Return the ungraded capture when no later factory result supersedes it."""
+    if proof is None or proof.record is not None:
+        return None
+    return (
+        proof.captured
+        if proof.captured is not None and proof.captured.verdict == VERDICT_CAPTURED
+        else None
+    )
+
+
+def captured_record_note(*, proof: ProofLeg) -> str:
+    """Describe the ungraded capture when it is the only factory record."""
+    captured = captured_only(proof=proof)
+    if captured is None:
+        return ""
+    return (
+        f"; the only factory record is the {VERDICT_CAPTURED} record {captured.url},"
+        " which carries no per-assertion verdict and grades nothing"
+    )
+
+
+def unreproduced_factory_captured_assertions(*, proof: ProofLeg) -> tuple[AssertionEvidence, ...]:
+    """Return failed factory assertions from the proof-only arm's latest record."""
+    if proof.record is None or proof.record.verdict != VERDICT_NOT_REPRODUCED:
+        return ()
+    return tuple(
+        assertion
+        for assertion in proof.assertions
+        if assertion.proof_mode == PROOF_MODE_FACTORY_CAPTURED
+        and assertion.check is not None
+        and not assertion.check.passed
+    )
+
+
+def unreproduced_factory_captured_pending_legs(
+    *, proof: ProofLeg, create: Callable[[str, str], _Pending]
+) -> tuple[_Pending, ...]:
+    """Render the negative proof-only observation through a caller's pending-leg type."""
+    record = proof.record
+    if record is None or record.verdict != VERDICT_NOT_REPRODUCED:
+        return ()
+    return tuple(
+        create(
+            f"factory-captured assertion {assertion.text!r} was not reproduced",
+            "".join(
+                (
+                    f"The arm's Proof of Done record {record.url} lists this assertion as not ",
+                    "reproduced; it remains parked for human disposition.",
+                )
+            ),
+        )
+        for assertion in unreproduced_factory_captured_assertions(proof=proof)
+    )

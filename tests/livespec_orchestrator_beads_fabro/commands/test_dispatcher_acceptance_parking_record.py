@@ -89,20 +89,28 @@ def _criteria(
     )
 
 
-def _record_body(*, verdict: str) -> str:
+def _record_body(*, verdict: str, reproduced: str = "yes") -> str:
     return (
         f"Proof of Done — {verdict} — run {_RUN_ID} — 2026-10-04T09:00:00Z\n"
         "\n"
         f"## Assertion 1 — {_ASSERTION}\n"
         "\n"
-        "Reproduced: yes.\n"
+        f"Reproduced: {reproduced}.\n"
     )
 
 
 def _proof(
-    *, verdict: str, modes: tuple[str, ...], assertions: tuple[str, ...] | None = None
+    *,
+    verdict: str,
+    modes: tuple[str, ...],
+    assertions: tuple[str, ...] | None = None,
+    reproduced: str = "yes",
 ) -> object:
-    records = proof_records(comments=({"url": _RECORD_URL, "body": _record_body(verdict=verdict)},))
+    records = proof_records(
+        comments=(
+            {"url": _RECORD_URL, "body": _record_body(verdict=verdict, reproduced=reproduced)},
+        )
+    )
     return proof_leg(
         criteria=_criteria(modes=modes, assertions=assertions),
         records=records,
@@ -287,3 +295,27 @@ def test_a_host_and_a_human_leg_are_both_pending_host_first() -> None:
         f"host-captured record for {_HOST_ASSERTION!r}",
         f"human-attested record for {_HUMAN_ASSERTION!r}",
     ]
+
+
+def test_a_not_reproduced_factory_assertion_is_named_with_its_proof_only_record() -> None:
+    """Scenario 257 preserves the negative arm observation in the parking record."""
+    record = parking_record(
+        item_id=_ITEM_ID,
+        policy="ai-only",
+        result=_result(
+            verdict="FAIL",
+            proof=_proof(
+                verdict="not_reproduced",
+                modes=(PROOF_MODE_FACTORY_CAPTURED,),
+                assertions=(_ASSERTION,),
+                reproduced="no",
+            ),
+        ),
+        pull_request=7,
+    )
+
+    assert [leg.name for leg in record.pending] == [
+        f"factory-captured assertion {_ASSERTION!r} was not reproduced"
+    ]
+    assert _RECORD_URL in record.pending[0].action
+    assert "Proof of Done record" in record.pending[0].action
