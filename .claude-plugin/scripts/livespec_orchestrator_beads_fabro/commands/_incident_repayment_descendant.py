@@ -166,6 +166,18 @@ def verify_descendant_master_ci(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR09
                 attributed_landed_commit=matching[1],
             )
         )
+    admitted_ids = runs_at(runner=runner, repo=repo, repository=repository, head=master_ci.head)
+    if admitted_ids is None:
+        return _refuse(
+            detail="admitted-run: the normal master CI runs at the admitted head are unreadable"
+        )
+    if master_ci.run_id not in admitted_ids:
+        return _refuse(
+            detail=(
+                f"admitted-run: run {master_ci.run_id} is not a normal master CI run "
+                f"at {master_ci.head}"
+            )
+        )
     candidates = normal_runs(runner=runner, repo=repo, repository=repository, head=None)
     if candidates is None:
         return _refuse(detail="condition-4: successful master-run history is unreadable")
