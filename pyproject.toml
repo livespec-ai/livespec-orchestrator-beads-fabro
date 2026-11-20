@@ -739,6 +739,9 @@ destructive_cli_allowlist = [
 #   group and asserts a detached worker survives to write its verdict, which no
 #   in-process call can stand in for. It drops every GIT_, COVERAGE and COV_CORE
 #   variable from each child environment.
+# - test_gate_preview_running_step_42erfz.py runs the same materialized preview
+#   to read the process tree of a live hook, which only a real child has. It
+#   drops the same variables.
 #
 # This key MUST stay above the `[[...mirror_pairings]]` array-of-tables
 # below (same TOML attachment reason as `destructive_cli_allowlist`).
@@ -782,6 +785,7 @@ subprocess_spawn_allowlist = [
     "tests/integration/test_commit_runner_folds_checkpoints_above_open_red_gisyvv.py",
     "tests/integration/test_routing_schema_nodes_emit_a_directive.py",
     "tests/integration/test_gate_preview_progress_and_record_42erfz.py",
+    "tests/integration/test_gate_preview_running_step_42erfz.py",
 ]
 
 [[tool.livespec_dev_tooling.mirror_pairings]]
