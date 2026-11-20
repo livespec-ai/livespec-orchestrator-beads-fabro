@@ -97,7 +97,14 @@ _H2 = re.compile(r"^##\s+(.+?)\s*$")
 _H2_MARKER = "## "
 _VERDICT_PASSED = "passed"
 _VERDICT_FAILED = "failed"
+_VERDICT_UNVERIFIED = "unverified"
 _REMEDY_SEPARATOR = "; "
+_UNVERIFIED_CHECK = re.compile(
+    r"(?im)\b(check\s+\d+\s+could\s+not\s+be\s+verified\b[^.\n]*(?:\.)?)"
+)
+_UNREAD_CHECK_LINE = re.compile(
+    r"(?im)^\s*check\s+\d+\b[^\n]*?\b(i\s+could\s+not\s+(?:read|verify|access|confirm)\b[^.\n]*\.?)"
+)
 _UNRESOLVED_HEADING_BODY = "(this heading does not resolve in the governed spec tree)"
 _ABSENT_CRITERIA_BODY = "(this item carries no effective acceptance criteria)"
 # The description is the item's own text, so it can carry any heading; the end
@@ -291,7 +298,7 @@ def rubric_digest(*, rubric: str) -> str:
 
 
 def parse_judgement_reply(*, reply: str) -> DodJudgement:
-    """Read the final non-empty line of a host judgement reply."""
+    """Read a host verdict, refusing an incomplete judgement as a held result."""
     line = _last_non_empty_line(reply=reply)
     if line is None:
         return _unreadable()
@@ -300,8 +307,11 @@ def parse_judgement_reply(*, reply: str) -> DodJudgement:
         return _unreadable()
     record = cast("dict[str, object]", decoded)
     if record.get("outcome") == _VERDICT_PASSED:
+        findings = _unverified_check_findings(reply=reply)
+        if findings:
+            return DodJudgement(outcome=JUDGEMENT_HELD, findings=findings)
         return DodJudgement(outcome=JUDGEMENT_ADMITTED)
-    if record.get("outcome") == _VERDICT_FAILED:
+    if record.get("outcome") in {_VERDICT_FAILED, _VERDICT_UNVERIFIED}:
         return _failed_verdict(reason=record.get("failure_reason"))
     return _unreadable()
 
@@ -337,6 +347,17 @@ def _failed_verdict(*, reason: object) -> DodJudgement:
         outcome=JUDGEMENT_HELD,
         findings=tuple(line.strip() for line in reason.splitlines() if line.strip()),
     )
+
+
+def _unverified_check_findings(*, reply: str) -> tuple[str, ...]:
+    """Return legacy prose that contradicts a trailing passed verdict.
+
+    Older judges emitted a conversational caveat before their final JSON line.
+    Keeping that reply fail-closed prevents an installed build from admitting an
+    incomplete judgement while the explicit ``unverified`` verdict rolls out.
+    """
+    matches = (*_UNVERIFIED_CHECK.finditer(reply), *_UNREAD_CHECK_LINE.finditer(reply))
+    return tuple(match.group(1).strip() for match in matches)
 
 
 def _last_non_empty_line(*, reply: str) -> str | None:

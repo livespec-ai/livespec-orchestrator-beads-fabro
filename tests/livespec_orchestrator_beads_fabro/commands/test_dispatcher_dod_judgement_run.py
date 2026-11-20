@@ -271,6 +271,7 @@ def test_the_prompt_the_judge_receives_is_the_node_s_own_prompt_plus_the_subject
     # to name BOTH objects: without the passing one, a clean judgement and an
     # unreadable reply are the same bytes.
     assert '{"outcome": "passed"}' in prompt
+    assert '"outcome": "unverified"' in prompt
     assert '"outcome": "failed"' in prompt
 
 
@@ -291,6 +292,7 @@ def test_the_ending_contract_states_the_verdict_form_and_grades_nothing() -> Non
     # It has to name BOTH objects: without the passing one, a clean judgement
     # and an unreadable reply are the same bytes.
     assert '{"outcome": "passed"}' in contract
+    assert '"outcome": "unverified"' in contract
     assert '"outcome": "failed"' in contract
     lowered = contract.casefold()
     assert [word for word in _GRADING_WORDS if word in lowered] == []
@@ -781,6 +783,23 @@ def test_a_failing_reply_holds_the_item_with_its_findings(tmp_path: Path) -> Non
 
     assert verdict.outcome == JUDGEMENT_HELD
     assert verdict.findings == ("bd-ib-1: no scenario; add it.",)
+
+
+def test_an_unverified_reply_holds_the_item_with_its_named_check(tmp_path: Path) -> None:
+    verdict, _ = _take(
+        tmp_path=tmp_path,
+        result=CommandResult(
+            exit_code=0,
+            stdout=(
+                '{"outcome": "unverified", "failure_reason": '
+                '"Check 2 could not be verified against the spec files."}'
+            ),
+            stderr="",
+        ),
+    )
+
+    assert verdict.outcome == JUDGEMENT_HELD
+    assert verdict.findings == ("Check 2 could not be verified against the spec files.",)
 
 
 def test_each_measured_invocation_failure_maps_onto_its_own_stable_cause(
