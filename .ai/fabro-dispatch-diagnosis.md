@@ -56,3 +56,20 @@ through the dev-host play, as step 2 of `bd-ib-zb2hso`. Step 1's preconditions
 held on 2026-11-03: `livespec-dev-tooling-lirki2` (pinned client staging) is
 closed, and no fleet repository's `.livespec.jsonc` still declares a `legacy`
 factory.
+
+## `fabro validate` blocks on an open stdin, and the graph gate validates nothing without a binary
+
+Two traps from hand-landing graph changes on the dev host (bd-ib-crvt34 on
+2026-11-15, bd-ib-zji6m3 on 2026-11-16):
+
+- The carrier `fabro validate` (Petri-era, e.g.
+  `~/.local/state/fabro-currency/carrier-petri-v0.408-d22808f8e/fabro`) waits
+  on an open standard input and looks hung from an agent tool call. Run it
+  with `</dev/null`.
+- `dev-tooling/checks/fabro_graph_validity.py` resolves `fabro` from `PATH`.
+  Inside a detached `just gate-start` run no binary resolves, and under the
+  default lever `warn_when_fabro_absent` the check exits 0 while logging
+  `not-validated` for every graph: a PASSED gate there says the graphs were
+  not looked at. Validate a graph edit in the foreground with the carrier
+  directory prefixed to `PATH`, `LIVESPEC_FABRO_GRAPH_VALIDATION=fail_when_fabro_absent`
+  and `</dev/null`; the log then reads `validated with fabro <version>`.
