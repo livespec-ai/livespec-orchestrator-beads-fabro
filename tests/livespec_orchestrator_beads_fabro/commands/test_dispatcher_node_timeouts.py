@@ -159,7 +159,12 @@ def test_committed_graph_renders_every_declared_timeout(tmp_path: Path) -> None:
         committed_text=committed_text, timeouts=default_node_timeouts()
     )
     assert not isinstance(rendered, str)
-    assert set(_rendered_timeouts(text=rendered.text)) == {"1800s", "3900s", "7200s"}
+    assert set(_rendered_timeouts(text=rendered.text)) == {
+        "1170s",
+        "1800s",
+        "3900s",
+        "7200s",
+    }
     assert "red" in rendered.node_seconds
     assert 'stall_timeout="7200s"' in rendered.text
 

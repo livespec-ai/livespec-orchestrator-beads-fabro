@@ -51,9 +51,9 @@ _DEFAULT_BRANCH_TEMPLATE = re.compile(r"\{\{\s*inputs\.default_branch\s*\}\}")
 _PASSING_HOOK = "#!/bin/sh\nprintf 'lefthook v1.13.6  hook: pre-commit\\n'\nexit 0\n"
 _EXIT_ZERO = re.compile(r"\bexit 0\b")
 _DIRECTIVE_THEN_EXIT = re.compile(
-    r"""printf '%s\\n' '\{"preferred_next_label":"[A-Za-z0-9_]+"\}';\s*$"""
+    r"""printf '%s\\n' '\{"preferred_next_label":"[A-Za-z0-9_-]+"\}';\s*$"""
 )
-_PRINTED_LABEL = re.compile(r'"preferred_next_label":"([A-Za-z0-9_]+)"')
+_PRINTED_LABEL = re.compile(r'"preferred_next_label":"([A-Za-z0-9_-]+)"')
 
 
 @dataclass(frozen=True)
