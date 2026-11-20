@@ -16163,3 +16163,37 @@ Feature: A credential_wrapper re-exec does not relabel or swallow the child's fa
     Then the output says the credential_wrapper could not run in this environment
     And it names the wrapper and the still-missing secret names and never a secret value
 ```
+
+## Scenario 383 — An item-only read-history returns every generation of an incident from its work-item id and computes the closed generation's outstanding list
+
+```gherkin
+Feature: An incident's whole history is readable from its work-item id
+  As an operator inspecting an incident
+  I want read-history to answer from the incident work-item id alone
+  So that I can see every attempt and generation without reconstructing a fenced identity
+
+  Scenario: Every generation of every attempt is returned oldest first
+    Given an incident item with two attempts that together recorded five generations
+    When a caller runs read-history with the repository and the item id and nothing else
+    Then the reply's status is verified and the process exits 0
+    And the result's generations lists all five generations oldest first, each with its attempt id, phase, generation, operation id and owner
+    And authorizes_current_effects is false
+
+  Scenario: A closed incident's last generation carries a computed outstanding list
+    Given an incident item whose head is closed
+    When a caller runs read-history with the repository and the item id
+    Then the last generation carries outstanding, recomputed at read time from current evidence
+    And no earlier generation carries outstanding
+    And no authority record stores an outstanding list
+
+  Scenario: An item with no incident authority is refused by name
+    Given a work item that is unknown or is not an incident
+    When a caller runs read-history with the repository and that item id
+    Then the reply refuses with the named reason incident-authority-missing
+    And the reply's status is refused and the process exits 78
+
+  Scenario: The full-identity invocation is unchanged
+    Given an incident item with a current head
+    When a caller runs read-history naming the full fenced identity
+    Then the reply is the same historical reading it returned before the item-only invocation existed
+```
