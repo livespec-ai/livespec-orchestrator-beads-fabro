@@ -176,6 +176,33 @@ def test_green_preview_uses_the_implement_turns_affected_tests_gate(tmp_path: Pa
     assert "full pytest suite would run" not in completed.stderr
 
 
+def test_green_preview_exposes_justs_exported_test_parallelism_to_the_hook(
+    tmp_path: Path,
+) -> None:
+    """The preview and the commit gate give worker-sensitive tests one environment."""
+    preview = importlib.import_module(_MODULE)
+    repo, runner, env = _preview_repository(tmp_path=tmp_path, preview=preview)
+    (repo / "justfile").write_text('export test_nprocs := "6"\n', encoding="utf-8")
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text(
+        "#!/bin/sh\n"
+        'test "${test_nprocs:-}" = 6 || exit 23\n'
+        "printf '%s\\n' 'hook received the declared test parallelism'\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+
+    completed = _run(
+        repo=repo,
+        env=env,
+        argv=[sys.executable, str(runner), "green"],
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "hook received the declared test parallelism" in completed.stdout
+
+
 def test_gate_preview_trusts_its_worktree_before_running_the_hook(tmp_path: Path) -> None:
     """A generated mise config cannot block the prospective commit checks."""
     preview = importlib.import_module(_MODULE)
