@@ -734,6 +734,11 @@ destructive_cli_allowlist = [
 #   runner and the committed settle script through a stopped real rebase, to read
 #   the rebase state the settle leaves after a subjectless refusal. It scrubs every
 #   GIT_, COVERAGE and COV_CORE variable from each child environment.
+# - test_gate_preview_progress_and_record_42erfz.py runs the MATERIALIZED gate
+#   preview, whose subject is process lifetime: it kills the caller's process
+#   group and asserts a detached worker survives to write its verdict, which no
+#   in-process call can stand in for. It drops every GIT_, COVERAGE and COV_CORE
+#   variable from each child environment.
 #
 # This key MUST stay above the `[[...mirror_pairings]]` array-of-tables
 # below (same TOML attachment reason as `destructive_cli_allowlist`).
@@ -776,6 +781,7 @@ subprocess_spawn_allowlist = [
     "tests/integration/test_publish_draft_refuses_subjectless_commit_7cixf3.py",
     "tests/integration/test_commit_runner_folds_checkpoints_above_open_red_gisyvv.py",
     "tests/integration/test_routing_schema_nodes_emit_a_directive.py",
+    "tests/integration/test_gate_preview_progress_and_record_42erfz.py",
 ]
 
 [[tool.livespec_dev_tooling.mirror_pairings]]
