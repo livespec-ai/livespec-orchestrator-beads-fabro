@@ -144,15 +144,19 @@ def observe_succeeded_run_pull_request(
     """What became of the pull request a SUCCEEDED run published.
 
     A merged pull request is `reconcile-merged`'s, and a still-open one is
-    awaiting its own CI or merge, so neither may be released. Only a pull
-    request that is closed unmerged, with none merged or open, names a claim
-    whose work will never land and whose remedy is a return to `ready`. This
-    reads every state because that distinction cannot be drawn from the merged
-    list alone: an open pull request and a closed one both look like "no merged
-    pull request" there.
+    awaiting its own CI or merge, so neither may be released. The lookup is
+    restricted to the item dispatch's `feat/<item>` branch: a different pull
+    request that merely cites the item (for example, a follow-up's trailers)
+    must never close the active claim. Only a pull request that is closed
+    unmerged, with none merged or open, names a claim whose work will never
+    land and whose remedy is a return to `ready`.
     """
     states = _pull_request_states(
-        repo=repo, runner=runner, work_item_id=work_item_id, state_filter="all"
+        repo=repo,
+        runner=runner,
+        work_item_id=work_item_id,
+        state_filter="all",
+        head=f"feat/{work_item_id}",
     )
     if states is None:
         return FORGE_UNOBSERVABLE
@@ -171,22 +175,26 @@ def _pull_request_states(
     runner: CommandRunner,
     work_item_id: str,
     state_filter: str,
+    head: str | None = None,
 ) -> set[object] | None:
     """The states of every pull request matching the id, or None when unreadable."""
+    argv = [
+        "gh",
+        "pr",
+        "list",
+        "--state",
+        state_filter,
+        "--search",
+        work_item_id,
+        "--json",
+        "number,state,title",
+        "--limit",
+        "20",
+    ]
+    if head is not None:
+        argv.extend(("--head", head))
     result = runner.run(
-        argv=[
-            "gh",
-            "pr",
-            "list",
-            "--state",
-            state_filter,
-            "--search",
-            work_item_id,
-            "--json",
-            "number,state,title",
-            "--limit",
-            "20",
-        ],
+        argv=argv,
         cwd=repo,
         timeout_seconds=_GH_TIMEOUT_SECONDS,
     )

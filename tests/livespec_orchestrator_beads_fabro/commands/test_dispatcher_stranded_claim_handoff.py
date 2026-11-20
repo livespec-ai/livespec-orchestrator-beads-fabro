@@ -25,12 +25,18 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import pytest
 from livespec_orchestrator_beads_fabro._beads_client import reset_fake_singleton
-from livespec_orchestrator_beads_fabro._store_dispatch_claim import ClaimStamp, record_claim_stamp
+from livespec_orchestrator_beads_fabro._store_dispatch_claim import (
+    ClaimRow,
+    ClaimStamp,
+    record_claim_stamp,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandResult
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import JournalFile
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_survey import (
@@ -54,6 +60,9 @@ _COMMANDS = (
 )
 _RECOVERY_MODULE = (
     "livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_handoff_recovery"
+)
+_SUCCEEDED_RECOVERY_MODULE = (
+    "livespec_orchestrator_beads_fabro.commands._dispatcher_stranded_claim_succeeded_recovery"
 )
 _ITEM_ID = "bd-ib-handoffpass"
 _RUN_ID = "01HANDOFFRUN"
@@ -201,8 +210,9 @@ _FAILED = [{"name": "check-coverage", "status": "COMPLETED", "conclusion": "fail
 class _Forge:
     """A fake subprocess seam answering by argv, and remembering every call."""
 
-    def __init__(self, *, view: CommandResult) -> None:
+    def __init__(self, *, view: CommandResult, listed: CommandResult | None = None) -> None:
         self.view = view
+        self.listed = listed or CommandResult(exit_code=0, stdout="[]", stderr="")
         self.argvs: list[list[str]] = []
 
     def run(
@@ -218,9 +228,11 @@ class _Forge:
         self.argvs.append(argv)
         if argv[:3] == ["gh", "pr", "view"]:
             return self.view
+        if argv[:3] == ["gh", "pr", "list"]:
+            return self.listed
         if argv[:3] == ["gh", "api", "graphql"]:
             return CommandResult(exit_code=0, stdout=_REQUIRED, stderr="")
-        return CommandResult(exit_code=0, stdout="[]", stderr="")
+        return CommandResult(exit_code=0, stdout="", stderr="")
 
 
 def _ok(*, stdout: str) -> CommandResult:
@@ -258,20 +270,29 @@ def _stored() -> WorkItem:
     return next(iter(read_work_items(path=_config())))
 
 
-def _recovery_module() -> Any:
-    module_path = _COMMANDS / "_dispatcher_stranded_claim_handoff_recovery.py"
+def _recovery_module(*, succeeded: bool = False) -> Any:
+    module_name = (
+        "_dispatcher_stranded_claim_succeeded_recovery.py"
+        if succeeded
+        else "_dispatcher_stranded_claim_handoff_recovery.py"
+    )
+    module_path = _COMMANDS / module_name
     assert module_path.is_file(), f"{module_path} does not exist yet"
-    return importlib.import_module(_RECOVERY_MODULE)
+    return importlib.import_module(_SUCCEEDED_RECOVERY_MODULE if succeeded else _RECOVERY_MODULE)
 
 
-def _stub_reconcile(*, monkeypatch: pytest.MonkeyPatch, exit_code: int) -> list[argparse.Namespace]:
+def _stub_reconcile(
+    *, monkeypatch: pytest.MonkeyPatch, exit_code: int, succeeded: bool = False
+) -> list[argparse.Namespace]:
     calls: list[argparse.Namespace] = []
 
     def _reconcile(*, args: argparse.Namespace) -> int:
         calls.append(args)
         return exit_code
 
-    monkeypatch.setattr(_recovery_module(), "reconcile_merged_for_claim", _reconcile)
+    monkeypatch.setattr(
+        _recovery_module(succeeded=succeeded), "reconcile_merged_for_claim", _reconcile
+    )
     return calls
 
 
@@ -460,3 +481,128 @@ def test_a_succeeded_claim_without_a_handoff_of_its_own_dispatch_is_held_as_befo
     assert held[0].detail is None
     assert not any(argv[:3] == ["gh", "pr", "view"] for argv in forge.argvs)
     assert _stored().status == "active"
+
+
+def test_a_succeeded_claim_whose_published_pull_request_merged_is_reconciled_without_a_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The succeeded-run route owns its own module so the handed-off recovery
+    # remains beneath the repository's per-file ceiling.
+    calls = _stub_reconcile(monkeypatch=monkeypatch, exit_code=0, succeeded=True)
+    repo = _repo(tmp_path=tmp_path)
+    journal = _journal(repo=repo, rows=[_LAUNCH])
+    forge = _Forge(
+        view=_ok(stdout=_view(state="MERGED", armed=False)),
+        listed=_ok(stdout=json.dumps([{"number": _PR, "state": "MERGED", "title": _ITEM_ID}])),
+    )
+
+    recovered, held = _pass(repo=repo, journal=journal, forge=forge)
+
+    assert held == ()
+    assert [(row.work_item_id, row.route) for row in recovered] == [
+        (_ITEM_ID, "succeeded-run-reconcile-merged")
+    ]
+    assert [(call.item, call.regrade) for call in calls] == [(_ITEM_ID, False)]
+    assert calls[0].repo == str(repo)
+    assert any(argv[-2:] == ["--head", f"feat/{_ITEM_ID}"] for argv in forge.argvs)
+
+
+def test_a_succeeded_merged_claim_holds_when_its_recovery_precondition_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recovery = _recovery_module(succeeded=True)
+    for reading, expected_hold in (
+        ("fence", "effect-unobservable"),
+        ("missing-row", "effect-unobservable"),
+        ("changed-row", "claim-changed"),
+    ):
+
+        @contextmanager
+        def _fence(*, _reading: str = reading, **_: object) -> Iterator[bool]:
+            yield _reading != "fence"
+
+        with monkeypatch.context() as patch:
+            patch.setattr(recovery, "claim_recovery_fence", _fence)
+            if reading == "missing-row":
+                patch.setattr(recovery, "claim_row", lambda **_: None)
+            elif reading == "changed-row":
+                patch.setattr(
+                    recovery,
+                    "claim_row",
+                    lambda **_: ClaimRow(status="active", assignee="fabro", stamp=None),
+                )
+            case_root = tmp_path / reading
+            case_root.mkdir()
+            repo = _repo(tmp_path=case_root)
+            journal = _journal(repo=repo, rows=[_LAUNCH])
+            request = recovery.SucceededRunRecoveryRequest(
+                item=_item(), run_id=_RUN_ID, factory_name=_FACTORY, factory_server_url=_SERVER
+            )
+
+            outcome = recovery.recover_succeeded_merged_claim(
+                repo=repo, journal=journal, request=request, now_iso="2026-11-08T09:00:00Z"
+            )
+
+        assert outcome.hold_reason == expected_hold
+
+
+def test_a_succeeded_merged_claim_holds_when_the_acceptance_valve_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recovery = _recovery_module(succeeded=True)
+    calls = _stub_reconcile(monkeypatch=monkeypatch, exit_code=9, succeeded=True)
+    repo = _repo(tmp_path=tmp_path)
+    journal = _journal(repo=repo, rows=[_LAUNCH])
+    append_work_item(path=_config(), item=_item())
+    record_claim_stamp(path=_config(), work_item_id=_ITEM_ID, stamp=_stamp())
+    request = recovery.SucceededRunRecoveryRequest(
+        item=_item(), run_id=_RUN_ID, factory_name=_FACTORY, factory_server_url=_SERVER
+    )
+
+    outcome = recovery.recover_succeeded_merged_claim(
+        repo=repo, journal=journal, request=request, now_iso="2026-11-08T09:00:00Z"
+    )
+
+    assert outcome.hold_reason == "run-succeeded"
+    assert "exit 9" in (outcome.detail or "")
+    assert len(calls) == 1
+
+
+def test_a_succeeded_merged_claim_is_recovered_when_the_valve_removes_its_claim_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recovery = _recovery_module(succeeded=True)
+    rows = [ClaimRow(status="active", assignee="fabro", stamp=_stamp()), None]
+    monkeypatch.setattr(recovery, "claim_row", lambda **_: rows.pop(0))
+    _ = _stub_reconcile(monkeypatch=monkeypatch, exit_code=0, succeeded=True)
+    repo = _repo(tmp_path=tmp_path)
+    journal = _journal(repo=repo, rows=[_LAUNCH])
+    request = recovery.SucceededRunRecoveryRequest(
+        item=_item(), run_id=_RUN_ID, factory_name=_FACTORY, factory_server_url=_SERVER
+    )
+
+    outcome = recovery.recover_succeeded_merged_claim(
+        repo=repo, journal=journal, request=request, now_iso="2026-11-08T09:00:00Z"
+    )
+
+    assert (outcome.route, outcome.status, outcome.effects_written) == (
+        "succeeded-run-reconcile-merged",
+        "active",
+        ("reconcile-merged",),
+    )
+
+
+def test_the_succeeded_recovery_default_drives_the_ordinary_reconcile_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recovery = _recovery_module(succeeded=True)
+    from livespec_orchestrator_beads_fabro.commands import _dispatcher_reconcile_merged as valve
+
+    seen: list[argparse.Namespace] = []
+    monkeypatch.setattr(
+        valve, "run_reconcile_merged_command", lambda *, args: seen.append(args) or 7
+    )
+    args = argparse.Namespace(item=_ITEM_ID)
+
+    assert recovery.reconcile_merged_for_claim(args=args) == 7
+    assert seen == [args]

@@ -988,9 +988,19 @@ else
     fail "the per-scenario watchdog regressed"
 fi
 if bash "$HARNESS_DIR/test-restore-guard.sh" >/dev/null; then
-    pass "the seat restore guard refuses a plain ticket for an item with an open factory PR or a preserved-publish ref, and passes a seeded ruling or an explicit --fresh reason"
+    pass "the seat restore guard refuses a plain ticket for an open factory PR, preserved ref, or origin/master delivery, and passes a seeded ruling or explicit override"
 else
     fail "the seat restore guard regressed"
+fi
+if bash "$HARNESS_DIR/test-reconcile-delivered.sh" >/dev/null; then
+    pass "the fleet delivery reconciliation reports every open item named by origin/master and omits closed or unmentioned items"
+else
+    fail "the fleet delivery reconciliation regressed"
+fi
+if bash "$HARNESS_DIR/test-ticket-redeliver.sh" >/dev/null; then
+    pass "a redelivery records its reason before it can continue past the delivery screen"
+else
+    fail "the seat redelivery ledger record regressed"
 fi
 if bash "$HARNESS_DIR/test-load-guard-tmp-share.sh" >/dev/null; then
     pass "the seat load guard holds /tmp at a share of the mounted tmpfs, the same verdict on a 24G and a 48G tmpfs"
@@ -4448,6 +4458,25 @@ if [ "$parent_rc" = 0 ] && [ -z "$(detached_pid_of "$parent_out")" ] && [ "$(dri
     pass "control: with no gate stamp the launcher runs in place exactly as before and dispatches"
 else
     fail "control: a launcher with no gate stamp detached or did not dispatch (rc=$parent_rc, dispatches: $(drive_log_items))"
+fi
+
+scenario "50. the seat refuses a ticket whose item has already been delivered on origin/master"
+new_case master-delivery-screen
+git -C "$WORK/seed" "${GIT_IDENTITY[@]}" commit --quiet --allow-empty --no-verify \
+    -m $'fix: deliver an already-merged item\n\nWork-item: bd-ib-delivered'
+delivering_sha=$(git -C "$WORK/seed" rev-parse HEAD)
+git -C "$WORK/seed" "${GIT_IDENTITY[@]}" push --quiet "$ORIGIN" master
+git -C "$TENANT" fetch --quiet origin master
+mkdir -p "$CASE_DIR/bin"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$CASE_DIR/bin/gh"
+chmod +x "$CASE_DIR/bin/gh"
+delivery_out=$(PATH="$CASE_DIR/bin:$PATH" bash "$HARNESS_DIR/../seat/restore-guard.sh" bd-ib-delivered "$TENANT" 2>&1)
+delivery_rc=$?
+if [ "$delivery_rc" = 6 ] && [[ "$delivery_out" == *"$delivering_sha"* ]] \
+    && [[ "$delivery_out" == *origin/master* ]]; then
+    pass "a ticket whose item is named by a delivering origin/master commit is refused with that commit and reason"
+else
+    fail "a delivered item was not refused with its origin/master commit (rc=$delivery_rc, output: $delivery_out)"
 fi
 fi
 

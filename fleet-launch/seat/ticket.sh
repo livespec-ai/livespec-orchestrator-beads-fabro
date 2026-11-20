@@ -6,10 +6,30 @@
 # ticket.sh <item> <repo-dir> <20-digit key>: one guarded gmktec ticket (seat 50a20bc8, post-reboot; coordinator load guard).
 # Guard: GO -> launch. HOLD on procs_running alone -> re-read after 60 s (max 30 tries). Memory HOLD -> exit 3 (holds the wave).
 set -u; ITEM=$1; REPO=$2; KEY=$3; SEAT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd); . "$SEAT_DIR/../config.sh"; L=$FLEET_LAUNCH_STATE_DIR; ORCH=$FLEET_LAUNCH_ORCH_REPO; GUARD=${SEAT_LOAD_GUARD:-$SEAT_DIR/load-guard.sh}
-# Rule G: a plain ticket for an item with an open factory PR or a preserved-publish ref routes FRESH and the reclaim
-# destroys that work. Refused here, before any wait; `ticket.sh <item> <repo> <key> --fresh <reason>` is the only bypass.
-RG=(); [ "${4:-}" = --fresh ] && RG=(--fresh "${5:-}")
+# Rule G: a plain ticket for an item with an open factory PR, a preserved-publish ref, or an already-delivered commit routes
+# FRESH and can waste or destroy work. Refused here, before any wait. `--redeliver <reason>` is the intentional partial-work
+# escape hatch; its reason is durable before this ticket can launch.
+RG=()
+case "${4:-}" in
+  --fresh|--redeliver) RG=("$4" "${5:-}") ;;
+  "") ;;
+  *) echo "REFUSED $ITEM: unknown ticket option $4" >&2; exit 2 ;;
+esac
 bash "$SEAT_DIR/restore-guard.sh" "$ITEM" "$REPO" ${RG[@]+"${RG[@]}"} || exit $?
+if [ "${RG[0]:-}" = --redeliver ]; then
+  . "$SEAT_DIR/../launch-lib.sh"
+  if ! resolve_tenant_wrapper; then
+    echo "REFUSED $ITEM: cannot record --redeliver reason because $REPO/.livespec.jsonc credential_wrapper is unreadable" >&2
+    exit 7
+  fi
+  plugin=$(installed_plugin_dir) || exit 7
+  redeliver_comment="Fleet launcher redelivery approved for $ITEM: reason: ${RG[1]}. A commit on origin/master may be a partial delivery; this ticket intentionally dispatches the remaining work."
+  if ! (cd "$REPO" && wrap -- python3 "$SEAT_DIR/../ledger-item.py" comment "$plugin" "$REPO" "$ITEM" "$redeliver_comment") >/dev/null 2>&1; then
+    echo "REFUSED $ITEM: --redeliver reason could not be recorded in the item ledger" >&2
+    exit 7
+  fi
+  echo "REDELIVER $ITEM: recorded reason: ${RG[1]}"
+fi
 for _ in $(seq 1 30); do
   g=$($GUARD); echo "GUARD $ITEM $g"
   # coordinator 16:5xZ: Mem < 40G holds ALL launches; procs_running_median5 >= 50 = no new launch (wait and re-read)
