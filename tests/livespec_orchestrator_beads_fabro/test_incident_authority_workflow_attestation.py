@@ -114,6 +114,7 @@ def test_attested_successor_retains_the_cumulative_diff_scope() -> None:
     successor = attested_successor(observed=observed, receipt=_receipt())
 
     assert isinstance(successor, type(observed.attempt))
+    assert successor.original_paths == ("app.py", _WORKFLOW)
     assert successor.workflow_paths == (_WORKFLOW,)
 
 
