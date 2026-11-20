@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.344.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.344.0...v0.344.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* a green gate preview runs the hook under the environment the hook's own just exports, including test_nprocs (bd-ib-awyije) ([d436c9f](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/d436c9f7350d7feebdd2b3758af7fa0c7c8f2bae))
+* resolve the credential wrapper and ledger mode from the --repo target ([65111c5](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/65111c535cd8216d9f4fea6de45591ec0a2f1f79))
+* the gate preview's per-file-coverage step runs only the changed modules' tests, so a green turn's preview no longer costs a full-suite lap (bd-ib-pxecmp) ([291f06d](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/291f06d0b97f8603f6395c6058f63e9e2304e48d))
+
 ## [0.344.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.343.10...v0.344.0) (2026-11-19)
 
 
