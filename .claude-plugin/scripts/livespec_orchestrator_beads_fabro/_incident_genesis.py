@@ -123,7 +123,7 @@ def _initial(*, attempt: IncidentAttempt, repository: str, item_id: str, operati
         and isinstance(attempt.carrier, BranchReserved)
         # Initial authority is agent-authored. Workflow scope first appears only
         # through the separately attested receipt operation.
-        and not attempt.workflow_paths
+        and not attempt.workflow_scope()
     )
 
 

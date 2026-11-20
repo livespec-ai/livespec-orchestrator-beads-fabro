@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import json
 from contextlib import suppress
-from dataclasses import asdict
-from typing import TYPE_CHECKING
+from dataclasses import asdict, dataclass, replace
+from typing import TYPE_CHECKING, Literal
 
 from livespec_orchestrator_beads_fabro._incident_authority_payload import (
     HEAD_HINT_KEY,
@@ -50,7 +50,11 @@ from livespec_orchestrator_beads_fabro.errors import (
 if TYPE_CHECKING:
     from livespec_orchestrator_beads_fabro._beads_client import BeadsClient
 
-__all__: list[str] = ["commit_transition"]
+__all__: list[str] = [
+    "HumanAttestedWorkflowReceipt",
+    "attest_workflow_paths",
+    "commit_transition",
+]
 
 _LEDGER_ERRORS = (
     BeadsCommandError,
@@ -59,6 +63,15 @@ _LEDGER_ERRORS = (
     BeadsMappingError,
     BeadsTenantMissingError,
 )
+
+
+@dataclass(frozen=True, kw_only=True)
+class HumanAttestedWorkflowReceipt:
+    """A maintainer receipt authorizing one exact workflow-path scope."""
+
+    operation_id: str
+    workflow_paths: tuple[str, ...]
+    operation: Literal["human_attested"] = "human_attested"
 
 
 def _read(
@@ -88,7 +101,7 @@ def _valid_successor(*, before: IncidentAttempt, after: IncidentAttempt) -> bool
         # Ordinary transitions are agent-written authority records.  A workflow
         # attestation expires with its recorded generation: only the separate
         # maintainer receipt operation may put it on a successor.
-        and not after.workflow_paths
+        and not after.workflow_scope()
         # No writer discharges the incident from anything but a merged repayment.
         and closure_successor_allowed(before=before, after=after)
         and (
@@ -215,3 +228,67 @@ def commit_transition(
         # Keep an unknown candidate: deleting it could sever our own successful
         # transition after a failed readback. A retry recovers the original.
         return AuthorityRefusal(code="incident-transition-unavailable", detail=str(exc))
+
+
+def _attested_successor(
+    *, observed: IncidentReading, receipt: HumanAttestedWorkflowReceipt
+) -> IncidentAttempt | AuthorityRefusal:
+    if receipt.operation != "human_attested" or not receipt.workflow_paths:
+        return AuthorityRefusal(
+            code="incident-workflow-attestation-invalid", detail=observed.attempt.item_id
+        )
+    successor = replace(
+        observed.attempt,
+        generation=observed.attempt.generation + 1,
+        operation_id=receipt.operation_id,
+        original_paths=tuple(
+            dict.fromkeys((*observed.attempt.original_paths, *receipt.workflow_paths))
+        ),
+        workflow_paths=receipt.workflow_paths,
+    )
+    decoded = decode_attempt(value=parse_json(text=json.dumps(attempt_record(attempt=successor))))
+    return (
+        decoded
+        if decoded is not None and decoded.workflow_scope()
+        else AuthorityRefusal(
+            code="incident-workflow-attestation-invalid", detail=observed.attempt.item_id
+        )
+    )
+
+
+def attest_workflow_paths(
+    *,
+    client: BeadsClient,
+    observed: IncidentReading,
+    receipt: HumanAttestedWorkflowReceipt,
+) -> IncidentReading | AuthorityRefusal:
+    """Record one maintainer-attested workflow scope on the next generation.
+
+    Ordinary transition callers cannot select a non-empty workflow scope.  This
+    separate receipt operation constructs the only valid scoped successor, then
+    takes the same server-side generation fence and idempotent replay path.
+    """
+    decoded = _attested_successor(observed=observed, receipt=receipt)
+    if isinstance(decoded, AuthorityRefusal):
+        return decoded
+    recovered = _read(client=client, attempt=decoded, historical=True)
+    if isinstance(recovered, IncidentReading):
+        return (
+            recovered
+            if attempt_record(attempt=recovered.attempt) == attempt_record(attempt=decoded)
+            else AuthorityRefusal(
+                code="incident-workflow-attestation-operation-conflict",
+                detail=receipt.operation_id,
+            )
+        )
+    current = require_current_generation(client=client, observed=observed)
+    if isinstance(current, AuthorityRefusal):
+        return current
+    history = read_history(client=client, repository=decoded.repository, item_id=decoded.item_id)
+    if isinstance(history, AuthorityRefusal):
+        return history
+    if receipt.operation_id in {prior.operation_id for prior in history}:
+        return AuthorityRefusal(
+            code="incident-workflow-attestation-operation-reused", detail=receipt.operation_id
+        )
+    return _close(client=client, observed=observed, successor=decoded)

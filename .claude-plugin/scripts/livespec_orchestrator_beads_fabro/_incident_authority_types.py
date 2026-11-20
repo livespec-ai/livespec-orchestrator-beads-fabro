@@ -3,8 +3,8 @@
 # EXPEDITED_INCIDENT_RESPONSE flag: bd-ib-dzbwaq
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import ClassVar
+from dataclasses import InitVar, dataclass, field
+from typing import ClassVar, cast
 
 from livespec_orchestrator_beads_fabro._incident_carrier import IncidentCarrier
 
@@ -19,7 +19,7 @@ class AuthorityRefusal:
     detail: str
 
 
-@dataclass(frozen=True, kw_only=True, init=False)
+@dataclass(frozen=True, kw_only=True)
 class IncidentAttempt:
     """One committed immutable authority snapshot, distinct from normal proof."""
 
@@ -41,37 +41,19 @@ class IncidentAttempt:
     repayment_required: bool
     # None is a schema-1 record written before the explicit carrier model.
     carrier: IncidentCarrier | None = None
+    # An InitVar preserves the legacy dataclass/asdict shape while allowing an
+    # immutable scope to participate in construction and dataclasses.replace.
+    workflow_paths: InitVar[tuple[str, ...]] = ()
 
-    def __init__(  # noqa: PLR0913 - mirrors the immutable authority record schema.
-        self,
-        *,
-        repository: str,
-        item_id: str,
-        attempt_id: str,
-        phase: str,
-        operation_id: str,
-        generation: int,
-        owner: str,
-        base: str,
-        head: str,
-        pr_number: int,
-        landed_commits: tuple[str, ...],
-        landed_trees: tuple[str, ...],
-        original_paths: tuple[str, ...],
-        deferred_work: tuple[str, ...],
-        repayment_required: bool,
-        carrier: IncidentCarrier | None = None,
-        workflow_paths: tuple[str, ...] = (),
-    ) -> None:
-        for name, value in locals().items():
-            if name not in {"self", "workflow_paths"}:
-                object.__setattr__(self, name, value)
+    def __post_init__(self, workflow_paths: tuple[str, ...]) -> None:
         object.__setattr__(self, "_workflow_paths", workflow_paths)
 
-    @property
-    def workflow_paths(self) -> tuple[str, ...]:
+    def workflow_scope(self) -> tuple[str, ...]:
         """The maintainer-attested exact workflow scope for this snapshot."""
-        return self._workflow_paths
+        return cast("tuple[str, ...]", object.__getattribute__(self, "_workflow_paths"))
+
+
+IncidentAttempt.workflow_paths = property(IncidentAttempt.workflow_scope)  # type: ignore[attr-defined]
 
 
 @dataclass(frozen=True, kw_only=True)

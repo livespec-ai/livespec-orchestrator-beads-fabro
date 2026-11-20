@@ -230,10 +230,10 @@ def attempt_record(*, attempt: IncidentAttempt) -> dict[str, Any]:
         "deferred_work",
     ):
         record[field] = list(record[field])
-    record["workflow_paths"] = list(attempt.workflow_paths)
+    record["workflow_paths"] = list(attempt.workflow_scope())
     if attempt.carrier is None:
         del record["carrier"]
-    if not attempt.workflow_paths:
+    if not attempt.workflow_scope():
         del record["workflow_paths"]
     return record
 

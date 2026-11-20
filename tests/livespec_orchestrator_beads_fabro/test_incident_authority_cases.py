@@ -30,7 +30,9 @@ from livespec_orchestrator_beads_fabro.errors import (
 )
 from livespec_orchestrator_beads_fabro.incident_authority import (
     AuthorityRefusal,
+    HumanAttestedWorkflowReceipt,
     IncidentReading,
+    attest_workflow_paths,
     commit_incident_transition,
     read_incident_authority,
 )
@@ -208,6 +210,58 @@ def test_workflow_paths_are_decoded_and_preserved_in_the_authority_record() -> N
     assert decoded is not None
     assert decoded.workflow_paths == (workflow,)
     assert attempt_record(attempt=decoded) == snapshot
+
+
+def test_human_attested_receipt_alone_can_write_workflow_scope() -> None:
+    workflow = ".github/workflows/incident.yml"
+    client, _, _ = _chain()
+    observed = _read(client)
+    assert isinstance(observed, IncidentReading)
+
+    attested = attest_workflow_paths(
+        client=client,
+        observed=observed,
+        receipt=HumanAttestedWorkflowReceipt(
+            operation_id="human-attestation-1",
+            workflow_paths=(workflow,),
+        ),
+    )
+
+    assert isinstance(attested, IncidentReading)
+    assert attested.is_current is True
+    assert attested.attempt.generation == 2
+    assert attested.attempt.workflow_paths == (workflow,)
+    agent_successor = replace(
+        attested.attempt,
+        generation=3,
+        operation_id="agent-transition-1",
+        workflow_paths=(workflow,),
+    )
+    refused = commit_incident_transition(
+        client=client, observed=attested, successor=agent_successor
+    )
+    assert isinstance(refused, AuthorityRefusal)
+    assert refused.code == "incident-transition-invalid-successor"
+    advanced = commit_incident_transition(
+        client=client,
+        observed=attested,
+        successor=replace(
+            attested.attempt,
+            generation=3,
+            operation_id="agent-transition-2",
+            workflow_paths=(),
+        ),
+    )
+    assert isinstance(advanced, IncidentReading)
+    historical = read_incident_authority(
+        client=client,
+        repository=REPOSITORY,
+        item_id=ITEM,
+        query=_query(attempt_record(attempt=attested.attempt)),
+        historical=True,
+    )
+    assert isinstance(historical, IncidentReading)
+    assert historical.is_current is False
 
 
 @pytest.mark.parametrize(
