@@ -376,6 +376,27 @@ def test_the_gate_runs_the_selected_tests_then_holds_the_changed_module_to_full_
     assert "--show-missing" in report_line
 
 
+def test_a_gate_preview_uses_changed_tests_and_direct_mirrors_not_importers(
+    *, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Preview scope is derived from the affected gate's same changed-path map."""
+    module = _load()
+    root, log = _committed_repo(tmp_path=tmp_path, monkeypatch=monkeypatch)
+    _stage(root=root, path=f"{_PKG}/orphan.py", text="VALUE = 2\n")
+    _stage(
+        root=root,
+        path="tests/pkg/test_direct.py",
+        text="from pkg.orphan import VALUE\n\ndef test_value() -> None:\n    assert VALUE == 2\n",
+    )
+    monkeypatch.setenv(module.PREVIEW_VARIABLE, "1")
+
+    assert module.main() == 0
+
+    pytest_line = log.read_text(encoding="utf-8").splitlines()[0]
+    assert pytest_line.endswith("--cov-fail-under=0 tests/pkg/test_direct.py")
+    assert "tests/pkg/test_a.py" not in pytest_line
+
+
 @pytest.mark.parametrize(("pytest_status", "coverage_status"), [(1, 0), (0, 2)])
 def test_a_failing_test_or_an_uncovered_line_refuses_the_commit(
     *, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pytest_status: int, coverage_status: int
