@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.344.2](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.344.1...v0.344.2) (2026-11-20)
+
+
+### Bug Fixes
+
+* a gate preview that outlasts its caller's tool call prints progress naming the hook step and leaves a pollable running-then-verdict record (bd-ib-42erfz) ([dfa50f2](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/dfa50f2b6c7e8eed50f8cdaea2109a8277a65e06))
+* judge a seeded Green clean only against the dispatch base ref ([9efa50f](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/9efa50f0987dfc7e364feaf1ad441d599a779681))
+* name the work item and dispatch base on the already-satisfied terminal ([d967014](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/d96701402c51d7875fa8a29452d9ba47df297165))
+* the gate preview's progress line leads with the running just command, since lefthook prints a step's header only when it finishes (bd-ib-42erfz) ([5b731fb](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/5b731fb9061898f9d743825e5ccd8cfcaff3e019))
+
 ## [0.344.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.344.0...v0.344.1) (2026-11-20)
 
 
