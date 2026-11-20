@@ -11,13 +11,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 from livespec_orchestrator_beads_fabro._beads_client import FakeBeadsClient, IssueDraft
 from livespec_orchestrator_beads_fabro._incident_authority_payload import decode_attempt
+from livespec_orchestrator_beads_fabro._incident_carrier import BranchReserved
 from livespec_orchestrator_beads_fabro._incident_genesis import decode_genesis_request
 from livespec_orchestrator_beads_fabro._store_dispatch_claim import (
     CLAIM_TOKEN_METADATA_KEY,
@@ -44,6 +45,7 @@ from livespec_orchestrator_beads_fabro.incident_normal_repayment import (
     REPAYMENT_OWNER,
     MasterCiRun,
     RepaymentEntry,
+    RepaymentPlan,
     advance_repayment,
     enter_repayment,
     incident_flags_delta,
@@ -66,6 +68,13 @@ REPAYMENT_PR = 12
 MASTER_HEAD = "d" * 40
 MASTER_TREE = "e" * 40
 GREEN = MasterCiRun(run_id="master-run-1", head=MASTER_HEAD, conclusion="success", complete=True)
+
+
+@dataclass(frozen=True, kw_only=True)
+class _VerifiedDescendantMasterCiRun(MasterCiRun):
+    """A descendant run whose forge and authority-history evidence was verified by the writer."""
+
+    landed_commit: str
 
 
 def _json(value: object) -> str:
@@ -307,6 +316,34 @@ def test_a_successful_complete_normal_master_run_makes_one_normal_repayment_oper
         6,
     )
     assert active.operation_id == operation_id
+
+
+def test_a_forge_verified_green_descendant_preserves_the_landed_commit_and_tree_for_repayment() -> (
+    None
+):
+    """A verified descendant admission must not pair its head with the landed tree."""
+    client, token = _ledger()
+    observed = _merged_repair(client, token)
+    descendant = _VerifiedDescendantMasterCiRun(
+        run_id="master-run-after-attributed-fix",
+        head="f" * 40,
+        conclusion="success",
+        complete=True,
+        landed_commit=MASTER_HEAD,
+    )
+
+    plan = plan_repayment(reading=observed, master_ci=descendant, target_ref=REPAYMENT_REF)
+
+    assert isinstance(plan, RepaymentPlan), plan
+    assert (plan.attempt.base, plan.attempt.head, plan.attempt.carrier) == (
+        MASTER_HEAD,
+        MASTER_HEAD,
+        BranchReserved(
+            target_ref=REPAYMENT_REF,
+            input_parent=MASTER_HEAD,
+            staged_tree=MASTER_TREE,
+        ),
+    )
 
 
 def test_the_normal_repayment_run_and_pull_request_remove_the_original_marker_while_validating_cumulative_original_incident_paths_evidence_and_deferred_debt() -> (

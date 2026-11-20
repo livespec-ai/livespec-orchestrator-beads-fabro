@@ -9,7 +9,11 @@ from dataclasses import asdict, fields
 from pathlib import PurePosixPath
 from typing import Any, cast
 
-from livespec_orchestrator_beads_fabro._incident_authority_types import IncidentAttempt
+from livespec_orchestrator_beads_fabro._incident_authority_types import (
+    IncidentAttempt,
+    RepaymentMasterCiEvidence,
+    RepaymentPreexistingJob,
+)
 from livespec_orchestrator_beads_fabro._incident_carrier import (
     BranchReserved,
     HeadPublished,
@@ -65,7 +69,14 @@ _TEXT_FIELDS = (
 )
 _QUERY_FIELDS = frozenset(("attempt_id", "phase", "operation_id", "generation", "owner"))
 _ATTEMPT_FIELDS = frozenset(f.name for f in fields(IncidentAttempt))
-_LEGACY_FIELDS = _ATTEMPT_FIELDS - {"carrier"}
+_LEGACY_FIELD_SETS: frozenset[frozenset[str]] = frozenset(
+    (
+        _ATTEMPT_FIELDS,
+        _ATTEMPT_FIELDS - {"carrier"},
+        _ATTEMPT_FIELDS - {"repayment_master_ci_evidence"},
+        _ATTEMPT_FIELDS - {"carrier", "repayment_master_ci_evidence"},
+    )
+)
 
 
 def decode_record(*, text: object, marker: str, keys: frozenset[str]) -> dict[str, Any] | None:
@@ -103,6 +114,70 @@ def _paths(*, values: tuple[str, ...]) -> bool:
         and ".." not in PurePosixPath(v).parts
         and str(PurePosixPath(v)) == v
         for v in values
+    )
+
+
+def _decode_repayment_evidence(  # noqa: PLR0911 - strict decoding refuses each malformed shape.
+    *, value: object
+) -> RepaymentMasterCiEvidence | None:
+    """Decode only the compact immutable evidence emitted by descendant admission."""
+    if not isinstance(value, dict):
+        return None
+    row = cast("dict[str, object]", value)
+    required = frozenset(
+        {
+            "admitted_run_id",
+            "admitted_head",
+            "landed_commit",
+            "landed_failed_run_id",
+            "preexisting_jobs",
+        }
+    )
+    if frozenset(row) != required or not all(
+        isinstance(row.get(key), str) and bool(cast(str, row[key]).strip())
+        for key in required - {"preexisting_jobs"}
+    ):
+        return None
+    if not all(_sha(value=cast(str, row[key])) for key in ("admitted_head", "landed_commit")):
+        return None
+    jobs = row.get("preexisting_jobs")
+    if not isinstance(jobs, list) or not jobs:
+        return None
+    decoded: list[RepaymentPreexistingJob] = []
+    for raw in cast("list[object]", jobs):
+        if not isinstance(raw, dict):
+            return None
+        job = cast("dict[str, object]", raw)
+        if frozenset(job) != frozenset(
+            {
+                "job",
+                "preexisting_run_id",
+                "attributed_item_id",
+                "attributed_landed_commit",
+            }
+        ) or not all(
+            isinstance(job.get(key), str) and bool(cast(str, job[key]).strip()) for key in job
+        ):
+            return None
+        commit = cast(str, job["attributed_landed_commit"])
+        if not _sha(value=commit):
+            return None
+        decoded.append(
+            RepaymentPreexistingJob(
+                job=cast(str, job["job"]),
+                preexisting_run_id=cast(str, job["preexisting_run_id"]),
+                attributed_item_id=cast(str, job["attributed_item_id"]),
+                attributed_landed_commit=commit,
+            )
+        )
+    if len({entry.job for entry in decoded}) != len(decoded):
+        return None
+    return RepaymentMasterCiEvidence(
+        admitted_run_id=cast(str, row["admitted_run_id"]),
+        admitted_head=cast(str, row["admitted_head"]),
+        landed_commit=cast(str, row["landed_commit"]),
+        landed_failed_run_id=cast(str, row["landed_failed_run_id"]),
+        preexisting_jobs=tuple(decoded),
     )
 
 
@@ -149,15 +224,20 @@ def unsupported_carrier(*, value: object) -> bool:
 
 def decode_attempt(*, value: object) -> IncidentAttempt | None:
     """Decode the complete snapshot without accepting bools as numeric ids."""
-    if not isinstance(value, dict) or frozenset(cast("dict[str, object]", value)) not in {
-        _ATTEMPT_FIELDS,
-        _LEGACY_FIELDS,
-    }:
+    if (
+        not isinstance(value, dict)
+        or frozenset(cast("dict[str, object]", value)) not in _LEGACY_FIELD_SETS
+    ):
         return None
     row = cast("dict[str, Any]", value)
     raw_carrier = row.get("carrier")
     carrier = None if raw_carrier is None else decode_carrier(value=raw_carrier)
-    if (raw_carrier is not None and carrier is None) or not _valid_identity(row=row):
+    evidence = _decode_repayment_evidence(value=row.get("repayment_master_ci_evidence"))
+    if (
+        (raw_carrier is not None and carrier is None)
+        or (row.get("repayment_master_ci_evidence") is not None and evidence is None)
+        or not _valid_identity(row=row)
+    ):
         return None
     if not _pr_agrees(row=row, carrier=carrier):
         return None
@@ -190,6 +270,7 @@ def decode_attempt(*, value: object) -> IncidentAttempt | None:
         deferred_work=deferred,
         repayment_required=row["repayment_required"],
         carrier=carrier,
+        repayment_master_ci_evidence=evidence,
     )
 
 
@@ -198,6 +279,8 @@ def attempt_record(*, attempt: IncidentAttempt) -> dict[str, Any]:
     record = asdict(attempt)
     if attempt.carrier is None:
         del record["carrier"]
+    if attempt.repayment_master_ci_evidence is None:
+        del record["repayment_master_ci_evidence"]
     return record
 
 
