@@ -114,7 +114,12 @@ def _no_setup(*, checkout: Path, scratch: Path) -> _Lap:
 
 def _complete_turn(*, checkout: Path, scratch: Path) -> _Lap:
     """`implement` stated its Definition of Done complete."""
-    del checkout, scratch
+    del scratch
+    # The gate refuses a handoff with no recorded preview result, so the lap
+    # starts from the clean record a completed Green preview leaves.
+    _ = (checkout / ".git" / "livespec-implement-gate-preview-green-result.json").write_text(
+        '{"failed_targets": [], "preview_ran": true, "status": 0}\n', encoding="utf-8"
+    )
     return _Lap(stdin='{"definition_of_done_complete": true}\n')
 
 
