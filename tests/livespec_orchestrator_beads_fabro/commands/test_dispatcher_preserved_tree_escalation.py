@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -38,6 +40,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
     CommandResult,
     DispatchOutcome,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_io import JournalFile
 from livespec_orchestrator_beads_fabro.commands._dispatcher_preserved_tree_base import SOURCE_STAGE
 from livespec_orchestrator_beads_fabro.commands._dispatcher_preserved_tree_escalation import (
     PRESERVED_TREE_UNREACHABLE_STAGE,
@@ -50,6 +53,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_preserved_tree_recor
     PRESERVED_TREE_SKIPPED_STAGE,
     PRESERVED_TREE_STAGE,
     PRESERVED_TREE_UNPRESERVED_STAGE,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_reflection_journal import (
+    read_journal_records,
 )
 from livespec_orchestrator_beads_fabro.commands._fabro_port_http import FabroHttpResult
 from livespec_orchestrator_beads_fabro.errors import BeadsConnectionError
@@ -163,7 +169,7 @@ class _Runner:
         argv: list[str],
         cwd: Path,
         timeout_seconds: float,
-        env: dict[str, str] | None = None,
+        env: Mapping[str, str | None] | None = None,
         stdin: int | None = None,
     ) -> CommandResult:
         _ = (cwd, timeout_seconds, env, stdin)
@@ -268,6 +274,9 @@ class _DiscrepantTransport:
         )
 
 
+_Transports = _Transport | _DiscrepantTransport
+
+
 def _args(*, server: str | None = _SERVER, factory: str = _FACTORY) -> argparse.Namespace:
     return argparse.Namespace(
         fabro_bin="/home/ubuntu/.fabro/bin/fabro",
@@ -292,18 +301,18 @@ def _preserved(
     *,
     tmp_path: Path,
     runner: _Runner | None = None,
-    transport: _Transport | None = None,
+    transport: _Transports | None = None,
     outcome: DispatchOutcome | None = None,
     args: argparse.Namespace | None = None,
     journal_records: tuple[dict[str, object], ...] = (
         {"stage": SOURCE_STAGE, "work_item_id": _ITEM, "staged_at": _BASE},
     ),
-) -> tuple[_Journal, _Runner, _Transport, list[str]]:
+) -> tuple[_Journal, _Runner, _Transports, list[str]]:
     _write_config(tmp_path)
     append_work_item(path=_config(), item=_item())
     journal = _Journal()
     used_runner = runner if runner is not None else _Runner()
-    used_transport = transport if transport is not None else _Transport()
+    used_transport: _Transports = transport if transport is not None else _Transport()
     preserve_checkpoint_failed_tree(
         args=args if args is not None else _args(),
         repo=tmp_path,
@@ -384,7 +393,7 @@ def test_an_empty_run_files_read_that_disagrees_with_stage_diffs_never_publishes
 ) -> None:
     """The preservation is either rebuilt from the patch or honestly reported as discrepant."""
     transport = _DiscrepantTransport()
-    journal, _, _, bodies = _preserved(tmp_path=tmp_path, transport=transport)  # type: ignore[arg-type]
+    journal, _, _, bodies = _preserved(tmp_path=tmp_path, transport=transport)
 
     assert transport.urls == [
         f"{_SERVER}/api/v1/runs/{_RUN}/files",
@@ -407,7 +416,30 @@ def test_an_empty_run_files_read_that_disagrees_with_stage_diffs_never_publishes
         assert "discrepancy" in bodies[0]
 
 
-def test_a_discrepant_read_is_recorded_before_the_dispatcher_rests_the_active_item(  # noqa: PLR0915
+def _no_disposition(**_: object) -> None:
+    return None
+
+
+def _no_groom_draft(**_: object) -> bool:
+    return False
+
+
+# Every post-run disposition other than the two this case grades. Each is a
+# no-op here so that the order observed is the preservation leg against the
+# real escalation, and nothing else the terminal path writes.
+_UNRELATED_DISPOSITIONS = (
+    "record_provider_exhaustion_if_observed",
+    "record_dead_implementer_truncation_if_observed",
+    "record_base_advanced_after_arming",
+    "record_merge_wait_handed_off",
+    "record_needs_human_cause",
+    "dispose_terminal_routing",
+    "emit_calibration",
+    "record_wip_capture_receipt",
+)
+
+
+def test_a_discrepant_read_is_recorded_before_the_dispatcher_rests_the_active_item(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The terminal path writes the discrepancy, then performs the ledger rest.
@@ -420,51 +452,33 @@ def test_a_discrepant_read_is_recorded_before_the_dispatcher_rests_the_active_it
     _write_config(tmp_path)
     active_item = replace(_item(), status="active", blocked_reason=None)
     append_work_item(path=_config(), item=active_item)
-    journal = _Journal()
-    journal.path = tmp_path / "journal.jsonl"  # type: ignore[attr-defined]
+    journal = JournalFile(path=tmp_path / "journal.jsonl")
+    journal.append(record={"stage": SOURCE_STAGE, "work_item_id": _ITEM, "staged_at": _BASE})
     runner = _Runner()
     transport = _DiscrepantTransport()
+
+    monkeypatch.setattr(
+        terminal_preservation, "preserve_checkpointed_work_reference", _no_disposition
+    )
+    # The terminal path builds its own inputs from the journal on disk; only the
+    # two external seams are replaced, so the leg itself runs unmodified.
+    monkeypatch.setattr(
+        terminal_preservation,
+        "PreservationInputs",
+        partial(PreservationInputs, runner=runner, transport=transport),
+    )
+    for name in _UNRELATED_DISPOSITIONS:
+        monkeypatch.setattr(loop_selection, name, _no_disposition)
+    monkeypatch.setattr(loop_selection, "record_groom_draft", _no_groom_draft)
+
     args = _args()
     args.close_on_merge = False
-
-    def _preserve_tree(**kwargs: object) -> None:
-        escalation.preserve_checkpoint_failed_tree(
-            args=kwargs["args"],  # type: ignore[arg-type]
-            repo=kwargs["repo"],  # type: ignore[arg-type]
-            item=kwargs["item"],  # type: ignore[arg-type]
-            outcome=kwargs["outcome"],  # type: ignore[arg-type]
-            journal=kwargs["journal"],  # type: ignore[arg-type]
-            inputs=PreservationInputs(
-                journal_records=(
-                    {"stage": SOURCE_STAGE, "work_item_id": _ITEM, "staged_at": _BASE},
-                ),
-                runner=runner,
-                transport=transport,
-            ),
-        )
-
-    monkeypatch.setattr(
-        terminal_preservation, "preserve_checkpointed_work_reference", lambda **_: None
-    )
-    monkeypatch.setattr(terminal_preservation, "preserve_checkpoint_failed_tree", _preserve_tree)
-    monkeypatch.setattr(loop_selection, "record_provider_exhaustion_if_observed", lambda **_: None)
-    monkeypatch.setattr(
-        loop_selection, "record_dead_implementer_truncation_if_observed", lambda **_: None
-    )
-    monkeypatch.setattr(loop_selection, "record_groom_draft", lambda **_: False)
-    monkeypatch.setattr(loop_selection, "record_base_advanced_after_arming", lambda **_: None)
-    monkeypatch.setattr(loop_selection, "record_merge_wait_handed_off", lambda **_: None)
-    monkeypatch.setattr(loop_selection, "record_needs_human_cause", lambda **_: None)
-    monkeypatch.setattr(loop_selection, "dispose_terminal_routing", lambda **_: None)
-    monkeypatch.setattr(loop_selection, "emit_calibration", lambda **_: None)
-    monkeypatch.setattr(loop_selection, "record_wip_capture_receipt", lambda **_: None)
-
     _ = loop_selection.post_run_dispositions(
         args=args,
         repo=tmp_path,
         item=active_item,
         outcome=_outcome(),
-        journal=journal,  # type: ignore[arg-type]
+        journal=journal,
         wall_clock_seconds=1.0,
         dispatch_context_size=1,
         token_supplier=lambda: "token",
@@ -472,11 +486,8 @@ def test_a_discrepant_read_is_recorded_before_the_dispatcher_rests_the_active_it
 
     stored = materialize_work_items(records=read_work_items(path=_config()))[_ITEM]
     assert (stored.status, stored.blocked_reason) == ("blocked", "needs-human")
-    unpreserved = journal.row(stage=PRESERVED_TREE_UNPRESERVED_STAGE)
-    blocked = journal.row(stage="needs-human-blocked")
-    assert unpreserved is not None
-    assert blocked is not None
-    assert journal.records.index(unpreserved) < journal.records.index(blocked)
+    stages = [row.get("stage") for row in read_journal_records(journal_path=journal.path)]
+    assert stages.index(PRESERVED_TREE_UNPRESERVED_STAGE) < stages.index("needs-human-blocked")
     bodies = [
         comment.text
         for comment in read_work_item_comments(path=_config(), work_item_id=_ITEM)
