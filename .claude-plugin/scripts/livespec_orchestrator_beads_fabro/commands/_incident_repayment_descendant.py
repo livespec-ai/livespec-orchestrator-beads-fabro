@@ -18,6 +18,7 @@ from livespec_orchestrator_beads_fabro.commands._incident_repayment_descendant_f
     failed_jobs,
     is_ancestor,
     latest_landed_ancestor,
+    normal_runs,
     run,
     runs_at,
 )
@@ -165,14 +166,10 @@ def verify_descendant_master_ci(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR09
                 attributed_landed_commit=matching[1],
             )
         )
-    all_runs = api(runner=runner, repo=repo, path=f"{repository}/actions/runs?per_page=100")
-    candidates = all_runs.get("workflow_runs") if all_runs else None
-    if not isinstance(candidates, list):
+    candidates = normal_runs(runner=runner, repo=repo, repository=repository, head=None)
+    if candidates is None:
         return _refuse(detail="condition-4: successful master-run history is unreadable")
-    for raw in cast("list[object]", candidates):
-        if not isinstance(raw, dict):
-            return _refuse(detail="condition-4: successful master-run history is unreadable")
-        row = cast("dict[str, object]", raw)
+    for row in candidates:
         head, status, conclusion = (
             row.get("head_sha"),
             row.get("status"),

@@ -63,6 +63,7 @@ __all__: list[str] = [
     "MERGE_MODES",
     "MERGE_MODE_DEFAULT",
     "ORCHESTRATOR_BUILD_ADOPT_REMEDY",
+    "ORIGIN_DEFAULT_BRANCH",
     "ORIGIN_DEFAULT_FETCH_REFSPEC",
     "ORIGIN_DEFAULT_REMOTE_REF",
     "ORIGIN_DEFAULT_REVISION",
@@ -263,6 +264,9 @@ RELEASE_REPOSITORY_MASTER_REF = "refs/heads/master"
 ORIGIN_DEFAULT_REVISION = "origin/master"
 ORIGIN_DEFAULT_REMOTE_REF = "refs/remotes/origin/master"
 ORIGIN_DEFAULT_FETCH_REFSPEC = "+refs/heads/master:refs/remotes/origin/master"
+# The bare name, for the forge run listings that filter and compare by branch name
+# (`actions/runs?branch=`, a run's `head_branch`) rather than by ref.
+ORIGIN_DEFAULT_BRANCH = "master"
 
 # The named-build adopt step livespec-dev-tooling owns, which every currency
 # surface names as its remedy. A fleet clone's session reconcile holds its

@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_integration_defaults import (
+    MASTER_CI_WORKFLOW_DEFAULT,
+    ORIGIN_DEFAULT_BRANCH,
+)
 from livespec_orchestrator_beads_fabro.effects import parse_json
 
 if TYPE_CHECKING:
@@ -19,12 +23,16 @@ __all__: list[str] = [
     "failed_jobs",
     "is_ancestor",
     "latest_landed_ancestor",
+    "normal_runs",
     "run",
     "runs_at",
 ]
 
 _FAILURE = "failure"
 _TIMEOUT_SECONDS = 60.0
+_PUSH = "push"
+_PAGE_SIZE = 100
+_MAX_PAGES = 100
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -85,21 +93,57 @@ def run(*, runner: CommandRunner, repo: Path, repository: str, run_id: str) -> R
     )
 
 
+def normal_runs(
+    *, runner: CommandRunner, repo: Path, repository: str, head: str | None
+) -> tuple[dict[str, object], ...] | None:
+    """Every normal master CI run, at one commit or on the whole branch, read page by page.
+
+    A history the forge reports as larger than what could be read, or any malformed
+    record, is unreadable rather than a shorter answer.
+    """
+    scope = f"&head_sha={head}" if head is not None else ""
+    collected: list[dict[str, object]] = []
+    for page in range(1, _MAX_PAGES + 1):
+        response = api(
+            runner=runner,
+            repo=repo,
+            path=(
+                f"{repository}/actions/runs?branch={ORIGIN_DEFAULT_BRANCH}&event={_PUSH}"
+                f"{scope}&per_page={_PAGE_SIZE}&page={page}"
+            ),
+        )
+        rows = response.get("workflow_runs") if response else None
+        total = response.get("total_count") if response else None
+        if not isinstance(rows, list) or not isinstance(total, int):
+            return None
+        for raw in cast("list[object]", rows):
+            if not isinstance(raw, dict):
+                return None
+            collected.append(cast("dict[str, object]", raw))
+        if len(collected) >= total:
+            return tuple(row for row in collected if _is_normal_master_ci(row=row))
+        if not rows:
+            return None
+    return None
+
+
+def _is_normal_master_ci(*, row: dict[str, object]) -> bool:
+    return (
+        row.get("name") == MASTER_CI_WORKFLOW_DEFAULT
+        and row.get("head_branch") == ORIGIN_DEFAULT_BRANCH
+        and row.get("event") == _PUSH
+    )
+
+
 def runs_at(
     *, runner: CommandRunner, repo: Path, repository: str, head: str
 ) -> tuple[str, ...] | None:
-    """List every run ID at a commit, accepting no malformed records."""
-    response = api(
-        runner=runner, repo=repo, path=f"{repository}/actions/runs?head_sha={head}&per_page=100"
-    )
-    rows = response.get("workflow_runs") if response else None
-    if not isinstance(rows, list):
+    """List every normal master CI run ID at a commit, accepting no malformed records."""
+    rows = normal_runs(runner=runner, repo=repo, repository=repository, head=head)
+    if rows is None:
         return None
     ids: list[str] = []
-    for raw in cast("list[object]", rows):
-        if not isinstance(raw, dict):
-            return None
-        row = cast("dict[str, object]", raw)
+    for row in rows:
         run_id = row.get("id")
         if not isinstance(run_id, int):
             return None

@@ -32,6 +32,9 @@ from livespec_orchestrator_beads_fabro._store_dispatch_claim import (
     create_claim_token,
 )
 from livespec_orchestrator_beads_fabro.commands import _incident_repayment_descendant as descendant
+from livespec_orchestrator_beads_fabro.commands import (
+    _incident_repayment_descendant_forge as forge_reads,
+)
 from livespec_orchestrator_beads_fabro.commands import incident_authority as command
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_types import CommandResult
 from livespec_orchestrator_beads_fabro.commands._incident_repayment_descendant_forge import Run
@@ -263,6 +266,19 @@ def _green(state: _Tenant) -> None:
     )
 
 
+def _ci_row(**changes: object) -> dict[str, object]:
+    return {"name": "CI", "head_branch": "master", "event": "push"} | changes
+
+
+def _runs_url(*, head: str | None) -> str:
+    scope = f"&head_sha={head}" if head is not None else ""
+    return f"repos/{REPOSITORY}/actions/runs?branch=master&event=push{scope}&per_page=100&page=1"
+
+
+def _runs_page(*rows: dict[str, object]) -> dict[str, object]:
+    return {"total_count": len(rows), "workflow_runs": list(rows)}
+
+
 def _descendant_forge(state: _Tenant, *, earlier_green: bool = False) -> tuple[str, str, str]:
     """Program the forge evidence for a green run following another incident's fix."""
     parent, descendant_head, job = "a" * 40, BROKEN_MASTER, "export-telemetry"
@@ -283,22 +299,18 @@ def _descendant_forge(state: _Tenant, *, earlier_green: bool = False) -> tuple[s
             jobs=[dict(name=job, conclusion="failure")],
         ),
     }
-    successful_runs: list[dict[str, str]] = [
-        dict(head_sha=descendant_head, status="completed", conclusion="success")
+    successful_runs: list[dict[str, object]] = [
+        _ci_row(head_sha=descendant_head, status="completed", conclusion="success")
     ]
     earlier: str | None = None
     if earlier_green:
         earlier = "1" * 40
-        successful_runs.append(dict(head_sha=earlier, status="completed", conclusion="success"))
+        successful_runs.append(_ci_row(head_sha=earlier, status="completed", conclusion="success"))
     state.forge.api |= {
-        f"repos/{REPOSITORY}/actions/runs?head_sha={MASTER_HEAD}&per_page=100": {
-            "workflow_runs": [dict(id=11)]
-        },
+        _runs_url(head=MASTER_HEAD): _runs_page(_ci_row(id=11)),
         f"repos/{REPOSITORY}/commits/{MASTER_HEAD}": {"parents": [dict(sha=parent)]},
-        f"repos/{REPOSITORY}/actions/runs?head_sha={parent}&per_page=100": {
-            "workflow_runs": [dict(id=12)]
-        },
-        f"repos/{REPOSITORY}/actions/runs?per_page=100": {"workflow_runs": successful_runs},
+        _runs_url(head=parent): _runs_page(_ci_row(id=12)),
+        _runs_url(head=None): _runs_page(*successful_runs),
         f"repos/{REPOSITORY}/compare/{MASTER_HEAD}...{descendant_head}": {"status": "ahead"},
         f"repos/{REPOSITORY}/compare/{descendant_head}...{MASTER_HEAD}": {"status": "behind"},
     }
@@ -697,11 +709,7 @@ def test_descendant_verifier_refuses_each_unreadable_contract_fact(  # noqa: PLR
             "read_history",
             lambda **_: _attributed_history(observed=reading.attempt, head=descendant_head),
         )
-        patch.setattr(
-            descendant,
-            "api",
-            lambda *, path, **_: {"parents": [{"sha": "a" * 40}]} if "/commits/" in path else None,
-        )
+        patch.setattr(descendant, "normal_runs", lambda **_: None)
         assert "condition-4" in verify().detail
 
 
@@ -747,14 +755,8 @@ def test_descendant_verifier_exhausts_nonmatching_history_and_later_candidates( 
         )
         patch.setattr(
             descendant,
-            "api",
-            lambda *, path, **_: {"parents": [{"sha": "a" * 40}]}
-            if "/commits/" in path
-            else {
-                "workflow_runs": [
-                    {"head_sha": candidate, "status": "completed", "conclusion": "success"}
-                ]
-            },
+            "normal_runs",
+            lambda **_: (_ci_row(head_sha=candidate, status="completed", conclusion="success"),),
         )
         patch.setitem(
             tenant.forge.api,
@@ -773,14 +775,8 @@ def test_descendant_verifier_exhausts_nonmatching_history_and_later_candidates( 
             "read_history",
             lambda **_: _attributed_history(observed=reading.attempt, head=descendant_head),
         )
-        patch.setattr(
-            descendant,
-            "api",
-            lambda *, path, **_: {"parents": [{"sha": "a" * 40}]}
-            if "/commits/" in path
-            else {"workflow_runs": [None]},
-        )
-        assert "condition-4" in verify().detail
+        patch.setattr(descendant, "normal_runs", lambda **_: (_ci_row(),))
+        assert isinstance(_verify_descendant(tenant, reading, master_ci), MasterCiRun)
     with monkeypatch.context() as patch:
         patch.setattr(
             descendant,
@@ -789,14 +785,8 @@ def test_descendant_verifier_exhausts_nonmatching_history_and_later_candidates( 
         )
         patch.setattr(
             descendant,
-            "api",
-            lambda *, path, **_: {"parents": [{"sha": "a" * 40}]}
-            if "/commits/" in path
-            else {
-                "workflow_runs": [
-                    {"head_sha": "e" * 40, "status": "queued", "conclusion": "failure"}
-                ]
-            },
+            "normal_runs",
+            lambda **_: (_ci_row(head_sha="e" * 40, status="queued", conclusion="failure"),),
         )
         assert isinstance(_verify_descendant(tenant, reading, master_ci), MasterCiRun)
     with monkeypatch.context() as patch:
@@ -807,16 +797,53 @@ def test_descendant_verifier_exhausts_nonmatching_history_and_later_candidates( 
         )
         patch.setattr(
             descendant,
-            "api",
-            lambda *, path, **_: {"parents": [{"sha": "a" * 40}]}
-            if "/commits/" in path
-            else {
-                "workflow_runs": [
-                    {"head_sha": "e" * 40, "status": "completed", "conclusion": "success"}
-                ]
-            },
+            "normal_runs",
+            lambda **_: (_ci_row(head_sha="e" * 40, status="completed", conclusion="success"),),
         )
         assert "condition-4" in verify().detail
+
+
+def test_a_run_history_holding_a_malformed_record_is_unreadable_not_shorter(
+    tenant: _Tenant,
+) -> None:
+    for page in ({"total_count": 1, "workflow_runs": [None]}, {"workflow_runs": []}):
+        tenant.forge.api[_runs_url(head=None)] = page
+        assert (
+            forge_reads.normal_runs(
+                runner=tenant.forge, repo=Path.cwd(), repository=REPOSITORY, head=None
+            )
+            is None
+        )
+    tenant.forge.api[_runs_url(head="a" * 40)] = {"total_count": 2, "workflow_runs": []}
+    assert (
+        forge_reads.runs_at(
+            runner=tenant.forge, repo=Path.cwd(), repository=REPOSITORY, head="a" * 40
+        )
+        is None
+    )
+    tenant.forge.api[_runs_url(head="a" * 40)] = _runs_page(_ci_row(id="not-a-number"))
+    assert (
+        forge_reads.runs_at(
+            runner=tenant.forge, repo=Path.cwd(), repository=REPOSITORY, head="a" * 40
+        )
+        is None
+    )
+
+
+def test_a_run_history_larger_than_the_page_bound_is_unreadable(
+    tenant: _Tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(forge_reads, "_MAX_PAGES", 1)
+    tenant.forge.api[_runs_url(head=None)] = {
+        "total_count": 5,
+        "workflow_runs": [_ci_row(id=1)],
+    }
+    assert (
+        forge_reads.normal_runs(
+            runner=tenant.forge, repo=Path.cwd(), repository=REPOSITORY, head=None
+        )
+        is None
+    )
 
 
 def test_advance_repayment_moves_the_admitted_repayment_one_phase_and_names_a_refused_phase(
