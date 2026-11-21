@@ -713,20 +713,19 @@ def structured_event(line):
     return value if isinstance(value, dict) else None
 
 
-def coverage_row_file(line, *, include_figures=False):
+def coverage_row_file(line, *, include_figures=False, include_legacy_percent=False):
     """A coverage table row below 100% as (file, detail), or None."""
     row = COVERAGE_ROW.match(line)
     if row is None or row.group("name") == "TOTAL" or float(row.group("cover")) >= 100.0:
         return None
     missing = row.group("missing")
     detail = "uncovered lines " + missing if missing else row.group("cover") + "% covered"
-    if include_figures or row.group("cover") == "99":
-        partial_branches = row.group("partial_branches")
-        if partial_branches is not None:
-            figures = row.group("missed") + " missed, " + partial_branches + " partial branch"
-            detail += " (" + figures + "; " + row.group("cover") + "% covered)"
-        elif missing:
-            detail += " (" + row.group("cover") + "% covered)"
+    partial_branches = row.group("partial_branches")
+    if partial_branches is not None and (include_figures or row.group("cover") == "99"):
+        figures = row.group("missed") + " missed, " + partial_branches + " partial branch"
+        detail += " (" + figures + "; " + row.group("cover") + "% covered)"
+    elif missing and include_legacy_percent:
+        detail += " (" + row.group("cover") + "% covered)"
     return row.group("name"), detail
 
 
@@ -839,10 +838,19 @@ def failing_files(text, targets):
         for line in text.splitlines()
         for row in (COVERAGE_ROW.match(line),)
     )
+    legacy_percent = (
+        affected_tests or "check-check-coverage-incremental" in targets or rounded_total
+    )
     for line in text.splitlines():
-        row = coverage_row_file(
-            line, include_figures=affected_tests or rounded_total
-        ) if coverage else None
+        row = (
+            coverage_row_file(
+                line,
+                include_figures=coverage,
+                include_legacy_percent=legacy_percent,
+            )
+            if coverage
+            else None
+        )
         if row is None:
             event = structured_event(line)
             row = None if event is None else event_file(event, coverage, lloc, soft_band)

@@ -72,9 +72,12 @@ def test_a_coverage_refusal_ending_in_the_timing_table_names_its_uncovered_files
     assert section == (
         "failed targets: check-per-file-coverage\n"
         "failing files (3):\n"
-        "- pkg/module_00.py: uncovered lines 10-11\n"
-        "- pkg/module_01.py: uncovered lines 11-12\n"
-        "- pkg/module_02.py: uncovered lines 12-13\n"
+        "- pkg/module_00.py: uncovered lines 10-11 "
+        "(2 missed, 1 partial branch; 93% covered)\n"
+        "- pkg/module_01.py: uncovered lines 11-12 "
+        "(2 missed, 1 partial branch; 93% covered)\n"
+        "- pkg/module_02.py: uncovered lines 12-13 "
+        "(2 missed, 1 partial branch; 93% covered)\n"
     )
 
 
@@ -148,7 +151,7 @@ def test_a_per_file_coverage_refusal_keeps_every_short_file_s_figures(
         "- ansible/factory_workspace_manifest.py: uncovered lines 97 "
         "(1 missed, 1 partial branch; 99% covered)\n"
         "- src/commit_replay_delegate.py: uncovered lines 133-138 "
-        "(7 missed, 2 partial branches; 92% covered)\n"
+        "(7 missed, 2 partial branch; 92% covered)\n"
     )
 
 
@@ -187,8 +190,10 @@ def test_the_section_lists_the_first_forty_files_and_counts_the_rest(
     listed = [line for line in section.splitlines() if line.startswith("- ")]
     facts = [
         len(listed) == 40,
-        listed[0] == "- pkg/module_00.py: uncovered lines 10-11",
-        listed[-1] == "- pkg/module_39.py: uncovered lines 49-50",
+        listed[0] == "- pkg/module_00.py: uncovered lines 10-11 "
+        "(2 missed, 1 partial branch; 93% covered)",
+        listed[-1] == "- pkg/module_39.py: uncovered lines 49-50 "
+        "(2 missed, 1 partial branch; 93% covered)",
         "failing files (55):" in section,
         section.endswith("15 further files omitted\n"),
     ]
@@ -226,7 +231,7 @@ def test_lloc_and_coverage_events_are_read_only_for_their_own_failed_targets(
             "failed targets: check-file-lloc check-check-coverage-incremental\n"
             "failing files (2):\n"
             "- pkg/big.py: LLOC 260 over the 250-line hard ceiling\n"
-            "- pkg/thin.py: uncovered lines 3-6\n"
+            "- pkg/thin.py: uncovered lines 3-6 (60% covered)\n"
         ),
         other
         == "failed targets: check-lint\nfailing files: none reported in the recorded output\n",
