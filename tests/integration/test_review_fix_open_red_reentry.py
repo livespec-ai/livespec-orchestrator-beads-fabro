@@ -136,6 +136,29 @@ def test_a_red_with_python_outside_the_repository_impl_prefixes_does_not_reenter
     assert _label(_run(repo=repo)) == "continue"
 
 
+def test_a_prefix_key_in_an_unrelated_table_does_not_make_outside_python_product_impl(
+    tmp_path: Path,
+) -> None:
+    """Only the `[tool.livespec_dev_tooling]` table declares the hook's impl prefixes."""
+    repo = _repo(tmp_path=tmp_path)
+    _ = (repo / "pyproject.toml").write_text(
+        '[tool.livespec_dev_tooling]\nsource_tree_prefixes = ["package/"]\n\n'
+        '[tool.unrelated]\nsource_tree_prefixes = ["ci-runner/"]\n',
+        encoding="utf-8",
+    )
+    script = repo / "ci-runner" / "k3s" / "phase2" / "report_memory_budget.py"
+    script.parent.mkdir(parents=True)
+    _ = script.write_text("print('outside the implementation prefixes')\n", encoding="utf-8")
+    tests = repo / "tests"
+    tests.mkdir(exist_ok=True)
+    _ = (tests / "test_thing.py").write_text("# red test\n", encoding="utf-8")
+    _git("add", "pyproject.toml", str(script.relative_to(repo)), "tests/test_thing.py", repo=repo)
+    _git("commit", "--quiet", "-m", f"fix: non-product script\n\n{_RED_TRAILER}", repo=repo)
+    _checkpoint(repo=repo)
+
+    assert _label(_run(repo=repo)) == "continue"
+
+
 def test_the_re_entered_review_fix_brief_names_the_open_red_and_directs_its_green(
     tmp_path: Path,
 ) -> None:
