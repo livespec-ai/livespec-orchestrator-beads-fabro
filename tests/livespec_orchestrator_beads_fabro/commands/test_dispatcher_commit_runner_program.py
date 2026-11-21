@@ -825,6 +825,32 @@ def test_a_git_refusal_after_every_hook_passed_quotes_the_line_git_printed(
     assert "Git then refused the commit: " + refusal in brief
 
 
+def test_a_checkpoint_lock_refusal_is_reported_as_overtaken_not_failed(tmp_path: Path) -> None:
+    """A passed hook plus the checkpoint's expected-HEAD race does not spend a failure."""
+    program = _program(tmp_path, _FakeSubprocess(returncode=128))
+    path = _record(tmp_path, _RUN_ID, {"state": "running", "command": ["git", "commit"]}, 1)
+    refusal = "fatal: update_ref failed for ref 'HEAD': cannot lock ref 'HEAD': is at 1234 but expected 5678"
+
+    fake = program["subprocess"]
+
+    def run(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        del command
+        kwargs["stdout"].write(
+            "lefthook hook: pre-commit\nAll 1 targets passed.\n" + refusal + "\n"
+        )
+        return SimpleNamespace(returncode=128)
+
+    fake.run = run
+
+    assert program["worker"](_RUN_ID) == 0
+
+    report, state = program["report_payload"](_RUN_ID, path, json.loads(path.read_text()))
+    assert state == "overtaken-by-checkpoint"
+    assert report["state"] == "overtaken-by-checkpoint"
+    assert report["git_refusal_line"].startswith("fatal: cannot lock ref 'HEAD':")
+    assert "failed_targets" not in report
+
+
 def test_a_git_refusal_after_the_aggregate_alone_skips_the_aggregates_own_events(
     tmp_path: Path,
 ) -> None:
@@ -944,6 +970,47 @@ def test_settle_with_no_live_commit_run_removes_a_stale_brief_and_prints_nothing
 
     assert not brief.exists()
     assert capsys.readouterr().out == ""
+
+
+def test_settle_retries_a_checkpoint_overtaken_run_instead_of_briefing_a_failure(
+    tmp_path: Path,
+) -> None:
+    """The retry's verdict, not the lost runner attempt, is the settle outcome."""
+    program = _settle_program(tmp_path)
+    original = _record(
+        tmp_path,
+        _RUN_ID,
+        {
+            "state": "overtaken-by-checkpoint",
+            "command": ["git", "commit", "-m", "retry"],
+            "start_head": "0123abc",
+        },
+        None,
+    )
+    retried: list[tuple[str, float]] = []
+
+    def retry_overtaken(run_id: str, timeout_seconds: float, program_path: str) -> int:
+        assert program_path
+        retried.append((run_id, timeout_seconds))
+        _ = original.write_text(
+            json.dumps({"state": "overtaken-by-checkpoint", "retried_by": _OTHER_RUN_ID}),
+            encoding="utf-8",
+        )
+        _ = _record(
+            tmp_path,
+            _OTHER_RUN_ID,
+            {"state": "passed", "exit_code": 0, "head": "feedbee"},
+            None,
+        )
+        return 0
+
+    program["retry_overtaken"] = retry_overtaken
+    brief = tmp_path / "brief"
+
+    assert program["settle"](30, str(brief)) == 0
+
+    assert retried == [(_RUN_ID, 30)]
+    assert not brief.exists()
 
 
 def test_settle_waits_for_the_live_run_and_a_passed_verdict_is_briefed_with_its_head(

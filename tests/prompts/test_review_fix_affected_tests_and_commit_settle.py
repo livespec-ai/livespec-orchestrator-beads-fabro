@@ -1,9 +1,9 @@
-"""Review-fix avoids duplicate aggregate checks and delegates a live commit.
+"""Review-fix avoids duplicate aggregate checks and fences its live commit.
 
 Scenario 255 assigns the review-fix turn the affected-tests gate and reserves
-the one full aggregate for the following janitor visit.  A separate settle
-node owns a commit-runner job that outlives the turn, so the prompt must not
-spend the ACP timeout polling that job after all other work is complete.
+the one full aggregate for the following janitor visit.  The engine checkpoints
+after the turn, so the prompt must wait a live commit runner to its own verdict
+instead of handing it to the later settle node.
 """
 
 from __future__ import annotations
@@ -26,9 +26,10 @@ _AFFECTED_TESTS_RULE = (
     "Run only the tests your change touches; the commit hook runs the affected-tests gate."
 )
 _JANITOR_AGGREGATE_RULE = "Leave the one full check aggregate to the following janitor visit."
-_LIVE_COMMIT_HANDOFF = (
-    "end the turn as succeeded, name that commit run's id in your final message, "
-    "and leave it for `review_fix_commit_settle` to wait out"
+_LIVE_COMMIT_FENCE = (
+    "Repeat that bounded wait until the runner reports a terminal",
+    "Do not end this turn while a runner commit is still `running`",
+    "not a handoff for a live runner commit",
 )
 
 
@@ -54,8 +55,9 @@ def test_review_fix_runs_only_affected_tests_and_leaves_the_aggregate_to_janitor
     assert "Re-run the repository's check suite" not in prompt
 
 
-def test_review_fix_hands_a_only_remaining_live_commit_run_to_the_settle_node() -> None:
-    """A live hook does not consume the review-fix ACP turn's remaining timeout."""
+def test_review_fix_waits_a_live_commit_before_the_engine_checkpoint() -> None:
+    """The later settle node only sees a terminal runner verdict."""
     prompt = _review_fix_prompt()
 
-    assert _LIVE_COMMIT_HANDOFF in prompt
+    for phrase in _LIVE_COMMIT_FENCE:
+        assert phrase in prompt

@@ -49,7 +49,10 @@ conflict or the gate failure:
    a trailer-appending hook can otherwise create a commit with no authored subject.
    and wait once with
    `python3 "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-runner.py" wait <run-id> --timeout-seconds 300`
-   in a later tool call. Wait at most once on each commit run you start. If that wait reports `running`, do not call `wait` again and do not stop it. End the turn and leave it for `fix_commit_settle` to wait out. A terminal report lets you continue. Never run a foreground `git commit`, or a
+   in a later tool call. Repeat that bounded wait until the runner reports a terminal
+   verdict. Do not end this turn while a runner commit is still `running`: the engine
+   checkpoints immediately after this node, and it must never race that commit's HEAD
+   update. A terminal report lets you continue. Never run a foreground `git commit`, or a
    foreground `git rebase --continue` while a resolution is staged: the commit
    hook runs the whole check suite and outlasts both the ten-minute tool-call
    limit and the turn's own limit, which killed the measured instance's hook and
@@ -275,15 +278,17 @@ names. Start the commit with
 (the same `git commit` you would run in the foreground, with its own
 arguments), which prints a run id at once, then wait once
 `python3 "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-runner.py" wait <run-id> --timeout-seconds 300`
-in a later tool call. Wait at most once on each commit run you start. If that wait reports `running`, do not call `wait` again and do not stop it. End the turn and leave it for `fix_commit_settle` to wait out. The runner invokes the
+in a later tool call. Repeat that bounded wait until the runner reports a terminal
+verdict. Do not end this turn while a runner commit is still `running`: the engine
+checkpoints immediately after this node, and it must never race that commit's HEAD
+update. The runner invokes the
 commit unchanged, so the repository hooks still run exactly as they would in
 the foreground. A `running` report is not a failed commit. Only `passed` is a
 commit; `failed` is the hook's refusal, with its exit status and output, and
 `no-verdict` means the commit's process ended without a verdict, so neither is
 a commit. The detached commit run and its bounded waits are the one exception
 to the rule against backgrounding a tool call, and every commit run you start
-must be terminal before your final message. The one exception is the commit run
-that the commit-hook section below tells you to leave for `fix_commit_settle`.
+must be terminal before your final message.
 
 ## What to do
 
@@ -430,18 +435,13 @@ So, for every commit in this stage:
   FOREGROUND until it exits, and only then is the final message written.
   Stopping while it runs abandons work that was about to pass and reports it
   as partial progress.
-- A COMMIT RUN THAT YOU STARTED THROUGH THE COMMIT RUNNER AND THAT THE RUNNER
-  STILL REPORTS AS RUNNING IS LEFT FOR `fix_commit_settle`. When the only work
-  this turn has left is such a commit, end the turn as SUCCEEDED, not failed,
-  and name that commit run's id in your final message. Do not keep calling
-  `wait` until the turn's time limit: a turn cut at its limit, or one that
-  ends failed, takes `fix -> needs_human`, `fix_commit_settle` never runs, and
-  the commit's verdict is lost. The graph's `fix_commit_settle` node waits that
-  commit run out and hands the janitor its verdict. This commit run is the
-  exception to the turn-end rule below; do not stop it. Wait at most once on
-  each commit run you start. If that wait reports `running`, do not call `wait`
-  again and do not stop it. End the turn and leave it for `fix_commit_settle`
-  to wait out.
+- A COMMIT RUN THAT YOU STARTED THROUGH THE COMMIT RUNNER MUST REACH ITS OWN
+  TERMINAL VERDICT BEFORE YOU END THIS TURN. Repeat the runner's bounded
+  `wait` while it reports `running`; do not stop the commit or start another.
+  The engine checkpoints immediately after this node, so ending while its HEAD
+  update is live can make either the checkpoint or the runner lose its ref
+  update. `fix_commit_settle` still records any already-terminal result, but it
+  is not a handoff for a live runner commit.
 
 ## When the failure is not auto-resolvable (needs-human protocol)
 
