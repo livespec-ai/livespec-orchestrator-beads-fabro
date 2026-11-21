@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from livespec_orchestrator_beads_fabro._beads_client import make_beads_client
@@ -117,3 +118,47 @@ def test_invalid_acceptance_rework_cap_label_falls_back_to_dispatcher_default(
     rework = next(record for record in records if record["stage"] == "acceptance-auto-rework")
     assert rework["acceptance_rework_cap"] == 2
     assert rework["cap_source"] == "dispatcher.acceptance_rework_cap"
+
+
+@pytest.mark.parametrize("policy", [("ai-only",), ("ai-then-human",), ("human-only",)])
+def test_a_proof_only_not_reproduced_factory_assertion_parks_without_rework(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, policy: str
+) -> None:
+    """Scenario 257 keeps every policy in acceptance after a negative proof-only arm."""
+    repo = _repo(tmp_path=tmp_path)
+    item = replace(_item(), acceptance_policy=policy)
+    append_work_item(path=_config(), item=item)
+    proof = SimpleNamespace(
+        record=SimpleNamespace(verdict="not_reproduced"),
+        assertions=(
+            SimpleNamespace(proof_mode="factory_captured", check=SimpleNamespace(passed=False)),
+        ),
+    )
+    acceptance_pass = _FailingAcceptancePass(proof=proof)  # type: ignore[arg-type]
+    parked: list[dict[str, object]] = []
+    monkeypatch.setattr(_dispatcher_completion, "run_acceptance_pass", lambda **_: acceptance_pass)
+    monkeypatch.setattr(
+        _dispatcher_completion,
+        "incident_decision",
+        lambda **_: SimpleNamespace(policy=policy, to_done=True),
+    )
+    monkeypatch.setattr(
+        _dispatcher_completion, "park_in_acceptance", lambda **kwargs: parked.append(kwargs)
+    )
+    journal = JournalFile(path=repo / "journal.jsonl")
+
+    disposition = _dispatcher_completion.complete_and_accept(
+        repo=repo,
+        item=item,
+        outcome=_green_outcome(item_id=item.id),
+        journal=journal,
+        park_unreproduced_factory_captured=True,
+    )
+
+    assert disposition.closed is False
+    assert [call["policy"] for call in parked] == [policy]
+    records = [json.loads(line) for line in journal.path.read_text(encoding="utf-8").splitlines()]
+    assert "acceptance-auto-rework" not in [record["stage"] for record in records]
+    stored = make_beads_client(config=_config()).show_issue(issue_id=item.id)
+    assert stored["status"] == "acceptance"
+    assert "rework:pending" not in stored["labels"]

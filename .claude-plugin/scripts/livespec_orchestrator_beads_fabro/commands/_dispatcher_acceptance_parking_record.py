@@ -45,6 +45,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_evidence impor
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_leg import (
     PROOF_RECORD_EVIDENCE_LEG,
+    captured_only,
+    captured_record_note,
+    unreproduced_factory_captured_pending_legs,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_record import (
     PROOF_RECORD_TITLE,
@@ -223,7 +226,7 @@ def _pending_legs(
     this record could not name. They are listed in the order the deliverable policy
     ranks the modes, host before human.
     """
-    captured = _captured_only(proof=result.proof)
+    captured = captured_only(proof=result.proof)
     legs = [
         PendingLeg(
             name=leg,
@@ -232,6 +235,12 @@ def _pending_legs(
         for leg in result.absent_evidence
     ]
     if result.proof is not None:
+        legs.extend(
+            unreproduced_factory_captured_pending_legs(
+                proof=result.proof,
+                create=lambda name, action: PendingLeg(name=name, action=action),
+            )
+        )
         legs.extend(
             PendingLeg(
                 name=f"{HOST_CAPTURED_EVIDENCE_LEG} for {text!r}",
@@ -253,25 +262,8 @@ def _pending_legs(
     return tuple(legs)
 
 
-def _captured_only(*, proof: ProofLeg | None) -> ProofRecord | None:
-    """The `captured` record, when it is the only factory record the merge has.
-
-    A `verified` record that is present but lacks an assertion's verdict is a
-    different fault with a different remedy, so it is excluded here.
-    """
-    if proof is None or proof.record is not None:
-        return None
-    return proof.captured
-
-
 def _captured_note(*, proof: ProofLeg) -> str:
-    captured = _captured_only(proof=proof)
-    if captured is None:
-        return ""
-    return (
-        f"; the only factory record is the {VERDICT_CAPTURED} record {captured.url},"
-        " which carries no per-assertion verdict and grades nothing"
-    )
+    return captured_record_note(proof=proof)
 
 
 def _action(
