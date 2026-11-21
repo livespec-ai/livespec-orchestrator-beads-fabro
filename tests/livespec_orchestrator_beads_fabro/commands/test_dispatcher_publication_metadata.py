@@ -31,6 +31,7 @@ import base64
 import os
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 import pytest
 import tomli
@@ -64,10 +65,11 @@ def _item(
     title: str = "Replace the implementation PR agent turn with scripted publication",
     acceptance_criteria: str | None = _CRITERIA,
     item_id: str = _ITEM_ID,
+    type_: Literal["bug", "feature", "task", "chore", "epic"] = "task",
 ) -> WorkItem:
     return WorkItem(
         id=item_id,
-        type="task",
+        type=type_,
         status="ready",
         title=title,
         description="The description is deliberately NOT part of the rendered body.",
@@ -100,6 +102,15 @@ def test_the_rendered_title_carries_the_items_own_words_and_its_id() -> None:
     assert item.title in metadata.title
     assert f"({_ITEM_ID})" in metadata.title
     assert not metadata.title.startswith("feat/"), "the branch-name fallback was rendered"
+
+
+def test_a_bug_items_rendered_title_is_a_fix_subject_describing_its_change() -> None:
+    """The title that Green makes the factory commit subject is release-please visible."""
+    item = _item(title="Prevent factory commits from stranding releases", type_="bug")
+
+    metadata = publication_metadata_for(item=item)
+
+    assert metadata.title == f"fix: {item.title} ({item.id})"
 
 
 def test_the_rendered_body_carries_the_acceptance_criteria_verbatim() -> None:
