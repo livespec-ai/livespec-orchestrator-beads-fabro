@@ -57,6 +57,11 @@ from livespec_orchestrator_beads_fabro.incident_authority import (
     file_incident,
     publish_incident_genesis,
     read_incident_authority,
+    read_incident_history,
+)
+from livespec_orchestrator_beads_fabro._incident_completion_rules import (
+    IncidentCompletionEvidence,
+    completion_obligations,
 )
 from livespec_orchestrator_beads_fabro.incident_completion import IncidentCompletion
 from livespec_orchestrator_beads_fabro.incident_drill_close import DrillClose
@@ -97,6 +102,7 @@ _ADVANCE = "advance-repayment"
 _HISTORICAL = frozenset(("read-history", "commit-transition", *LIFECYCLE_PAYLOADS))
 _FILING = "file-incident"
 _IDENTITY = ("item", "attempt", "phase", "generation")
+_FENCED_IDENTITY = (*_IDENTITY, "operation", "owner")
 _TRANSITION_PENDING = "incident-genesis-claim-transition-pending"
 _IDENTITY_RULE = "--item, --attempt, --phase and --generation: required unless file-incident"
 
@@ -118,8 +124,9 @@ def _parse(*, argv: Sequence[str] | None) -> argparse.Namespace:
     _ = parser.add_argument("--admission-complete", action="store_true")
     _ = parser.add_argument("--receipt-stdin", action="store_true")
     _ = parser.add_argument("--repo", required=True, type=Path)
-    for name in ("repository", "operation", "owner"):
-        _ = parser.add_argument(f"--{name}", required=True)
+    _ = parser.add_argument("--repository", required=True)
+    for name in ("operation", "owner"):
+        _ = parser.add_argument(f"--{name}")
     for name in ("item", "attempt", "phase"):
         _ = parser.add_argument(f"--{name}")
     _ = parser.add_argument("--generation", type=int)
@@ -133,8 +140,20 @@ def _parse(*, argv: Sequence[str] | None) -> argparse.Namespace:
     _check_receipt_source(parser=parser, args=args)
     if args.admission_complete and args.action != _ADVANCE:
         parser.error(f"--admission-complete is only valid for {_ADVANCE}")
-    # A filing has no item identity yet; every other action names one exactly.
-    if any((getattr(args, name) is None) != (args.action == _FILING) for name in _IDENTITY):
+    item_only_history = args.action == "read-history" and all(
+        getattr(args, name) is None for name in _FENCED_IDENTITY[1:]
+    )
+    # A filing has no item identity; item-only history has just its item; every
+    # other action names one full fence.
+    if args.action == _FILING:
+        if any(getattr(args, name) is not None for name in _IDENTITY):
+            parser.error(_IDENTITY_RULE)
+        if args.operation is None or args.owner is None:
+            parser.error("--operation and --owner: required for file-incident")
+    elif item_only_history:
+        if args.item is None:
+            parser.error("--item: required for item-only read-history")
+    elif any(getattr(args, name) is None for name in _FENCED_IDENTITY):
         parser.error(_IDENTITY_RULE)
     return args
 
@@ -147,6 +166,13 @@ def main(*, argv: Sequence[str] | None = None) -> int:
     if args.action == _FILING:
         return _reply(result=_filing(args=args), authorizes=False)
     client = make_beads_client(config=store_config(repo=args.repo))
+    if args.action == "read-history" and args.attempt is None:
+        history = read_incident_history(
+            client=client, repository=args.repository, item_id=args.item
+        )
+        return _history_reply(
+            history=history, repository=args.repository, item_id=args.item
+        )
     result = read_incident_authority(
         client=client,
         repository=args.repository,
@@ -279,6 +305,45 @@ def _result_body(*, result: _Reply) -> dict[str, object]:
     if isinstance(result, RepaymentEntry | RecoveryEntry | IncidentCompletion):
         lifecycle_body(result=result, body=body)
     return body
+
+
+def _history_reply(
+    *,
+    history: tuple[IncidentAttempt, ...] | AuthorityRefusal,
+    repository: str,
+    item_id: str,
+) -> int:
+    """Reply to an item-only history read without granting current authority.
+
+    The repeated ``history`` spelling retains compatibility with the first
+    released item-only caller; ``generations`` is the public Scenario 383
+    field.  A closed head has no outstanding obligations by the same rules
+    that admitted its closure, recomputed from the retained history rather
+    than written into an authority record.
+    """
+    if isinstance(history, AuthorityRefusal):
+        return _reply(result=history, authorizes=False)
+    generations = [attempt_record(attempt=attempt) for attempt in history]
+    if history and history[-1].phase == "closed":
+        generations[-1]["outstanding"] = list(
+            completion_obligations(
+                history=history, evidence=IncidentCompletionEvidence()
+            )
+        )
+    response: dict[str, object] = {
+        "schema": 1,
+        "status": "verified",
+        "result": {
+            "repository": repository,
+            "item_id": item_id,
+            "generations": generations,
+            "history": generations,
+        },
+        "authorizes_current_effects": False,
+        "normal_factory_proof": False,
+    }
+    _ = write_stdout(text=json.dumps(response, sort_keys=True) + "\n")
+    return 0
 
 
 def _reply(*, result: _Reply, authorizes: bool) -> int:
