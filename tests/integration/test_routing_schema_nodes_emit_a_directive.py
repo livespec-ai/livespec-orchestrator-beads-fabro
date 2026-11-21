@@ -106,6 +106,21 @@ def _tree_equals_the_dispatch_base(*, checkout: Path, scratch: Path) -> _Lap:
     return _Lap()
 
 
+def _carried_seed_without_a_red_test(*, checkout: Path, scratch: Path) -> _Lap:
+    """A preserved implementation differs from its dispatch base with no Red test."""
+    del scratch
+    identity = ("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid")
+    _ = (checkout / "tracked.txt").write_text("base\n", encoding="utf-8")
+    _ = _git(repo=checkout, argv=(*identity, "add", "tracked.txt"))
+    _ = _git(repo=checkout, argv=(*identity, "commit", "--quiet", "-m", "base"))
+    _ = _git(repo=checkout, argv=("update-ref", "refs/remotes/origin/master", "HEAD"))
+    _ = (checkout / "tracked.txt").write_text("carried\n", encoding="utf-8")
+    _ = _git(repo=checkout, argv=(*identity, "commit", "--all", "--quiet", "-m", "seed"))
+    handoff = checkout / ".git" / "livespec-implement-handoff.md"
+    _ = handoff.write_text("## red\n\nNo Red test was written.\n", encoding="utf-8")
+    return _Lap()
+
+
 def _no_setup(*, checkout: Path, scratch: Path) -> _Lap:
     """A lap that needs only an initialized repository."""
     del checkout, scratch
@@ -167,6 +182,10 @@ def _absent_runner(*, checkout: Path, scratch: Path) -> _Lap:
 _ORDINARY_LAPS: dict[tuple[str, str], tuple[Callable[..., _Lap], str]] = {
     # The split graph commits a complete Green turn before the diff breaker.
     (_IMPLEMENT, "already_satisfied_route"): (_tree_equals_the_dispatch_base, "already_satisfied"),
+    (_IMPLEMENT, "red_seeded_fallthrough_route"): (
+        _carried_seed_without_a_red_test,
+        "green_admission",
+    ),
     (_IMPLEMENT, "implement_completion"): (_complete_turn, "commit_green"),
     (_IMPLEMENT, "fix_commit_settle"): (_passed_fix_commit, "fix_open_red_route"),
     (_IMPLEMENT, "fix_open_red_route"): (_no_setup, "janitor_admission"),

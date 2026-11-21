@@ -57,7 +57,13 @@ def test_scenario285_routes_each_implement_commit_through_red_and_green_command_
     }
     assert ("dod_gate_mutation_guard", "red_admission", None) in edges
     assert ("red_admission", "red", None) in edges
-    assert ("red", "commit_red", None) in edges
+    assert ("red", "red_seeded_fallthrough_route", None) in edges
+    assert (
+        "red_seeded_fallthrough_route",
+        "green_admission",
+        "preferred_label=seeded",
+    ) in edges
+    assert ("red_seeded_fallthrough_route", "commit_red", None) in edges
     assert ("commit_red", "red_admission", "outcome=failed") in edges
     assert ("commit_red", "green_admission", None) in edges
     assert ("green_admission", "green", None) in edges

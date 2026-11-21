@@ -107,6 +107,7 @@ COMMAND_NODES: tuple[str, ...] = (
     "recapture_route",
     "red_admission",
     "red_needs_human_route",
+    "red_seeded_fallthrough_route",
     "red_unknown_label_route",
     "refresh_repair",
     "review_fix_admission",
