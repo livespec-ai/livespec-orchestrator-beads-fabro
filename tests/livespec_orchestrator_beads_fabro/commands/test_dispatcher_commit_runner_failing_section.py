@@ -78,6 +78,31 @@ def test_a_coverage_refusal_ending_in_the_timing_table_names_its_uncovered_files
     )
 
 
+def test_a_per_file_coverage_refusal_keeps_a_short_file_s_full_figures_from_early_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A rounded aggregate total never replaces the short file's own coverage figures."""
+    output = (
+        "---------- coverage: platform linux, python 3.10.16-final-0 ----------\n"
+        "Name                                Stmts   Miss  Branch  BrPart  Cover   Missing\n"
+        "ansible/factory_workspace_manifest.py   165      1      20       1    99%   97\n"
+        "TOTAL                                9000      1     400       1  100.00%\n"
+        "Failed targets (1):\n"
+        "  - check-per-file-coverage\n" + _TIMING_TAIL
+    )
+
+    section = _refusal_section(capsys=capsys, tmp_path=tmp_path, output=output)
+
+    assert section == (
+        "failed targets: check-per-file-coverage\n"
+        "failing files (1):\n"
+        "- ansible/factory_workspace_manifest.py: uncovered lines 97 "
+        "(1 missed, 1 partial branch; 99% covered)\n"
+        "rounded total coverage 100.00% is not the pass criterion; "
+        "ansible/factory_workspace_manifest.py is below 100%\n"
+    )
+
+
 def test_an_affected_tests_refusal_without_a_target_list_names_its_recipe_test_and_coverage(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
