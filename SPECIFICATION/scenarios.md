@@ -15566,6 +15566,23 @@ Feature: A run's engine checkpoint and merge commits never reach the default bra
     When publish_draft folds the run's commits
     Then the folded commit's only parent is B
     And its tree equals the janitor-passed head's tree
+
+  Scenario: A published run commit carries a conventional-commit subject derived from its work item
+    Given a bug work item whose run's one authored commit has the subject "fix: refuse a stale lease"
+    When publish_draft publishes the run
+    Then the pushed head's subject begins with a conventional type prefix
+    And the subject's type is fix and its text follows the colon
+
+  Scenario: The type is feat for a non-bug work item and the item's own named type governs
+    Given a feature work item with no named type and a work item naming the type perf
+    When publish_draft publishes each run
+    Then the first pushed head's subject begins with feat: and the second's begins with perf:
+
+  Scenario: A head commit whose subject has no conventional type prefix is refused
+    Given a janitor-passed run head whose authored commit's subject is the bare work-item title
+    When publish_draft prepares to push it
+    Then publish_draft pushes nothing
+    And it fails closed with LIVESPEC_PUBLISH_DRAFT_SUBJECT_NOT_CONVENTIONAL naming the run, the commit and its subject
 ```
 
 ## Scenario 369 — publish_draft adopts a pull request the forge created behind a failed create call, and only at the pushed head
