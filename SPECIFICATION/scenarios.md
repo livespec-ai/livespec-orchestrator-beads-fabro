@@ -9279,6 +9279,18 @@ Feature: New behaviour gets new spec before it is built
     And the only revision cut after the item's tier record that amended its generalization-target heading carries decision reject
     When a dispatch of the item is refused, and when needs-attention is composed
     Then the refusal names no relink candidate and needs-attention carries no hygiene:spec-tier-relink fact for the item
+
+  Scenario: A none classification names the cited References heading as its generalization-target
+    Given an item whose Definition of Done References line names a heading that resolves to an H2 of the specification tree
+    And that heading governs none of the item's assertions
+    When the filing-stage classification records tier none for the item
+    Then the livespec-spec-change-tier record's generalization-target is that References heading
+    And check 4 accepts the References line as coherent on the recorded internal ruling
+
+  Scenario: A none classification for an item citing no resolvable heading records none as its target
+    Given an item whose Definition of Done cites no References heading that resolves to an H2
+    When the filing-stage classification records tier none for the item
+    Then the livespec-spec-change-tier record's generalization-target reads (none)
 ```
 
 ## Scenario 207 — The drift run processes each merge behind a contiguous frontier and files proposals it never accepts
