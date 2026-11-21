@@ -94,6 +94,24 @@ def _quota_machine_code(*, machine_code: str) -> AcpAvailabilitySignature:
     )
 
 
+# MEASURED 2026-11-04 on petri, run 01M6KVPC4B2J: the pinned Claude
+# adapter rejected the requested model before a turn began with `Claude Code
+# 2.1.170 does not support this model; version 2.1.280 or newer is required`.
+# This is a model-specific adapter incompatibility, not an account outage, so
+# it holds only the candidate that named the unsupported model.
+_ANTHROPIC_MODEL_UNSUPPORTED = AcpAvailabilitySignature(
+    source=_MESSAGE_SOURCE,
+    cause="model_unsupported",
+    scope=_CANDIDATE_SCOPE,
+    all_literals=(
+        "claude code",
+        "does not support this model",
+        "version",
+        "or newer is required",
+    ),
+)
+
+
 # MEASURED 2026-09-09, the `pr`-node outage that motivated this contract:
 # the pinned Codex adapter returned HTTP 400 naming the requested model as
 # unsupported for a ChatGPT account. Candidate-scoped: the account works,
@@ -203,6 +221,7 @@ _CODEX_USAGE_LIMIT_SNAKE_TOKEN = _quota_machine_code(machine_code="usage_limit_e
 
 _BUILTIN_SIGNATURES: dict[str, tuple[AcpAvailabilitySignature, ...]] = {
     ANTHROPIC_DOMAIN: (
+        _ANTHROPIC_MODEL_UNSUPPORTED,
         _ANTHROPIC_SESSION_LIMIT,
         _ANTHROPIC_GENERIC_LIMIT,
         _ANTHROPIC_WEEKLY_LIMIT,

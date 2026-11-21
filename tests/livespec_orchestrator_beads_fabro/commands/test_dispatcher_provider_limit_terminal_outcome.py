@@ -82,6 +82,14 @@ _IDENTITY = AcpCandidateIdentity(
     candidate_key=_CANDIDATE_KEY,
     availability_key=_AVAILABILITY_KEY,
 )
+_STRUCTURED_IDENTITY = AcpCandidateIdentity(
+    display_name="Claude ACP Claude Opus 5",
+    candidate_key="claude-acp/anthropic/claude-opus-5",
+    availability_key="anthropic",
+)
+_CLAUDE_MODEL_UNSUPPORTED = (
+    "Claude Code 2.1.170 does not support this model; " "version 2.1.280 or newer is required"
+)
 
 _DECLARED_QUOTA = {
     "source": "protocol.message",
@@ -150,6 +158,7 @@ def _write_repo(
     declare_signature: bool,
     parameterize: bool = True,
     candidate_key: str = _CANDIDATE_KEY,
+    structured: bool = False,
 ) -> None:
     """A repository whose `implement` node declares the candidate that ran.
 
@@ -169,14 +178,21 @@ def _write_repo(
         'digraph ImplementWorkItem {\n    implement [\n        timeout="60s"\n    ]\n}\n',
         encoding="utf-8",
     )
-    entry: dict[str, object] = {
-        "command": "claude-code-acp",
-        "display_name": _IDENTITY.display_name,
-        "candidate_key": candidate_key,
-        "availability_key": _AVAILABILITY_KEY,
-    }
-    if declare_signature:
-        entry["availability_signatures"] = [_DECLARED_QUOTA]
+    if structured:
+        entry: dict[str, object] = {
+            "agent": "claude-acp",
+            "model": "claude-opus-5",
+            "effort": "high",
+        }
+    else:
+        entry = {
+            "command": "claude-code-acp",
+            "display_name": _IDENTITY.display_name,
+            "candidate_key": candidate_key,
+            "availability_key": _AVAILABILITY_KEY,
+        }
+        if declare_signature:
+            entry["availability_signatures"] = [_DECLARED_QUOTA]
     (repo / ".livespec.jsonc").write_text(
         json.dumps(
             {
@@ -189,7 +205,12 @@ def _write_repo(
     )
 
 
-def _plan(*, tmp_path: Path, resolved: bool = True) -> DispatchPlan:
+def _plan(
+    *,
+    tmp_path: Path,
+    resolved: bool = True,
+    identity: AcpCandidateIdentity = _IDENTITY,
+) -> DispatchPlan:
     """A plan carrying the identity the dispatch SELECTED for `implement`.
 
     The identity rides the plan rather than being re-read from configuration,
@@ -219,7 +240,7 @@ def _plan(*, tmp_path: Path, resolved: bool = True) -> DispatchPlan:
                 nodes={},
                 inputs={},
                 run_inputs=(),
-                candidates={"implement": _IDENTITY},
+                candidates={"implement": identity},
             )
             if resolved
             else None
@@ -265,6 +286,37 @@ def test_a_needs_human_terminal_on_a_provider_limit_yields_a_release(
     # The preserved-work reference the release OBSERVED, read off the
     # terminal's own sentinel rather than derived from the run id.
     assert f"refs/heads/needs-human/{_RUN}" in release.recovery_source
+
+
+def test_a_structured_claude_model_refusal_at_the_terminal_yields_a_release(
+    tmp_path: Path,
+) -> None:
+    """The structured Claude model diagnostic releases its selected candidate.
+
+    The terminal re-resolves the candidate from the repository configuration,
+    while the dispatch plan records the identity it selected.  This reaches
+    both sides using the catalog-resolved form that previously lacked the
+    measured signature and therefore exhausted implement re-entry on Claude.
+    """
+    _write_repo(repo=tmp_path, declare_signature=False, structured=True)
+
+    outcome = _outcome(
+        tmp_path=tmp_path,
+        cause=_CLAUDE_MODEL_UNSUPPORTED,
+        plan=_plan(tmp_path=tmp_path, identity=_STRUCTURED_IDENTITY),
+    )
+
+    assert outcome is not None
+    assert outcome.stage == "provider-limit-release"
+    assert outcome.status != "blocked"
+    release = outcome.provider_limit_release
+    assert release is not None
+    assert release.matched is not None
+    assert (release.matched.cause, release.matched.scope) == ("model_unsupported", "candidate")
+    assert release.matched.hold_key == "anthropic"
+    assert release.matched.candidate_key == _STRUCTURED_IDENTITY.candidate_key
+    assert release.executed == _STRUCTURED_IDENTITY
+    assert outcome.provider_usage_limit is False
 
 
 def test_an_unclassifiable_failure_still_rests_at_blocked_needs_human(

@@ -40,6 +40,7 @@ by.
 from __future__ import annotations
 
 import importlib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,10 @@ from livespec_orchestrator_beads_fabro.commands._acp_candidate_schema import (
     AcpCandidate,
     AcpCandidateIdentity,
 )
+from livespec_orchestrator_beads_fabro.commands._acp_candidate_structured import (
+    parse_structured_candidate,
+)
+from livespec_orchestrator_beads_fabro.commands._acp_catalogs import resolve_acp_catalogs
 from livespec_orchestrator_beads_fabro.commands._acp_dispatch_coverage import RenderedCandidate
 from livespec_orchestrator_beads_fabro.commands._acp_node_adapters import AcpAdapter
 from livespec_orchestrator_beads_fabro.commands._fabro_port_records import FabroFailureDetail
@@ -70,6 +75,9 @@ _CODEX_MODEL_NOT_FOUND = (
     "HTTP 400 invalid_request_error model_not_found: The 'gpt-6.1-terra' model is not "
     "supported when using Codex with a ChatGPT account"
 )
+_CLAUDE_MODEL_UNSUPPORTED = (
+    "Claude Code 2.1.170 does not support this model; " "version 2.1.280 or newer is required"
+)
 # MEASURED 2026-10-17 on hp, run 01M54W4YM2SWANMK515YNPFY7J of `bd-ib-6itdjz`:
 # the implement attempt's recorded `causes[-1]` after four hours of genuine
 # progress -- 360 completed tool calls, 14 git commits, and no 429, overloaded,
@@ -90,7 +98,7 @@ _DECLARED_QUOTA = {
 }
 
 
-def _signatures(*, declared: dict[str, object]) -> Any:
+def _signatures(*, declared: Mapping[str, object]) -> Any:
     """The declared signature tuple, parsed through the committed grammar.
 
     Parsed rather than constructed, so the fixture cannot drift from the
@@ -104,7 +112,9 @@ def _signatures(*, declared: dict[str, object]) -> Any:
     return parsed
 
 
-def _rendered(*, identity: AcpCandidateIdentity | None, declared: dict[str, object] | None) -> Any:
+def _rendered(
+    *, identity: AcpCandidateIdentity | None, declared: Mapping[str, object] | None
+) -> Any:
     return RenderedCandidate(
         candidate=AcpCandidate(
             adapter=AcpAdapter(command="claude-code-acp", args=(), env={}),
@@ -147,6 +157,19 @@ def _builtin_codex_rendered() -> RenderedCandidate:
         ),
         builtin=True,
     )
+
+
+def _structured_rendered(*, agent: str, model: str) -> RenderedCandidate:
+    """One shipped structured candidate, as an implement node resolves it."""
+    catalogs = resolve_acp_catalogs(block={})
+    assert not isinstance(catalogs, str), catalogs
+    candidate = parse_structured_candidate(
+        entry={"agent": agent, "model": model, "effort": "high"},
+        key="dispatcher.acp_nodes.implement",
+        catalogs=catalogs,
+    )
+    assert isinstance(candidate, AcpCandidate), candidate
+    return RenderedCandidate(candidate=candidate, builtin=False)
 
 
 def _release(*, failure: FabroFailureDetail, rendered: Any) -> Any:
@@ -216,14 +239,47 @@ def test_measured_codex_model_not_found_releases_the_recorded_candidate() -> Non
     assert release.matched.candidate_key == _CODEX_IDENTITY.candidate_key
 
 
+def test_structured_model_incompatibility_releases_the_failed_candidate() -> None:
+    """A structured implement candidate reaches the release path, not retry_requested.
+
+    The old regression was specific to catalog-resolved candidates: their
+    derived identities reached the terminal but their models carried no
+    signatures, so a Claude adapter's model-version refusal exhausted re-entry
+    on the same candidate.  Exercise the terminal classification seam for both
+    shipped ACP adapters to keep the candidate hold and provider-limit release
+    connected to the structured render.
+    """
+    for agent, model, cause, expected_key in (
+        (
+            "claude-acp",
+            "claude-opus-5",
+            _CLAUDE_MODEL_UNSUPPORTED,
+            "claude-acp/anthropic/claude-opus-5",
+        ),
+        ("codex-acp", "gpt-5.5", _CODEX_MODEL_NOT_FOUND, "codex-acp/openai/gpt-5.5"),
+    ):
+        release = _release(
+            failure=_failure(cause=cause),
+            rendered=_structured_rendered(agent=agent, model=model),
+        )
+
+        assert release is not None, agent
+        assert release.matched is not None, agent
+        assert (release.matched.cause, release.matched.scope) == (
+            "model_unsupported",
+            "candidate",
+        ), agent
+        assert release.matched.candidate_key == expected_key, agent
+
+
 def test_the_same_sentence_without_a_declared_signature_is_not_eligible() -> None:
     """The POSITIVE control's counterpart: nothing matches, so nothing releases.
 
     Without this the test above proves only that a release can be produced, not
     that the declared signature is what produced it. Measured on this
-    repository 2026-10-17: its own structured `acp_nodes` candidates resolve
-    `builtin=False` and declare no signatures, so this is the live arm for
-    every node it dispatches today.
+    repository 2026-10-17: a configured candidate without its own or catalog
+    signatures resolves `builtin=False` and declares no signatures, so this is
+    the live arm for a repository-owned adapter without a measurement.
     """
     assert _SOURCE.is_file()
 

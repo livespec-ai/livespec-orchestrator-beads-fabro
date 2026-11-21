@@ -27,12 +27,13 @@ dispatch that launches and fails at the provider, with a catalog entry standing
 behind it that reads like evidence.
 
 THE SIGNATURES ARE MEASUREMENTS, NOT DOCUMENTATION. The ChatGPT-account
-diagnostic the contract requires is the one measured at the v107 `pr`-node
-outage, and it is carried on the OpenAI entries whose account boundary produced
-it rather than on every model in the file: a signature lent to a model whose
-adapter never emits it classifies somebody else's failure as that candidate's.
-`_acp_builtin_signatures` holds the same measurement for the built-in domains
-and records where each came from.
+diagnostic the contract requires is carried on the OpenAI entries that render
+through the Codex adapter which produced it. The measured Claude Code
+model-version diagnostic is carried on the Anthropic entries that render
+through its Claude adapter. A signature lent to a model whose adapter never
+emits it classifies somebody else's failure as that candidate's.
+`_acp_builtin_signatures` owns those measurements and records where each came
+from; the catalog projects the applicable entries into structured candidates.
 """
 
 from __future__ import annotations
@@ -46,9 +47,19 @@ from livespec_orchestrator_beads_fabro.commands._acp_agent_catalog import (
     ANTHROPIC_PROVIDER,
     OPENAI_PROVIDER,
 )
+from livespec_orchestrator_beads_fabro.commands._acp_builtin_candidates import (
+    ANTHROPIC_DOMAIN,
+    CODEX_DOMAIN,
+)
+from livespec_orchestrator_beads_fabro.commands._acp_builtin_signatures import (
+    builtin_availability_signatures,
+)
 from livespec_orchestrator_beads_fabro.commands._acp_candidate_pricing import (
     PRICE_FIELDS,
     AcpCandidatePricing,
+)
+from livespec_orchestrator_beads_fabro.commands._acp_candidate_signatures import (
+    AcpAvailabilitySignature,
 )
 from livespec_orchestrator_beads_fabro.commands._acp_catalog_overrides import catalog_overrides
 from livespec_orchestrator_beads_fabro.commands._acp_model_entry import (
@@ -127,6 +138,23 @@ _PROVIDER_MODELS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
 )
 
 
+def _provider_signatures(*, provider: str) -> tuple[AcpAvailabilitySignature, ...]:
+    """The measured adapter signatures each provider's structured models carry.
+
+    Structured candidates do not use byte-matched built-in identity, so their
+    signatures must travel on the catalog model they resolve through.  The
+    adapter, not an inferred model spelling, determines which measured table
+    applies.
+    """
+    availability_key = {
+        ANTHROPIC_PROVIDER: ANTHROPIC_DOMAIN,
+        OPENAI_PROVIDER: CODEX_DOMAIN,
+    }.get(provider)
+    if availability_key is None:
+        return ()
+    return builtin_availability_signatures(availability_key=availability_key)
+
+
 def builtin_model_catalog() -> Mapping[str, AcpModelEntry]:
     """The shipped snapshot, keyed by `provider/model`.
 
@@ -150,6 +178,7 @@ def builtin_model_catalog() -> Mapping[str, AcpModelEntry]:
             canonical_id=model,
             aliases=_MODEL_ALIASES.get(model, ()),
             pricing=builtin_model_pricing(model=model),
+            signatures=_provider_signatures(provider=provider),
         )
         for provider, models in _PROVIDER_MODELS
         for model, display_name in models
@@ -189,9 +218,10 @@ def model_catalog_digest(*, catalog: Mapping[str, AcpModelEntry]) -> str:
     catalog ship under an unchanged snapshot id, and a re-priced catalog is
     exactly what changes every derived run cost downstream of it.
 
-    Availability signatures stay OUT, and the reason is the same one that kept
-    pricing out until now: no shipped entry carries one, so including them
-    would put a field into the digest that no committed byte can vary.
+    Availability signatures are included beside pricing: both change what a
+    rendered structured candidate carries, so either change must produce a new
+    snapshot identity rather than reuse one that names different dispatch
+    behavior.
     """
     return _digest(
         payload=[
@@ -201,6 +231,17 @@ def model_catalog_digest(*, catalog: Mapping[str, AcpModelEntry]) -> str:
                 entry.display_name,
                 list(entry.aliases),
                 _pricing_projection(pricing=entry.pricing),
+                [
+                    [
+                        signature.source,
+                        signature.cause,
+                        signature.scope,
+                        list(signature.all_literals),
+                        signature.machine_code,
+                        signature.final_text,
+                    ]
+                    for signature in entry.signatures
+                ],
             ]
             for key, entry in sorted(catalog.items())
         ]
