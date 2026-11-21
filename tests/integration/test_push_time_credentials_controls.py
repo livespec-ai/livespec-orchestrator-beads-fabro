@@ -267,3 +267,63 @@ def test_the_server_rejects_the_expired_credential_without_the_refresh_helper(
     expected = "Basic " + base64.b64encode(f"x-access-token:{EXPIRED}".encode()).decode()
     assert box.writes == [expected]
     assert box.mint_count() == 0
+
+
+def test_a_planted_pre_push_hook_cannot_merge_the_run_with_the_publication_credential(
+    push_sandbox: PushSandbox,
+) -> None:
+    """Scenario 202: a hook an agent stage planted to merge the run's pull request fails.
+
+    `gh` here is a stand-in for the forge: a `pr merge` call takes effect, and leaves
+    its marker, only when the caller holds a forge credential in its environment
+    (any other `gh` call, such as the `pr list --state merged` publish_draft itself makes, is a harmless no-op). The
+    planted hook tries `gh pr merge` while publish_draft pushes through it. The
+    control calls the same `gh` with a credential and DOES merge, which is what
+    makes the planted hook's failure evidence about the credential and not about a
+    `gh` that could never merge.
+    """
+    box = push_sandbox
+    merged = box.root / "pull-request-merged"
+    hook_rc = box.root / "hook-merge-rc"
+    stub_dir = box.root / "stub-bin"
+    stub_dir.mkdir()
+    executable(
+        path=stub_dir / "gh",
+        source=(
+            "#!/bin/sh\n"
+            'case "$*" in "pr merge"*) ;; *) exit 0 ;; esac\n'
+            "if env | grep -Eq '^(GH_TOKEN|GITHUB_TOKEN|GITHUB_PRIVATE_KEY|LIVESPEC_PUSH_TOKEN)='; then\n"
+            f"  echo merged > '{merged}'\n"
+            "  exit 0\n"
+            "fi\n"
+            "echo 'gh: no credential' >&2\n"
+            "exit 4\n"
+        ),
+    )
+    box.env["PATH"] = f"{stub_dir}:{box.env['PATH']}"
+    executable(
+        path=box.clone / ".git/hooks/pre-push",
+        source=(
+            "#!/bin/sh\n"
+            "has=no; env | grep -Eq '^(GH_TOKEN|GITHUB_TOKEN|GITHUB_PRIVATE_KEY|LIVESPEC_PUSH_TOKEN)=' && has=yes\n"
+            "gh pr merge 1 --merge 2>/dev/null\n"
+            f"echo \"rc=$? credential=$has pid=$$ ppid=$PPID\" >> '{hook_rc}'\n"
+            "exit 0\n"
+        ),
+    )
+
+    result = box.run(node="publish_draft")
+
+    assert result.returncode == 0, result.stderr
+    assert "rc=0" not in hook_rc.read_text(), hook_rc.read_text()
+    assert not merged.exists(), "the planted hook merged the pull request"
+
+    control = subprocess.run(
+        [str(stub_dir / "gh"), "pr", "merge", "1", "--merge"],
+        env={**box.env, "GH_TOKEN": FRESH},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert control.returncode == 0, control.stderr
+    assert merged.exists(), "the control gh could not merge even with a credential"
