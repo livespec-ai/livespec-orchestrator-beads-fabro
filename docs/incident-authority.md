@@ -3,8 +3,12 @@
 The public `scripts/bin/incident_authority.py` process boundary lets installed
 consumers use the canonical reader without importing private plugin modules.
 Resolve the governed project's registered installed plugin and use its credential
-wrapper. Invoke `read-current` or `read-history` with `--repo`, `--repository`,
-`--item`, `--attempt`, `--phase`, `--operation`, `--generation`, and `--owner`.
+wrapper. Invoke `read-current` with `--repo`, `--repository`, `--item`,
+`--attempt`, `--phase`, `--operation`, `--generation`, and `--owner`.
+`read-history` also accepts the same fully fenced identity, or an item-only
+lookup with `--repo`, `--repository`, and `--item`. The item-only reply returns
+every retained generation oldest first; only a final `closed` generation carries
+`outstanding`, recomputed while reading rather than stored in authority.
 
 The schema-1 JSON reply carries `status: verified|refused`, `result`,
 `authorizes_current_effects`, and `normal_factory_proof: false`. Refusals exit 78
