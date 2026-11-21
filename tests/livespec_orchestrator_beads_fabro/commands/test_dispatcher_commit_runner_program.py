@@ -833,11 +833,17 @@ def test_a_git_refusal_after_every_hook_passed_quotes_the_line_git_printed(
     assert "Git then refused the commit: " + refusal in brief
 
 
-def test_a_checkpoint_lock_refusal_is_reported_as_overtaken_not_failed(tmp_path: Path) -> None:
-    """A passed hook plus the checkpoint's expected-HEAD race does not spend a failure."""
+def _lock_refusal_report(tmp_path: Path, *, only_checkpoints: bool) -> tuple[dict[str, Any], str]:
+    """Run a commit whose hook passed and whose HEAD update Git refused with a lock error."""
     program = _program(tmp_path, _FakeSubprocess(returncode=128))
-    path = _record(tmp_path, _RUN_ID, {"state": "running", "command": ["git", "commit"]}, 1)
+    path = _record(
+        tmp_path,
+        _RUN_ID,
+        {"state": "running", "command": ["git", "commit"], "start_head": "0123abc"},
+        1,
+    )
     refusal = "fatal: update_ref failed for ref 'HEAD': cannot lock ref 'HEAD': is at 1234 but expected 5678"
+    program["engine_checkpoints_only_since"] = lambda head: only_checkpoints and head == "0123abc"
 
     fake = program["subprocess"]
 
@@ -852,11 +858,24 @@ def test_a_checkpoint_lock_refusal_is_reported_as_overtaken_not_failed(tmp_path:
 
     assert program["worker"](_RUN_ID) == 0
 
-    report, state = program["report_payload"](_RUN_ID, path, json.loads(path.read_text()))
+    return program["report_payload"](_RUN_ID, path, json.loads(path.read_text()))
+
+
+def test_a_checkpoint_lock_refusal_is_reported_as_overtaken_not_failed(tmp_path: Path) -> None:
+    """A passed hook plus the checkpoint's expected-HEAD race does not spend a failure."""
+    report, state = _lock_refusal_report(tmp_path, only_checkpoints=True)
     assert state == "overtaken-by-checkpoint"
     assert report["state"] == "overtaken-by-checkpoint"
     assert report["git_refusal_line"].startswith("fatal: cannot lock ref 'HEAD':")
     assert "failed_targets" not in report
+
+
+def test_a_lock_refusal_after_a_non_checkpoint_head_move_stays_a_failure(tmp_path: Path) -> None:
+    """HEAD moved by anything but engine checkpoints is a refusal, not an overtaking."""
+    report, state = _lock_refusal_report(tmp_path, only_checkpoints=False)
+    assert state == "failed"
+    assert report["state"] == "failed"
+    assert report["git_refusal_line"].startswith("fatal: cannot lock ref 'HEAD':")
 
 
 def test_a_git_refusal_after_the_aggregate_alone_skips_the_aggregates_own_events(

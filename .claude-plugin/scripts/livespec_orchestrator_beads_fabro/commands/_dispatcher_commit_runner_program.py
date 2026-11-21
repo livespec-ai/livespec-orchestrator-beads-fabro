@@ -598,7 +598,9 @@ def worker(run_id):
         refusal = git_refusal_line(text) if exit_code != 0 else None
         if refusal is not None:
             terminal["git_refusal_line"] = refusal
-            if CHECKPOINT_OVERTAKE_REFUSAL.search(refusal):
+            if CHECKPOINT_OVERTAKE_REFUSAL.search(refusal) and engine_checkpoints_only_since(
+                record.get("start_head")
+            ):
                 terminal["state"] = OVERTAKEN_BY_CHECKPOINT
     if exit_code != 0:
         terminal["failed_targets"] = (
@@ -655,9 +657,10 @@ def restore_overtaken_starting_head(record):
     head = git_output("rev-parse", "HEAD")
     if head == start_head:
         return
-    if not is_ancestor(start_head):
+    if not engine_checkpoints_only_since(start_head):
         raise RunnerRefusal(
-            "the checkpoint-overtaken commit run's starting HEAD is not an ancestor of HEAD"
+            "HEAD moved past the checkpoint-overtaken commit run's starting HEAD by something"
+            " other than engine checkpoints, so it is not rewound"
         )
     git_output("reset", "--soft", start_head)
 
@@ -1112,6 +1115,22 @@ def is_ancestor(commit):
         ["git", "merge-base", "--is-ancestor", commit, "HEAD"], capture_output=True, check=False
     )
     return result.returncode == 0
+
+
+def engine_checkpoints_only_since(start_head):
+    """Whether HEAD moved past start_head only by engine checkpoint commits.
+
+    False when start_head is unknown, equals HEAD, is not an ancestor of HEAD, or any
+    commit above it is not an engine checkpoint, so a foreign HEAD move is never taken
+    for a checkpoint overtaking the runner.
+    """
+    if not isinstance(start_head, str) or not start_head or not is_ancestor(start_head):
+        return False
+    try:
+        subjects = git_output("log", "--format=%s", start_head + "..HEAD").splitlines()
+    except RunnerRefusal:
+        return False
+    return bool(subjects) and all(ENGINE_CHECKPOINT_SUBJECT.match(line) for line in subjects)
 
 
 def checkpointed_merge_parent(record):
