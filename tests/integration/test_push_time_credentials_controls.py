@@ -69,6 +69,31 @@ def test_the_publication_push_retains_its_pre_push_hook(push_sandbox: PushSandbo
     assert box.writes == []
 
 
+def test_a_publication_hook_pushes_without_being_able_to_read_a_forge_secret(
+    push_sandbox: PushSandbox,
+) -> None:
+    """Scenario 202: the hook gets a push, not the credential that enables it."""
+    box = push_sandbox
+    executable(
+        path=box.clone / ".git/hooks/pre-push",
+        source=(
+            "#!/bin/sh\n"
+            "set -eu\n"
+            "if env | grep -Eq '^(GH_TOKEN|GITHUB_TOKEN|GITHUB_PRIVATE_KEY|LIVESPEC_PUSH_TOKEN)='; then\n"
+            "  echo hook-read-a-forge-secret >&2\n"
+            "  exit 1\n"
+            "fi\n"
+        ),
+    )
+
+    result = box.run(node="publish_draft")
+
+    assert result.returncode == 0, result.stderr
+    assert box.head(ref=f"refs/heads/{BRANCH}") == git(
+        "rev-parse", "HEAD", cwd=box.clone, env=box.env
+    )
+
+
 def test_the_helper_preserves_inherited_process_config(push_sandbox: PushSandbox) -> None:
     box = push_sandbox
     box.env.update(

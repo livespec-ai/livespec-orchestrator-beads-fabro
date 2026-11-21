@@ -42,6 +42,17 @@ case "$authority" in
     *@*) old_user=${authority%@*}; old_password=${old_user#*:} ;;
 esac
 mint="$(dirname "$0")/mint_app_token.py"
+# Git starts its pre-push hook after it has asked its credential helper for the
+# remote's credentials.  Keep a minted token in this one-use file only until
+# that helper has answered, then remove it before Git starts repository code.
+#
+# A shell variable is deliberately not exported: the `env -u` invocation below
+# becomes the git process, so neither this token nor the App inputs reach its
+# hooks (or a gate that the push command starts).  The helper's configuration
+# contains only this transient path, never a credential value.
+token_file=$(mktemp "${TMPDIR:-/tmp}/livespec-push-token.XXXXXX")
+chmod 600 "$token_file"
+trap 'rm -f "$token_file"' EXIT HUP INT TERM
 # Append to inherited process config so hook policy and callers' config survive.
 export GIT_CONFIG_COUNT=${GIT_CONFIG_COUNT:-0}
 add_config() {
@@ -54,7 +65,9 @@ add_config "credential.$clean.helper" ''
 add_config "credential.$clean.helper" '!f() {
     cat >/dev/null
     if test "$1" = get; then
-        printf "username=x-access-token\npassword=%s\n" "$LIVESPEC_PUSH_TOKEN"
+        token=$(cat "'"$token_file"'")
+        rm -f "'"$token_file"'"
+        printf "username=x-access-token\npassword=%s\n" "$token"
     fi
 }; f'
 add_config http.extraHeader ''
@@ -63,12 +76,12 @@ add_config "http.$clean.extraHeader" ''
 # trace output or an origin error must not print URL credentials or Basic auth.
 redact_output() {
     local secret encoded
-    for secret in "$LIVESPEC_PUSH_TOKEN" "$old_password"; do
+    for secret in "$token" "$old_password"; do
         if test -n "$secret"; then
             output=${output//"$secret"/[redacted]}
         fi
     done
-    encoded=$(printf 'x-access-token:%s' "$LIVESPEC_PUSH_TOKEN" | base64 | tr -d '\n')
+    encoded=$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')
     output=${output//"$encoded"/[redacted]}
 }
 for attempt in 1 2; do
@@ -77,8 +90,11 @@ for attempt in 1 2; do
         echo 'LIVESPEC_PUSH_AUTH_MINT: installation token could not be minted' >&2
         exit 1
     fi
-    export LIVESPEC_PUSH_TOKEN="$token"
-    if output=$("$@" 2>&1); then status=0; else status=$?; fi
+    umask 077
+    printf %s "$token" > "$token_file"
+    if output=$(env -u GH_TOKEN -u GITHUB_TOKEN -u GITHUB_APP_ID \
+        -u GITHUB_PRIVATE_KEY -u GITHUB_APP_INSTALLATION_ID \
+        -u LIVESPEC_PUSH_TOKEN "$@" 2>&1); then status=0; else status=$?; fi
     redact_output
     printf '%s\n' "$output"
     if test "$status" -eq 0 || test "$attempt" -eq 2; then exit "$status"; fi
