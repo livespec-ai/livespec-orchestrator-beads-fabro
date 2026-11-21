@@ -70,6 +70,9 @@ from livespec_orchestrator_beads_fabro.commands._acp_agent_catalog import CLAUDE
 from livespec_orchestrator_beads_fabro.commands._acp_builtin_candidates import ANTHROPIC_DOMAIN
 from livespec_orchestrator_beads_fabro.commands._acp_candidate_schema import AcpCandidate
 from livespec_orchestrator_beads_fabro.commands._acp_codex_headroom import CodexHeadroomReading
+from livespec_orchestrator_beads_fabro.commands._dispatcher_central_factory_selection import (
+    CentralFactorySelection,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential_policy import (
     ClaudeCredentialRefusal,
 )
@@ -329,6 +332,9 @@ class SessionHeadroomPolicy:
     absent or invalid `dispatcher.claude_credential_policy`, or a numbered-slots
     pool with no declared slot injected. Every covered candidate is then skipped
     without a reading. It defaults to ABSENT, which admits the pool as assessed.
+
+    `central_selection` is the central factory selection record this evaluation
+    read, kept for the journal row that names it.
     """
 
     floor_percent: int
@@ -338,6 +344,9 @@ class SessionHeadroomPolicy:
     codex_read: Callable[[], CodexHeadroomReading] | None = None
     pool_read: Callable[[], tuple[SessionHeadroomReading, ...]] | None = None
     credential_refusal: ClaudeCredentialRefusal | None = None
+    # What the central factory selection record said this evaluation, carried so the
+    # journal can name it; `None` unless `selection: central-factory-selection`.
+    central_selection: CentralFactorySelection | None = None
 
 
 def session_headroom_reading(

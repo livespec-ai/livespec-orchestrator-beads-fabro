@@ -46,6 +46,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
@@ -65,6 +66,7 @@ from livespec_orchestrator_beads_fabro.commands._acp_session_headroom import (
 )
 from livespec_orchestrator_beads_fabro.commands._acp_session_headroom_drain import (
     drain_rate_attempted,
+    parse_session_headroom_instant,
     reading_with_drain_rate,
 )
 from livespec_orchestrator_beads_fabro.commands._acp_session_headroom_projection import (
@@ -72,6 +74,7 @@ from livespec_orchestrator_beads_fabro.commands._acp_session_headroom_projection
     session_headroom_projection,
 )
 from livespec_orchestrator_beads_fabro.commands._acp_session_headroom_records import (
+    central_selection_record,
     session_headroom_assessment_record,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_codex_headroom_gate import (
@@ -81,14 +84,15 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_codex_headroom_io im
     read_projected_codex_headroom,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_selector import (
+    admission_central_and_refusal,
     policy_pool_slots,
     register_admission_slot_chooser,
-    repo_credential_refusal,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_session_headroom_baseline import (
     session_headroom_baseline,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_session_headroom_io import (
+    central_slot_identity,
     read_projected_session_headroom,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_session_headroom_pool import (
@@ -184,7 +188,13 @@ def session_headroom_policy(
     )
     # An absent or invalid policy, or no declared slot injected, is the refusal
     # every covered candidate is skipped by, without a reading.
-    refusal = repo_credential_refusal(repo=repo, environ=os.environ)
+    # Under `central-factory-selection` the record is read ONCE per evaluation and
+    # both the refusal and the one-slot pool below follow that single reading.
+    central, refusal = admission_central_and_refusal(
+        repo=repo,
+        environ=os.environ,
+        now=parse_session_headroom_instant(text=now_iso) or datetime.now(timezone.utc),
+    )
     taken: list[PoolSelection] = []
 
     def pool_once() -> PoolSelection:
@@ -193,7 +203,7 @@ def session_headroom_policy(
                 _assessed_pool(
                     # The declared credential policy decides the pool, read when
                     # the pool is; an absent or invalid one assesses no slot.
-                    pool=lambda: policy_pool_slots(repo=repo, environ=os.environ),
+                    pool=lambda: policy_pool_slots(repo=repo, environ=os.environ, central=central),
                     read=read,
                     inputs=_PoolAssessmentInputs(
                         floor_percent=floor,
@@ -216,6 +226,7 @@ def session_headroom_policy(
         weekly_floor_percent=weekly_floor,
         pool_read=lambda: pool_once().readings,
         credential_refusal=refusal,
+        central_selection=central,
         codex_read=codex_headroom_source(
             now_iso=now_iso,
             journal_path=journal_path,
@@ -362,6 +373,15 @@ def journal_session_headroom(
     floor = verdict.session_headroom_floor_percent
     if floor is None:
         return
+    if verdict.central_selection is not None:
+        journal.append(
+            record=central_selection_record(
+                work_item_id=work_item_id,
+                selection=verdict.central_selection,
+                verdict=verdict,
+                slot_identity=central_slot_identity(selection=verdict.central_selection),
+            )
+        )
     if verdict.headroom_assessments:
         journal.append(
             record=session_headroom_assessment_record(

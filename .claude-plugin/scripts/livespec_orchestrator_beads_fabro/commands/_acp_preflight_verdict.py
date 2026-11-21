@@ -78,6 +78,9 @@ from livespec_orchestrator_beads_fabro.commands._acp_success_critical import (
     derive_success_critical,
 )
 from livespec_orchestrator_beads_fabro.commands._acp_workflow_graph import parse_workflow_graph
+from livespec_orchestrator_beads_fabro.commands._dispatcher_central_factory_selection import (
+    CentralFactorySelection,
+)
 
 __all__: list[str] = [
     "CLAUDE_CREDENTIAL_REFUSAL_STAGE",
@@ -128,6 +131,8 @@ class AcpPreflightVerdict:
     # emptying an admission-required node. A hand-picked dispatch reports it as
     # a precondition error, and the no-fallback path never fails open on it.
     credential_refused: bool = False
+    # The central factory selection record this evaluation read, for the journal.
+    central_selection: CentralFactorySelection | None = None
 
     @property
     def viable(self) -> bool:
@@ -354,6 +359,7 @@ def _graded(
         session_headroom_horizon_minutes=(
             None if inputs.headroom is None else inputs.headroom.horizon_minutes
         ),
+        central_selection=None if inputs.headroom is None else inputs.headroom.central_selection,
     )
 
 

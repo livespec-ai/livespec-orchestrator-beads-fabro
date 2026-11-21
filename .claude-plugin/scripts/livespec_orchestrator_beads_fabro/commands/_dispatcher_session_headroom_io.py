@@ -75,6 +75,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass, replace
 from email.message import Message
 from urllib.error import HTTPError, URLError
@@ -88,6 +89,9 @@ from livespec_orchestrator_beads_fabro.commands._acp_session_headroom import (
     session_headroom_reading,
     seven_day_reading,
     unobservable_session_headroom,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_central_factory_selection import (
+    CentralFactorySelection,
 )
 
 __all__: list[str] = [
@@ -185,6 +189,13 @@ def projected_credential_identity(*, token: str | None) -> str:
         return ABSENT_CREDENTIAL_IDENTITY
     material = f"{_FINGERPRINT_DOMAIN}:{token}".encode()
     return hashlib.sha256(material).hexdigest()[:_FINGERPRINT_HEX_LENGTH]
+
+
+def central_slot_identity(*, selection: CentralFactorySelection) -> str | None:
+    """The centrally named slot's opaque non-secret identity, or `None` when none was named."""
+    if selection.slot is None:
+        return None
+    return projected_credential_identity(token=os.environ.get(selection.slot))
 
 
 def read_projected_session_headroom(

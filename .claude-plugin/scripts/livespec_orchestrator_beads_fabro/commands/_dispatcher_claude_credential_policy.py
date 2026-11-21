@@ -29,7 +29,7 @@ caller refuses on it before any claim.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Final, cast
 
@@ -43,10 +43,13 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_policy_settings impo
 
 __all__: list[str] = [
     "ADMITTED_SLOT_ABSENT",
+    "CENTRAL_FACTORY_SELECTION",
     "CLAUDE_CREDENTIAL_POLICY_ABSENT",
     "CLAUDE_CREDENTIAL_POLICY_INVALID",
     "CLAUDE_CREDENTIAL_POLICY_KEY",
+    "DEFAULT_CENTRAL_SELECTION_MAX_AGE_MINUTES",
     "LEGACY_INDEPENDENT",
+    "LOCAL_RANKING",
     "NO_DECLARED_SLOT_INJECTED",
     "NUMBERED_SLOTS",
     "ClaudeCredentialPolicy",
@@ -59,6 +62,12 @@ __all__: list[str] = [
 CLAUDE_CREDENTIAL_POLICY_KEY: Final = "claude_credential_policy"
 NUMBERED_SLOTS: Final = "numbered-slots"
 LEGACY_INDEPENDENT: Final = "legacy-independent"
+# `selection` values (`SPECIFICATION/contracts.md` "The dispatcher declares its Claude
+# credential policy"): an absent `selection` is `local-ranking`.
+LOCAL_RANKING: Final = "local-ranking"
+CENTRAL_FACTORY_SELECTION: Final = "central-factory-selection"
+DEFAULT_CENTRAL_SELECTION_MAX_AGE_MINUTES: Final = 60
+_MAX_AGE_MINUTES_BOUNDS: Final = (1, 1440)
 _SLOT_NAME: Final = re.compile(r"^CLAUDE_CODE_OAUTH_TOKEN__[A-Z0-9_]+$")
 # The stable refusal causes. Stable because a did-not-run judgement record is
 # capped per distinct cause, and each names what an operator must fix.
@@ -78,6 +87,8 @@ class ClaudeCredentialPolicy:
 
     mode: str
     slots: tuple[str, ...]
+    selection: str = LOCAL_RANKING
+    central_selection_max_age_minutes: int = DEFAULT_CENTRAL_SELECTION_MAX_AGE_MINUTES
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -90,6 +101,14 @@ class ClaudeCredentialRefusal:
 
     cause: str
     detail: str
+    # What a covered candidate's skip names when the bare `cause` would hide the
+    # operative fact (the central factory selection record's own reason).
+    condition: str | None = None
+
+    @property
+    def skip_condition(self) -> str:
+        """The condition a skipped covered candidate carries."""
+        return self.cause if self.condition is None else self.condition
 
     @property
     def configuration(self) -> bool:
@@ -119,13 +138,62 @@ def parse_claude_credential_policy(
     if mode == LEGACY_INDEPENDENT:
         if "slots" in policy:
             return Failure(_unreadable(detail="slots must be absent under legacy-independent"))
-        return Success(ClaudeCredentialPolicy(mode=LEGACY_INDEPENDENT, slots=()))
-    if mode != NUMBERED_SLOTS:
+    elif mode != NUMBERED_SLOTS:
         return Failure(_unreadable(detail=f"mode must be {NUMBERED_SLOTS} or {LEGACY_INDEPENDENT}"))
-    return _numbered_slots(value=policy.get("slots"))
+    base = _with_selection(mode=cast("str", mode), policy=policy)
+    if isinstance(base, Failure):
+        return base
+    return _with_slots(base=base.unwrap(), value=policy.get("slots"))
 
 
-def _numbered_slots(*, value: object) -> Result[ClaudeCredentialPolicy, PolicySettingUnreadable]:
+def _with_selection(
+    *, mode: str, policy: dict[str, object]
+) -> Result[ClaudeCredentialPolicy, PolicySettingUnreadable]:
+    """The `selection` and `central_selection_max_age_minutes` half of the policy."""
+    selection = policy.get("selection", LOCAL_RANKING)
+    if selection not in {LOCAL_RANKING, CENTRAL_FACTORY_SELECTION}:
+        return Failure(
+            _unreadable(detail=f"selection must be {LOCAL_RANKING} or {CENTRAL_FACTORY_SELECTION}")
+        )
+    if selection == CENTRAL_FACTORY_SELECTION and mode != NUMBERED_SLOTS:
+        return Failure(
+            _unreadable(
+                detail=f"selection {CENTRAL_FACTORY_SELECTION} requires mode {NUMBERED_SLOTS}"
+            )
+        )
+    age = policy.get("central_selection_max_age_minutes", DEFAULT_CENTRAL_SELECTION_MAX_AGE_MINUTES)
+    low, high = _MAX_AGE_MINUTES_BOUNDS
+    if isinstance(age, bool) or not isinstance(age, int) or not low <= age <= high:
+        return Failure(
+            _unreadable(
+                detail=(
+                    f"central_selection_max_age_minutes must be an integer from {low} "
+                    f"through {high}"
+                )
+            )
+        )
+    return Success(
+        ClaudeCredentialPolicy(
+            mode=mode,
+            slots=(),
+            selection=selection,
+            central_selection_max_age_minutes=age,
+        )
+    )
+
+
+def _with_slots(
+    *, base: ClaudeCredentialPolicy, value: object
+) -> Result[ClaudeCredentialPolicy, PolicySettingUnreadable]:
+    """`base` once its `slots` are read: none under legacy, a validated list under numbered."""
+    if base.mode == LEGACY_INDEPENDENT:
+        return Success(base)
+    return _numbered_slots(base=base, value=value)
+
+
+def _numbered_slots(
+    *, base: ClaudeCredentialPolicy, value: object
+) -> Result[ClaudeCredentialPolicy, PolicySettingUnreadable]:
     if not isinstance(value, list) or not value:
         return Failure(_unreadable(detail="slots must be a non-empty array under numbered-slots"))
     names = cast("list[object]", value)
@@ -136,7 +204,7 @@ def _numbered_slots(*, value: object) -> Result[ClaudeCredentialPolicy, PolicySe
     slots = tuple(cast("list[str]", names))
     if len(set(slots)) != len(slots):
         return Failure(_unreadable(detail="slots must be distinct"))
-    return Success(ClaudeCredentialPolicy(mode=NUMBERED_SLOTS, slots=slots))
+    return Success(replace(base, slots=slots))
 
 
 def resolve_claude_credential_policy(
