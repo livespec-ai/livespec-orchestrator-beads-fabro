@@ -144,8 +144,12 @@ def policy_pool_slots(
     repo: Path,
     environ: Mapping[str, str],
     central: CentralFactorySelection | None = None,
+    now: datetime | None = None,
 ) -> tuple[str, ...]:
-    """The pool `repo`'s declared policy allows; none under an absent or invalid one."""
+    """The pool `repo`'s declared policy allows; none under an absent or invalid one.
+
+    `now` controls freshness when this call must read an implicit central selection.
+    """
     resolved = claude_credential_policy_for(repo=repo)
     if isinstance(resolved, ClaudeCredentialRefusal):
         return ()
@@ -154,17 +158,20 @@ def policy_pool_slots(
         policy=resolved,
         central=central
         or central_selection_for(
-            policy=resolved, environ=environ, home=Path.home(), now=datetime.now(timezone.utc)
+            policy=resolved,
+            environ=environ,
+            home=Path.home(),
+            now=now or datetime.now(timezone.utc),
         ),
     )
 
 
 def repo_credential_refusal(
-    *, repo: Path, environ: Mapping[str, str]
+    *, repo: Path, environ: Mapping[str, str], now: datetime | None = None
 ) -> ClaudeCredentialRefusal | None:
-    """`admission_credential_refusal` under `repo`'s committed policy."""
+    """`admission_credential_refusal` under `repo`'s committed policy at `now`."""
     return admission_central_and_refusal(
-        repo=repo, environ=environ, now=datetime.now(timezone.utc)
+        repo=repo, environ=environ, now=now or datetime.now(timezone.utc)
     )[1]
 
 
