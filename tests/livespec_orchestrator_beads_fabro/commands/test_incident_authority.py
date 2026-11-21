@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from livespec_orchestrator_beads_fabro._incident_authority_payload import attempt_record
 from livespec_orchestrator_beads_fabro.commands import incident_authority as command
 from livespec_orchestrator_beads_fabro.incident_authority import (
     AuthorityRefusal,
@@ -115,6 +116,79 @@ def test_refusal_has_named_code_nonzero_exit_and_no_normal_fallback(
 def test_read_commands_reject_transition_payloads(action: str, tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match="2"):
         command.main(argv=[*_argv(action=action, root=tmp_path), "--successor-json", "{}"])
+
+
+def test_read_history_by_item_returns_every_retained_generation(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    first = IncidentAttempt(
+        repository="owner/repo",
+        item_id="item-1",
+        attempt_id="attempt-1",
+        phase="repair",
+        operation_id="operation-1",
+        generation=1,
+        owner="operator:alice",
+        base="a" * 40,
+        head="b" * 40,
+        pr_number=7,
+        landed_commits=("b" * 40,),
+        landed_trees=("c" * 40,),
+        original_paths=("app.py",),
+        deferred_work=("normal-factory-proof",),
+        repayment_required=True,
+    )
+    second = IncidentAttempt(
+        **(
+            asdict(first)
+            | dict(phase="master-observation", operation_id="operation-2", generation=2)
+        )
+    )
+    closed = IncidentAttempt(
+        **(
+            asdict(second)
+            | dict(
+                attempt_id="attempt-2",
+                phase="closed",
+                operation_id="operation-3",
+                generation=3,
+            )
+        )
+    )
+    captured: dict[str, Any] = {}
+
+    def read_history(**kwargs: Any) -> tuple[IncidentAttempt, ...]:
+        captured.update(kwargs)
+        return first, second, closed
+
+    monkeypatch.setattr(command, "store_config", lambda **_kwargs: None)
+    monkeypatch.setattr(command, "make_beads_client", lambda **_kwargs: "client")
+    monkeypatch.setattr(command, "read_incident_history", read_history, raising=False)
+    try:
+        exit_status = command.main(
+            argv=[
+                "read-history",
+                "--repo",
+                str(tmp_path),
+                "--repository",
+                "owner/repo",
+                "--item",
+                "item-1",
+            ]
+        )
+    except SystemExit as error:
+        exit_status = error.code
+
+    assert exit_status == 0
+    expected = [attempt_record(attempt=attempt) for attempt in (first, second, closed)]
+    expected[-1]["outstanding"] = []
+    response = json.loads(capsys.readouterr().out)
+    assert response["result"] == {
+        "repository": "owner/repo",
+        "item_id": "item-1",
+        "generations": expected,
+    }
+    assert captured == dict(client="client", repository="owner/repo", item_id="item-1")
 
 
 @pytest.mark.parametrize("encoding", ["indented", "duplicate-key"])
