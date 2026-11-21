@@ -219,33 +219,6 @@ def state_path(directory, run_id):
     return directory / (run_id + ".json")
 
 
-def waited_running_path(directory, stage):
-    return directory / "waited-running" / (stage + ".json")
-
-
-def waited_running_runs(directory, stage):
-    path = waited_running_path(directory, stage)
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    return value if isinstance(value, list) and all(isinstance(item, str) for item in value) else []
-
-
-def remember_running_wait(directory, stage, run_id):
-    runs = waited_running_runs(directory, stage)
-    if run_id not in runs:
-        runs.append(run_id)
-    path = waited_running_path(directory, stage)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(runs) + "\n", encoding="utf-8")
-
-
-def reset_running_waits(directory, stage):
-    if stage in STAGE_SETTLES:
-        waited_running_path(directory, stage).unlink(missing_ok=True)
-
-
 def open_wait_path(directory, run_id):
     return directory / "open-waits" / (run_id + ".json")
 
@@ -691,17 +664,6 @@ def retry_overtaken(run_id, timeout_seconds, program):
 def wait(run_id, timeout_seconds):
     directory = runs_directory()
     path = state_path(directory, run_id)
-    stage = os.environ.get("LIVESPEC_AGENT_STAGE")
-    settle_node = STAGE_SETTLES.get(stage)
-    if settle_node is not None and run_id in waited_running_runs(directory, stage):
-        record = read_record(path)
-        if record is None:
-            raise RunnerRefusal("no commit run " + run_id + " is recorded in this repository")
-        state = current_state(path, record)
-        raise RunnerRefusal(
-            "commit run " + run_id + " already reported running during " + stage
-            + " stage visit; current state is " + state + "; " + settle_node + " will wait on it"
-        )
     record = read_record(path)
     if record is None:
         raise RunnerRefusal("no commit run " + run_id + " is recorded in this repository")
@@ -719,8 +681,6 @@ def wait(run_id, timeout_seconds):
                 raise RunnerRefusal("no commit run " + run_id + " is recorded in this repository")
             if current_state(path, record) != RUNNING or time.monotonic() >= deadline:
                 payload, state = report_payload(run_id, path, record)
-                if settle_node is not None and state == RUNNING:
-                    remember_running_wait(directory, stage, run_id)
                 print(json.dumps(payload, sort_keys=True))
                 return 0
             time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
@@ -1209,7 +1169,7 @@ def record_stopped_run(path, record):
     return stopped, NO_VERDICT
 
 
-def settle_runs(timeout_seconds, brief_file, restore_head_before_wait, stage):
+def settle_runs(timeout_seconds, brief_file, restore_head_before_wait):
     """Wait live runs and brief the latest terminal hook refusal exactly once.
 
     Returns the settled state of the turn's commit run and the path of its record, or
@@ -1232,13 +1192,12 @@ def settle_runs(timeout_seconds, brief_file, restore_head_before_wait, stage):
     if not live:
         if not records:
             brief.unlink(missing_ok=True)
-            reset_running_waits(directory, stage)
             return None, None
         path, record = max(records, key=lambda item: item[0].stat().st_mtime_ns)
         state = recorded_state(record)
         if state == OVERTAKEN_BY_CHECKPOINT:
             retry_overtaken(path.stem, timeout_seconds, os.path.abspath(sys.argv[0]))
-            return settle_runs(timeout_seconds, brief_file, restore_head_before_wait, stage)
+            return settle_runs(timeout_seconds, brief_file, restore_head_before_wait)
         recordable_failure = (
             state == "failed"
             and (record.get("hook_ran") is True or record.get("no_authored_subject"))
@@ -1246,7 +1205,6 @@ def settle_runs(timeout_seconds, brief_file, restore_head_before_wait, stage):
         already_settled = record.get("settled") is True
         if not (recordable_failure or state == OVERTAKEN_BY_CHECKPOINT) or already_settled:
             brief.unlink(missing_ok=True)
-            reset_running_waits(directory, stage)
             return state, path
         write_record(path, {**record, "settled": True})
         brief.parent.mkdir(parents=True, exist_ok=True)
@@ -1255,7 +1213,6 @@ def settle_runs(timeout_seconds, brief_file, restore_head_before_wait, stage):
             encoding="utf-8",
         )
         print(json.dumps({"settled": [{"run_id": path.stem, "state": state}]}, sort_keys=True))
-        reset_running_waits(directory, stage)
         return state, path
     if restore_head_before_wait:
         for path in live:
@@ -1282,7 +1239,7 @@ def settle_runs(timeout_seconds, brief_file, restore_head_before_wait, stage):
         retry_overtaken(
             path.stem, max(0.0, deadline - time.monotonic()), os.path.abspath(sys.argv[0])
         )
-        return settle_runs(timeout_seconds, brief_file, restore_head_before_wait, stage)
+        return settle_runs(timeout_seconds, brief_file, restore_head_before_wait)
     if state == "failed" and (record.get("hook_ran") is True or record.get("no_authored_subject")):
         write_record(path, {**record, "settled": True})
     brief.parent.mkdir(parents=True, exist_ok=True)
@@ -1292,7 +1249,6 @@ def settle_runs(timeout_seconds, brief_file, restore_head_before_wait, stage):
     )
     settled_runs = [{"run_id": one.stem, "state": status} for one, _, status in outcomes]
     print(json.dumps({"settled": settled_runs}, sort_keys=True))
-    reset_running_waits(directory, stage)
     return state, path
 
 
@@ -1448,7 +1404,7 @@ def settle(timeout_seconds, brief_file, restore_head_before_wait=False, stage=No
     The one exception is a rebase that stopped on a later conflicting pick: the brief then
     reads `failed`, so the fix node re-enters on it with the rebase still open at that pick.
     """
-    state, path = settle_runs(timeout_seconds, brief_file, restore_head_before_wait, stage)
+    state, path = settle_runs(timeout_seconds, brief_file, restore_head_before_wait)
     lines, stopped = end_operation(state, stage, path)
     for line in lines:
         print(line, file=sys.stderr)
