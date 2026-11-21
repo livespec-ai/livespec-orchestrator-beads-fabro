@@ -78,6 +78,33 @@ def test_a_coverage_refusal_ending_in_the_timing_table_names_its_uncovered_files
     )
 
 
+def test_an_affected_tests_refusal_without_a_target_list_names_its_recipe_test_and_coverage(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The pre-commit affected-tests gate has no aggregate target list of its own."""
+    output = (
+        "│ lefthook v1.13.6  hook: pre-commit │\n"
+        "FAILED tests/test_phase1_mechanical_coverage.py::"
+        "test_phase1_mechanical_checks_have_no_newly_covered_warnings\n"
+        "effects/_incident_authority_transition.py  300  18  90%  "
+        "237, 273, 276, 286, 289, 291\n"
+        "Coverage failure: total of 97 is less than fail-under=100\n"
+        "error: Recipe `check-changed` failed\n"
+        ":: affected-tests gate refused the commit\n"
+    )
+
+    section = _refusal_section(capsys=capsys, tmp_path=tmp_path, output=output)
+
+    assert section == (
+        "failed targets: check-changed\n"
+        "failing files (2):\n"
+        "- tests/test_phase1_mechanical_coverage.py::"
+        "test_phase1_mechanical_checks_have_no_newly_covered_warnings: failed\n"
+        "- effects/_incident_authority_transition.py: uncovered lines "
+        "237, 273, 276, 286, 289, 291 (90% covered)\n"
+    )
+
+
 def test_the_section_lists_the_first_forty_files_and_counts_the_rest(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
