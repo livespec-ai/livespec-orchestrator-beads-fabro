@@ -393,12 +393,19 @@ def test_both_release_classes_route_identically_on_identical_measurements(
         },
         {
             "work_item_id": _ITEM_ID,
+            "status": "blocked",
+            "stage": "fabro-run",
+            "needs_human_kind": None,
+            "needs_human_stages": ["pr_refresh@1"],
+        },
+        {
+            "work_item_id": _ITEM_ID,
             "status": "failed",
             "stage": "fabro-run",
             "detail": NON_CONVERGED_MARKER,
         },
     ],
-    ids=("needs_human", "non_converged"),
+    ids=("needs_human", "pr_refresh_needs_human", "non_converged"),
 )
 def test_a_returned_terminal_routes_like_an_explicit_recovery_release(
     world: _World,
