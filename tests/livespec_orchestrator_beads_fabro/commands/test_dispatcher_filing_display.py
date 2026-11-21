@@ -31,6 +31,7 @@ from __future__ import annotations
 import importlib
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 from livespec_orchestrator_beads_fabro.commands._dod_governing_heading import (
@@ -39,7 +40,7 @@ from livespec_orchestrator_beads_fabro.commands._dod_governing_heading import (
 from livespec_orchestrator_beads_fabro.commands._dod_governing_heading_judge import (
     GoverningHeadingReader,
 )
-from livespec_orchestrator_beads_fabro.types import WorkItem
+from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 
 _MODULE = "livespec_orchestrator_beads_fabro.commands._dispatcher_filing_display"
 _MODULE_PATH = Path(
@@ -256,6 +257,118 @@ def test_an_unreadable_dispatcher_config_is_displayed_rather_than_raised(tmp_pat
 
     capability_line = next(line for line in lines if line.startswith("sandbox-capabilities:"))
     assert "unreadable" in capability_line
+
+
+def test_a_held_recorded_tier_names_the_session_disposition_hold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A filer sees the hold that would refuse a later child disposition."""
+    module = importlib.import_module(_MODULE)
+    receipt = (
+        "livespec-spec-change-tier\n\n"
+        "work-item: bd-ib-disp\n"
+        "stage: filing\n"
+        "tier: spec-change\n"
+        "classification: feature\n"
+        "verdict-kind: partial\n"
+        "generalization-target: (none)\n"
+        "linked-proposal-topic: awaiting-ratification\n"
+        "spec-version: 1\n"
+        "behaviour-digest: display-tier\n"
+        "rationale: the specification needs an amendment\n"
+        "spec-change-tier-clause-provenance: complete"
+    )
+    config = cast(StoreConfig, object())
+
+    def _store_config(*, repo: Path) -> StoreConfig:
+        del repo
+        return config
+
+    def _comments(*, path: StoreConfig, work_item_id: str) -> tuple[str, ...]:
+        del path, work_item_id
+        return (receipt,)
+
+    monkeypatch.setattr(module, "store_config", _store_config)
+    monkeypatch.setattr(module, "item_comment_bodies", _comments)
+
+    lines = _display(item=_item(), cwd=_repo(tmp_path=tmp_path))
+
+    classification_line = " ".join(
+        (
+            "recorded tier classification: spec-change (feature); linked proposal topic:",
+            "awaiting-ratification",
+        )
+    )
+    hold_line = " ".join(
+        (
+            "recorded spec-change-tier hold: held (unratified-topic); this item cannot be closed",
+            "or disposed by a session until the hold is released",
+        )
+    )
+    assert classification_line in lines
+    assert hold_line in lines
+
+
+def test_a_filing_with_no_recorded_tier_has_no_tier_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Absence of a tier line continues to mean no classification was recorded."""
+    module = importlib.import_module(_MODULE)
+    config = cast(StoreConfig, object())
+
+    def _store_config(*, repo: Path) -> StoreConfig:
+        del repo
+        return config
+
+    def _comments(*, path: StoreConfig, work_item_id: str) -> tuple[str, ...]:
+        del path, work_item_id
+        return ()
+
+    monkeypatch.setattr(module, "store_config", _store_config)
+    monkeypatch.setattr(module, "item_comment_bodies", _comments)
+
+    lines = _display(item=_item(), cwd=_repo(tmp_path=tmp_path))
+
+    assert not any(line.startswith("recorded tier classification:") for line in lines)
+
+
+def test_a_recorded_non_spec_change_tier_has_no_hold_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A recorded classification that does not hold remains visible but disposable."""
+    module = importlib.import_module(_MODULE)
+    receipt = (
+        "livespec-spec-change-tier\n\n"
+        "work-item: bd-ib-disp\n"
+        "stage: filing\n"
+        "tier: none\n"
+        "classification: implementation\n"
+        "verdict-kind: stated\n"
+        "generalization-target: (none)\n"
+        "linked-proposal-topic: (none)\n"
+        "spec-version: 1\n"
+        "behaviour-digest: display-tier\n"
+        "rationale: the specification already states the work\n"
+        "spec-change-tier-clause-provenance: complete"
+    )
+    config = cast(StoreConfig, object())
+
+    def _store_config(*, repo: Path) -> StoreConfig:
+        del repo
+        return config
+
+    def _comments(*, path: StoreConfig, work_item_id: str) -> tuple[str, ...]:
+        del path, work_item_id
+        return (receipt,)
+
+    monkeypatch.setattr(module, "store_config", _store_config)
+    monkeypatch.setattr(module, "item_comment_bodies", _comments)
+
+    lines = _display(item=_item(), cwd=_repo(tmp_path=tmp_path))
+
+    expected = "recorded tier classification: none (implementation); linked proposal topic: (none)"
+    assert expected in lines
+    assert not any(line.startswith("recorded spec-change-tier hold:") for line in lines)
 
 
 def test_a_declined_section_shows_the_missing_marker_and_no_assertions(tmp_path: Path) -> None:
