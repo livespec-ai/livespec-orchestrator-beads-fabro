@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.345.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.345.0...v0.345.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* report every short coverage file's figures ([880091c](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/880091c92c36af4726349c018c7e1c6b3c6d83c5))
+* retain coverage figures independently of total ([9e09563](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/9e095632b4eaf4f7719aab99ee12028742c82fe2))
+* retain figures for every short coverage file ([a52ecac](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/a52ecacb2f9c63d2cbef43dfbeb2aef7de7735e0))
+* **workflow:** state the run-owned-tip lease republish contract and drop dead repair_pending ([13e7299](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/13e729951d1fe87f9c41bb6f17c6e9a45e4d8bb1))
+
 ## [0.345.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.344.2...v0.345.0) (2026-11-21)
 
 
