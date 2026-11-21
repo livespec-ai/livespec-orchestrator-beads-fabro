@@ -164,6 +164,12 @@ FOLDED_CHECKPOINTS_SENTINEL = "LIVESPEC_COMMIT_RUNNER_FOLDED_CHECKPOINTS"
 # reports in the FULL output, never from its final lines.
 FAILING_FILE_CAP = 40
 COVERAGE_TARGETS = frozenset({"check-per-file-coverage", "check-check-coverage-incremental"})
+# `check-changed` is the pre-commit affected-tests gate.  Unlike the aggregate,
+# it prints neither target sections nor a Failed targets list, but it does mark
+# its own refusal and emits pytest's failed nodes plus coverage rows.
+AFFECTED_TESTS_TARGET = "check-changed"
+AFFECTED_TESTS_REFUSAL = re.compile(r"^:: affected-tests gate refused the commit$", re.MULTILINE)
+PYTEST_FAILED_NODE = re.compile(r"^FAILED (?P<node>\S+)\s*$", re.MULTILINE)
 LLOC_TARGETS = frozenset({"check-file-lloc"})
 SOFT_BAND_TARGETS = frozenset({"check-no-lloc-soft-warnings"})
 # A coverage table row: name, statements, misses, optional branch columns, cover, missing.
@@ -682,12 +688,14 @@ def failed_targets(text):
 
 
 def targets_for_refusal(text):
-    """The aggregate list, or the later hook command that refused the commit."""
+    """The aggregate list, a later hook command, or the affected-tests gate."""
     targets = failed_targets(text)
     if targets:
         return targets
     target = hook_refusal_target(text)
-    return [target] if target is not None else []
+    if target is not None:
+        return [target]
+    return [AFFECTED_TESTS_TARGET] if AFFECTED_TESTS_REFUSAL.search(text) else []
 
 
 def structured_event(line):
@@ -703,13 +711,19 @@ def structured_event(line):
     return value if isinstance(value, dict) else None
 
 
-def coverage_row_file(line):
+def coverage_row_file(line, *, include_percent=False):
     """A coverage table row below 100% as (file, detail), or None."""
     row = COVERAGE_ROW.match(line)
     if row is None or row.group("name") == "TOTAL" or float(row.group("cover")) >= 100.0:
         return None
     missing = row.group("missing")
-    detail = "uncovered lines " + missing if missing else row.group("cover") + "% covered"
+    detail = (
+        "uncovered lines " + missing + " (" + row.group("cover") + "% covered)"
+        if missing and include_percent
+        else "uncovered lines " + missing
+        if missing
+        else row.group("cover") + "% covered"
+    )
     return row.group("name"), detail
 
 
@@ -809,12 +823,16 @@ def failing_files(text, targets):
     per-file coverage check's count for the same file. A failed lint or type target
     names the file and line of each finding in its own section.
     """
-    coverage = bool(COVERAGE_TARGETS.intersection(targets))
+    affected_tests = AFFECTED_TESTS_TARGET in targets
+    coverage = affected_tests or bool(COVERAGE_TARGETS.intersection(targets))
     lloc = bool(LLOC_TARGETS.intersection(targets))
     soft_band = bool(SOFT_BAND_TARGETS.intersection(targets))
     found = lint_type_files(text, targets)
+    if affected_tests:
+        for failed_test in PYTEST_FAILED_NODE.finditer(text):
+            found.setdefault(failed_test.group("node"), "failed")
     for line in text.splitlines():
-        row = coverage_row_file(line) if coverage else None
+        row = coverage_row_file(line, include_percent=affected_tests) if coverage else None
         if row is None:
             event = structured_event(line)
             row = None if event is None else event_file(event, coverage, lloc, soft_band)
