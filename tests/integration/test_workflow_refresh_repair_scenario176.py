@@ -1804,22 +1804,15 @@ def test_a_repaired_visit_pushes_a_plain_fast_forward_when_it_owes_no_rewrite(
     assert ancestor.world.remote_head(ref=_BRANCH) == ancestor.repaired_head
 
 
-def test_a_visit_following_no_repair_round_never_rewrites_the_publish_branch(
+def test_a_visit_following_no_repair_round_republishes_its_own_recorded_head(
     tmp_path: Path,
 ) -> None:
-    """Scenario 144's narrowed sub-scenario, as the republication world minus the brief.
+    """A review-fix visit republishes its own recorded head without a repair brief.
 
-    A `publish_draft` visit reached through a review-fix round, or through any
-    other path, follows no refresh-repair round -- and it reaches the stage in
-    exactly this state, because the brief is the only artifact that marks a
-    repaired visit and no other route writes one. So the world here is the green
-    republication world with the brief REMOVED and nothing else changed, which
-    is what makes the refusal evidence about the brief rather than about
-    anything else the fixture happens to carry.
-
-    The exact-head helper is PRESENT, deliberately: the refusal has to come from
-    the absent brief and not from an unavailable lease, and a world without the
-    helper could not tell those apart.
+    A fix turn can rebuild the run's published commit without entering a
+    refresh-repair round.  The remote tip is still this run's established
+    published head, so the same explicit lease must republish the rebuilt head;
+    the absent brief must not turn that safe positive provenance into a refusal.
     """
     repaired = _repaired_run(root=tmp_path, push_program=True)
     world = repaired.world
@@ -1827,10 +1820,9 @@ def test_a_visit_following_no_repair_round_never_rewrites_the_publish_branch(
 
     result = _run_repaired_publish_draft(repaired=repaired)
 
-    assert result.returncode != 0, result.stdout
-    assert "LIVESPEC_PUBLISH_DRAFT_PUSH_FAILED" in result.stderr
-    assert "LIVESPEC_PUBLISH_DRAFT_REPAIR_REPUBLISH" not in result.stderr
-    assert world.remote_head(ref=_BRANCH) == repaired.published_head
+    assert result.returncode == 0, result.stderr
+    assert "LIVESPEC_PUBLISH_DRAFT_REPAIR_REPUBLISH" in result.stderr
+    assert world.remote_head(ref=_BRANCH) == repaired.repaired_head
     assert world.head() == repaired.repaired_head
 
 
@@ -1908,16 +1900,16 @@ def _janitor_stage_repaired_run(*, root: Path) -> _Repaired:
     return repaired
 
 
-def test_a_janitor_stage_repair_round_republishes_over_this_run_s_own_published_head(
+def test_a_janitor_stage_repair_round_republishes_each_rebuilt_own_head(
     tmp_path: Path,
 ) -> None:
     """The measured loss on bd-ib-ohlkz7: the janitor eats its own brief, publish_draft still knows.
 
     The janitor visit that follows the fix turn removes the janitor-stage brief
     on entry, so `publish_draft` cannot learn from the brief that it follows a
-    refresh-repair round. The marker the janitor leaves instead is CONSUMED by
-    the republishing visit: a second visit in the same run, reaching origin's
-    own recorded head again with a rewritten branch, must refuse.
+    refresh-repair round. The marker the janitor leaves is irrelevant to safe
+    provenance: a second visit in the same run reaches origin's currently
+    recorded own head again and republishes its rewritten head under a lease.
     """
     repaired = _janitor_stage_repaired_run(root=tmp_path)
     world = repaired.world
@@ -1941,13 +1933,13 @@ def test_a_janitor_stage_repair_round_republishes_over_this_run_s_own_published_
 
     again = _run_repaired_publish_draft(repaired=repaired)
 
-    assert again.returncode != 0, again.stdout
-    assert "LIVESPEC_PUBLISH_DRAFT_PUSH_FAILED" in again.stderr
-    assert "LIVESPEC_PUBLISH_DRAFT_REPAIR_REPUBLISH" not in again.stderr
-    assert world.remote_head(ref=_BRANCH) == repaired.repaired_head
+    assert again.returncode == 0, again.stderr
+    assert "LIVESPEC_PUBLISH_DRAFT_REPAIR_REPUBLISH" in again.stderr
+    assert world.remote_head(ref=_BRANCH) == rewritten
+    assert world.state(name=PUBLISH_HEAD_STATE_FILENAME) == f"{rewritten}\n"
 
 
-def test_a_review_fix_visit_after_an_earlier_janitor_repair_round_refuses_a_divergent_tip(
+def test_a_review_fix_visit_after_an_earlier_janitor_repair_round_republishes_its_own_tip(
     tmp_path: Path,
 ) -> None:
     """The cumulative repair count must not mark a later review-fix visit as a repair visit.
@@ -1956,7 +1948,7 @@ def test_a_review_fix_visit_after_an_earlier_janitor_repair_round_refuses_a_dive
     repair count is above zero and a janitor visit has already removed that
     round's brief. A later janitor visit, reached through a review-fix round,
     enters with no brief at all, and the publish_draft visit that follows it
-    follows no refresh-repair round.
+    still owns origin's recorded tip, so it may republish the rebuilt head.
     """
     repaired = _janitor_stage_repaired_run(root=tmp_path)
     world = repaired.world
@@ -1969,8 +1961,7 @@ def test_a_review_fix_visit_after_an_earlier_janitor_repair_round_refuses_a_dive
 
     result = _run_repaired_publish_draft(repaired=repaired)
 
-    assert result.returncode != 0, result.stdout
-    assert "LIVESPEC_PUBLISH_DRAFT_PUSH_FAILED" in result.stderr
-    assert "LIVESPEC_PUBLISH_DRAFT_REPAIR_REPUBLISH" not in result.stderr
-    assert world.remote_head(ref=_BRANCH) == repaired.published_head
+    assert result.returncode == 0, result.stderr
+    assert "LIVESPEC_PUBLISH_DRAFT_REPAIR_REPUBLISH" in result.stderr
+    assert world.remote_head(ref=_BRANCH) == repaired.repaired_head
     assert world.head() == repaired.repaired_head
