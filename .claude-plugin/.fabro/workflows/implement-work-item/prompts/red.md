@@ -40,6 +40,16 @@ Before Step 1, inspect
    The graph sends this directly to Green and never enters `commit_red`.
    Green and `commit_green` retain the complete seed without inventing a
    second Red commit.
+   If you instead determine that the seeded tree already satisfies the item's
+   Definition of Done and there is no Red test to name, append an
+   `## already-satisfied` section with the evidence, do not publish or open a
+   pull request, and end the turn with exactly:
+
+       {"preferred_next_label": "already-satisfied"}
+
+   The graph classifies that declaration before any command commit. A carried
+   seed is then routed through its Red/Green proof path; an unchanged dispatch
+   base ends as already satisfied.
 2. Decide whether the Definition of Done already holds on the dispatch base.
    If it does, do not write or run a test. Append a `## already-satisfied`
    section to the handoff file with a declared `already-satisfied` outcome and
@@ -56,12 +66,10 @@ Before Step 1, inspect
    after such a refusal, so take the failing-test path below and never declare
    `already-satisfied` again.
    When a preserved seed carries changes that meet the Definition of Done but
-   the dispatch base does not, this is not already satisfied: continue with
-   the failing-test path so the carried changes reach Green and publication.
-   Write the test the same way and prove its failure on the dispatch base, as
-   Step 3 says. `commit_red` makes the Red commit on the dispatch base with the
-   carried changes set aside, then restores them, so `green` and `commit_green`
-   take them to publication. Never declare `already-satisfied` for such a seed.
+   the dispatch base does not, declare `already-satisfied` as Step 1 directs.
+   The classifier records that the tree is carried before the run can publish
+   it. If that record has already refused the declaration, take the failing-test
+   path on the re-entry and prove the assertion against the dispatch base.
 3. Otherwise, continue with the failing-test path. Write one failing test for one Definition of Done assertion.
    The test must fail on a genuine assertion rather than during collection or
    import.
@@ -140,8 +148,9 @@ route.
 
 ## The labels this stage can route
 
-This stage may emit `preferred_next_label` only in the three directive forms
-shown above: `seeded-open-red`, `already-satisfied`, and `needs-human`. Every
+This stage may emit `preferred_next_label` only in the four directive forms
+shown above: `seeded-open-red`, `seeded-red-passes`, `already-satisfied`, and
+`needs-human`. Every
 ordinary Red ending carries no label at all. The human decision is the failed
 ending above; if you end instead with
 

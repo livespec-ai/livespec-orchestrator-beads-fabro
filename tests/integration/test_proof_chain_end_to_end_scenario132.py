@@ -945,6 +945,7 @@ def _assert_drove_the_committed_graph(*, run: _Run) -> None:
         # its command node commits it, then Green implements against the handoff.
         "red_admission",
         "red",
+        "red_seeded_fallthrough_route",
         "commit_red",
         "green_admission",
         "green",

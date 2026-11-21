@@ -246,7 +246,7 @@ def test_seeded_routes_and_prompts_direct_the_open_red_path() -> None:
     assert "Red test file: <path>" in red
     assert "seeded-open-red" in red
     assert "seeded-open-red" in green
-    assert "never declare `already-satisfied` for such a seed" in " ".join(red.lower().split())
+    assert "declare `already-satisfied` as Step 1 directs" in red
     assert "dispatch base" in red
 
 
