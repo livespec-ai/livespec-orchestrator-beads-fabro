@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,11 +47,24 @@ def _launch(*, directory: Path | None, stage: str = "proof_verify") -> WorkflowL
     )
 
 
+def test_the_launch_authority_is_bound_at_construction_and_never_taken_from_a_call() -> None:
+    """No request-time parameter or request field can carry the launch authority."""
+    assert "launch" not in inspect.signature(PublicationBroker.handle).parameters
+    assert "launch" in PublicationBroker.__dataclass_fields__
+    request_fields = set(BrokerRequest.__dataclass_fields__)
+    assert not request_fields & {"launch", "stage", "credential", "request_directory"}
+
+
 def test_the_broker_posts_a_new_comment_only_to_the_workflow_pull_request(tmp_path: Path) -> None:
     body = tmp_path / "record.md"
     body.write_text("proof", encoding="utf-8")
     runner = _Runner()
-    broker = PublicationBroker(runner=runner, credential=lambda: "broker-secret", cwd=tmp_path)
+    broker = PublicationBroker(
+        runner=runner,
+        credential=lambda: "broker-secret",
+        cwd=tmp_path,
+        launch=_launch(directory=tmp_path),
+    )
 
     result = broker.handle(
         request=BrokerRequest(
@@ -59,7 +73,6 @@ def test_the_broker_posts_a_new_comment_only_to_the_workflow_pull_request(tmp_pa
             pull_request_number=73,
             comment_body=body,
         ),
-        launch=_launch(directory=tmp_path),
     )
 
     assert result.refusal is None
@@ -80,7 +93,12 @@ def test_the_broker_uploads_only_to_the_workflow_proof_asset_store(tmp_path: Pat
     asset = tmp_path / "proof.txt"
     asset.write_text("proof", encoding="utf-8")
     runner = _Runner()
-    broker = PublicationBroker(runner=runner, credential=lambda: "broker-secret", cwd=tmp_path)
+    broker = PublicationBroker(
+        runner=runner,
+        credential=lambda: "broker-secret",
+        cwd=tmp_path,
+        launch=_launch(directory=tmp_path),
+    )
 
     result = broker.handle(
         request=BrokerRequest(
@@ -91,7 +109,6 @@ def test_the_broker_uploads_only_to_the_workflow_proof_asset_store(tmp_path: Pat
             proof_asset_name="run-proof.txt",
             proof_asset_store="proof-assets",
         ),
-        launch=_launch(directory=tmp_path),
     )
 
     assert result.refusal is None
@@ -231,14 +248,18 @@ def test_execution_fails_closed_without_a_workflow_owned_directory(tmp_path: Pat
         used_credential = True
         return "broker-secret"
 
-    result = PublicationBroker(runner=_Runner(), credential=credential, cwd=tmp_path).handle(
+    result = PublicationBroker(
+        runner=_Runner(),
+        credential=credential,
+        cwd=tmp_path,
+        launch=_launch(directory=None),
+    ).handle(
         request=BrokerRequest(
             operation="comment",
             claimed_stage="proof_verify",
             pull_request_number=73,
             comment_body=tmp_path / "record.md",
         ),
-        launch=_launch(directory=None),
     )
 
     assert result.command is None
@@ -251,13 +272,17 @@ def test_a_refusal_never_asks_the_broker_for_its_credential(tmp_path: Path) -> N
     def credential() -> str:
         raise AssertionError("a refused request must not read the credential")
 
-    result = PublicationBroker(runner=_Runner(), credential=credential, cwd=tmp_path).handle(
+    result = PublicationBroker(
+        runner=_Runner(),
+        credential=credential,
+        cwd=tmp_path,
+        launch=_launch(directory=tmp_path),
+    ).handle(
         request=BrokerRequest(
             operation="comment",
             claimed_stage="review",
             pull_request_number=73,
         ),
-        launch=_launch(directory=tmp_path),
     )
 
     assert result.command is None

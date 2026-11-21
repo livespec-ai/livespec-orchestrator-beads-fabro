@@ -2,11 +2,14 @@
 
 The broker is Dispatcher-materialized tooling, launched by the workflow beside an
 agent node rather than by that node.  Consequently an agent never receives the
-credential and cannot select the authority under which a request runs.  A client
-can describe content to publish, but its claimed stage, pull-request number and
-proof-asset store are checked against the ``WorkflowLaunch`` that the workflow
-gave the broker.  The service uses that launch record, not request values, when
-it finally constructs a forge command.
+credential and cannot select the authority under which a request runs.  The
+``WorkflowLaunch`` is bound to the broker when the broker is constructed, from
+workflow-owned state (see ``_dispatcher_publication_broker_serve``), and
+``handle`` takes no launch of its own: a caller that can reach ``handle`` can
+describe content to publish, but its claimed stage, pull-request number and
+proof-asset store are only checked against that bound record.  The service uses
+the launch record, not request values, when it finally constructs a forge
+command.
 
 This module intentionally does not wire an agent-facing client.  The following
 broker-routing item supplies that transport.  Keeping the policy here pure and
@@ -64,6 +67,9 @@ class BrokerRequest:
 @dataclass(frozen=True, kw_only=True)
 class WorkflowLaunch:
     """The immutable publication authority supplied by the workflow launcher.
+
+    The broker entry point loads it from a file only the workflow's own user can
+    write, once, before any request is read.  No request field maps onto it.
 
     ``request_directory`` is broker-owned staging, not the run checkout.  It
     prevents a request from using a path traversal to make the credential-owning
@@ -162,6 +168,7 @@ def _staged_path_refusal(*, path: Path, launch: WorkflowLaunch, kind: str) -> st
 class PublicationBroker:
     """Execute only an already-authorized request in the broker's own process.
 
+    ``launch`` is the workflow-owned authority bound for this broker's whole life.
     ``credential`` belongs to the service and is consulted only after policy
     validation.  It is passed directly to the one child forge command as an
     environment delta; it is never placed in an agent request, a working-tree
@@ -171,13 +178,14 @@ class PublicationBroker:
     runner: CommandRunner
     credential: Callable[[], str]
     cwd: Path
+    launch: WorkflowLaunch
 
-    def handle(self, *, request: BrokerRequest, launch: WorkflowLaunch) -> BrokerResult:
+    def handle(self, *, request: BrokerRequest) -> BrokerResult:
         """Validate and execute one narrow write, refusing before credential use."""
-        refusal = refusal_for(request=request, launch=launch)
+        refusal = refusal_for(request=request, launch=self.launch)
         if refusal is not None:
             return BrokerResult(refusal=refusal)
-        if launch.request_directory is None:
+        if self.launch.request_directory is None:
             return BrokerResult(
                 refusal=(
                     "publication broker refused request: workflow supplied no "
@@ -186,7 +194,7 @@ class PublicationBroker:
             )
         return BrokerResult(
             command=self.runner.run(
-                argv=_argv_for(request=request, launch=launch),
+                argv=_argv_for(request=request, launch=self.launch),
                 cwd=self.cwd,
                 timeout_seconds=_BROKER_TIMEOUT_SECONDS,
                 env={"GH_TOKEN": self.credential(), "GITHUB_TOKEN": None},
