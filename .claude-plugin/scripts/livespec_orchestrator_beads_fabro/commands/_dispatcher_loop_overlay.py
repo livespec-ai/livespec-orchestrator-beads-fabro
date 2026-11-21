@@ -78,6 +78,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_worktree_pac
     fleet_toolchain_is_the_sandbox_gate_premise,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_secret_channel import VaultSecretSink
+from livespec_orchestrator_beads_fabro.commands._repository_name import repository_name
 from livespec_orchestrator_beads_fabro.types import WorkItem
 
 __all__: list[str] = [
@@ -181,7 +182,7 @@ def materialize_dispatch_overlay(*, overlay: DispatchOverlay) -> str | None:
         # included, so the measurement travels through the journal and the
         # projection stays pure (bd-ib-pa73qh).
         proof_rendering=journaled_proof_rendering(
-            journal_path=overlay.journal.path, repository=overlay.repo.name
+            journal_path=overlay.journal.path, repository=repository_name(root=overlay.repo)
         ),
         # The adapter inputs this dispatch WRAPS, so the route check grades the
         # graph against what is actually guarded rather than against a convention.

@@ -85,6 +85,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_runs_spans
     emit_reconcile_pass_span,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_stamp import repo_run_attribution
+from livespec_orchestrator_beads_fabro.commands._repository_name import repository_name
 from livespec_orchestrator_beads_fabro.effects import AttemptFailure, attempt
 from livespec_orchestrator_beads_fabro.errors import (
     BeadsCommandError,
@@ -286,7 +287,7 @@ def _emit_pass_span(
     if summary.factories_surveyed == 0:
         emit_reconcile_pass_span(
             summary=summary,
-            tenant=repo.name,
+            tenant=repository_name(root=repo),
             cancelling_actor=journal.identity.invoker,
             spans_path=calibration_spans_path(args=args, repo=repo),
             now_ns=time.time_ns(),
