@@ -98,6 +98,7 @@ from livespec_orchestrator_beads_fabro.commands._needs_attention_work_items impo
     stranded_dispatch_items,
     watchable_fabro_run_item_ids,
 )
+from livespec_orchestrator_beads_fabro.commands._repository_name import repository_name
 from livespec_orchestrator_beads_fabro.commands._sibling_status_lookup import (
     make_sibling_status_lookup,
 )
@@ -126,7 +127,7 @@ def main(*, argv: list[str] | None = None) -> int:
     _ = parser.add_argument("--skip-hygiene", dest="skip_hygiene", action="store_true")
     args = parser.parse_args(argv)
     project_root = Path(args.project_root) if args.project_root is not None else Path.cwd()
-    repo_name = args.repo_name if args.repo_name is not None else project_root.name
+    repo_name = args.repo_name if args.repo_name is not None else repository_name(root=project_root)
     attention = build_attention(
         project_root=project_root,
         repo_name=repo_name,

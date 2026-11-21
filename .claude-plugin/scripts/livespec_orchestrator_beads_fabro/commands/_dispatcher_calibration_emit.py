@@ -36,6 +36,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_stall_window import 
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_tdd_order_sink import TddOrderSink
 from livespec_orchestrator_beads_fabro.commands._dispatcher_tdd_probe import gather_tdd_signals
+from livespec_orchestrator_beads_fabro.commands._repository_name import repository_name
 from livespec_orchestrator_beads_fabro.effects import (
     AttemptFailure,
     JsonParseFailure,
@@ -130,7 +131,7 @@ def _build_and_append_calibration(  # noqa: PLR0913 - injectable calibration sea
     record = build_calibration_record(
         item=item,
         outcome=outcome,
-        repo_name=repo.name,
+        repo_name=repository_name(root=repo),
         journal_records=journal_records,
         wall_clock_seconds=wall_clock_seconds,
         token_cost_micros=calibration_token_cost(args=args, repo=repo, outcome=outcome),
