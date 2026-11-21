@@ -501,7 +501,11 @@ def test_the_recorded_seeded_open_red_endings_route_to_green_admission(attempt: 
             'No test to write.\n\n{"preferred_next_label": "already-satisfied"}',
             "already_satisfied_route",
         ),
-        ("red", "## red\nRed test file: tests/x.py\n", "commit_red"),
+        (
+            "red",
+            "## red\nRed test file: tests/x.py\n",
+            "red_seeded_fallthrough_route",
+        ),
         (
             "red",
             '{"outcome": "failed", "failure_reason": "Definition of Done amendment for x"}',

@@ -185,6 +185,10 @@ _LABEL_ROUTES_ADDED = {
     "green_needs_human_route",
     "green_unknown_label_route",
 }
+# The unlabelled-Red classifier (bd-ib-qmcode) routes a carried seed with no
+# Red test through Green rather than into `commit_red`.  It is reached once per
+# Red visit and does not add a cycle of its own.
+_RED_SEEDED_FALLTHROUGH_ROUTE_ADDED = {"red_seeded_fallthrough_route"}
 # The `dod_gate` post-turn mutation guard (work-item bd-ib-al54tl), kept as its
 # own constant for the reason every set above gives. It sits on `dod_gate`'s
 # single fallthrough, closes no cycle and is reached once, so it moves no other
@@ -795,6 +799,7 @@ def test_the_ported_graph_derives_the_same_execution_budget_as_the_pre_port_one(
         | _IMPLEMENT_AMENDMENT_ROUTE_ADDED
         | _RED_GREEN_SPLIT_ADDED
         | _LABEL_ROUTES_ADDED
+        | _RED_SEEDED_FALLTHROUGH_ROUTE_ADDED
         | _COMMIT_SETTLE_ADDED
         | _JANITOR_ADMISSION_ADDED
         | _JANITOR_REFRESH_ROUTE_ADDED
@@ -830,6 +835,7 @@ def test_the_ported_graph_derives_the_same_execution_budget_as_the_pre_port_one(
         | _IMPLEMENT_AMENDMENT_ROUTE_LOOP
         | _RED_GREEN_SPLIT_ADDED
         | _LABEL_ROUTES_ADDED
+        | _RED_SEEDED_FALLTHROUGH_ROUTE_ADDED
         | _COMMIT_SETTLE_ADDED
         | _JANITOR_ADMISSION_ADDED
         | _JANITOR_REFRESH_ROUTE_ADDED

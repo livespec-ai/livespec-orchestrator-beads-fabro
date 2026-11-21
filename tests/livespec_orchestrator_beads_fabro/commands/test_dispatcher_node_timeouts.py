@@ -160,6 +160,7 @@ def test_committed_graph_renders_every_declared_timeout(tmp_path: Path) -> None:
     )
     assert not isinstance(rendered, str)
     assert set(_rendered_timeouts(text=rendered.text)) == {
+        "600s",
         "1170s",
         "1800s",
         "3900s",

@@ -517,6 +517,26 @@ chmod 755 \"$runner\""
         script="counter=$(git rev-parse --git-path livespec-red-admission-count); handoff=$(git rev-parse --git-path livespec-implement-handoff.md); cause=$(git rev-parse --git-path livespec-stage-cause); count=$(cat \"$counter\" 2>/dev/null || echo 0); if test \"$count\" -ge 3 2>/dev/null; then full_section=$(awk '/^## commit_red/{text=$0 RS; seen=1; next} seen && /^## /{seen=0} seen{ text=text $0 RS } END{printf \"%s\", text}' \"$handoff\" 2>/dev/null); targets=$(printf '%s\\n' \"$full_section\" | awk '/^Failed targets(:| \\([0-9]+\\):)[[:space:]]*$/ { printing=1; next } printing && /^[[:space:]]+-[[:space:]]+/ { line=$0; sub(/^[[:space:]]+-[[:space:]]+/, \"\", line); sub(/[[:space:]]+$/, \"\", line); print line; next } printing { exit }' | tr '\\n' ' ' | sed 's/ $//'); section=$(printf '%s' \"$full_section\" | tail -c 2000 | tr '\\n' ' '); if test -n \"$targets\"; then target_summary=\"failing targets: $targets\"; else target_summary=\"failing target: unknown\"; fi; message=\"LIVESPEC_IMPLEMENT_RED_BOUND_EXHAUSTED: red admission bound exhausted; $target_summary; latest commit_red handoff section: ${section:-absent, so its recorded exit status and failed targets are unavailable}\"; printf 'stage: %s\\ncause: %s\\n' red_admission \"$message\" > \"$cause\"; printf '%s\\n' \"$message\" >&2; exit 1; fi; echo $((count + 1)) > \"$counter\""
     ]
 
+    // An ordinary Red normally falls through to `commit_red`, because it has
+    // just written the one failing test that command must commit.  A carried
+    // seed is different: a Red turn can finish without its preferred label
+    // after discovering the seed already satisfies the item.  If its latest
+    // Red handoff names no test, commit_red has nothing to stage and only burns
+    // a Red admission.  Classify that measured shape before the command node:
+    // the seed continues through Green, while every ordinary Red keeps the
+    // historical fallthrough to commit_red.
+    red_seeded_fallthrough_route [
+        label="Unlabelled Red on a carried seed with no Red test: continue through Green"
+        shape=parallelogram
+        // This classifier only reads the handoff and compares HEAD with the
+        // dispatch base. Keep its four possible visits below the factory
+        // credential allowance while leaving ten minutes for a slow remote
+        // filesystem.
+        timeout="600s"
+        output_schema="routing"
+        script="handoff=$(git rev-parse --git-path livespec-implement-handoff.md) || exit $?; base_ref=\"origin/{{ inputs.default_branch }}\"; if ! git rev-parse --verify --quiet \"$base_ref\" >/dev/null; then echo \"LIVESPEC_RED_SEEDED_FALLTHROUGH_BASE_UNREADABLE: $base_ref does not resolve, so the carried seed cannot be classified\" >&2; exit 1; fi; section=$(awk '/^##[[:space:]]+red([[:space:]]|$)/ { text=$0 RS; seen=1; next } seen && /^##[[:space:]]/ { seen=0 } seen { text=text $0 RS } END { printf \"%s\", text }' \"$handoff\" 2>/dev/null); if printf '%s\\n' \"$section\" | grep -qE '^(Red test file|Test file):[[:space:]]*[^[:space:]]'; then printf '%s\\n' '{\"preferred_next_label\":\"commit_red\"}'; exit 0; fi; git diff --quiet \"$base_ref...HEAD\"; status=$?; if test \"$status\" -eq 1; then printf '%s\\n' '{\"preferred_next_label\":\"seeded\"}'; exit 0; fi; if test \"$status\" -ne 0; then echo \"LIVESPEC_RED_SEEDED_FALLTHROUGH_BASE_UNREADABLE: git diff against $base_ref exited $status, so the carried seed cannot be classified\" >&2; exit \"$status\"; fi; printf '%s\\n' '{\"preferred_next_label\":\"commit_red\"}'"
+    ]
+
     // No `output_schema`, for the reason given above `red`: its test-wrong label
     // and its amendment ending route only through the directive contract. The
     // completion field is read by `implement_completion` from the turn's
@@ -2651,7 +2671,9 @@ script="cut_root=$(printenv LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT || true); if te
     red -> green_admission [label="seeded Red already passes", condition="preferred_label=seeded-red-passes"]
     red -> red_needs_human_route [label="needs-human label", condition="preferred_label=needs-human"]
     red -> red_unknown_label_route [label="unrouted label", condition="preferred_label && preferred_label != seeded-open-red && preferred_label != seeded-red-passes && preferred_label != already-satisfied && preferred_label != needs-human"]
-    red -> commit_red
+    red -> red_seeded_fallthrough_route
+    red_seeded_fallthrough_route -> green_admission [label="carried seed with no Red test", condition="preferred_label=seeded"]
+    red_seeded_fallthrough_route -> commit_red
     already_satisfied_route -> red_admission [label="carried changes", condition="preferred_label=carried"]
     already_satisfied_route -> already_satisfied
     red_unknown_label_route -> red [label="label refused", condition="outcome=failed"]
