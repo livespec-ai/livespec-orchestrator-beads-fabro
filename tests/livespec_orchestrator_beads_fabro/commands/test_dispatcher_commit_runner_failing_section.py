@@ -103,6 +103,29 @@ def test_a_per_file_coverage_refusal_keeps_a_short_file_s_full_figures_from_earl
     )
 
 
+def test_a_per_file_coverage_refusal_keeps_short_file_figures_when_total_is_not_rounded(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A short file's figures do not depend on the aggregate total's rounding."""
+    output = (
+        "---------- coverage: platform linux, python 3.10.16-final-0 ----------\n"
+        "Name                                Stmts   Miss  Branch  BrPart  Cover   Missing\n"
+        "ansible/factory_workspace_manifest.py   165      1      20       1    99%   97\n"
+        "TOTAL                                9000     11     400       1  99.88%\n"
+        "Failed targets (1):\n"
+        "  - check-per-file-coverage\n" + _TIMING_TAIL
+    )
+
+    section = _refusal_section(capsys=capsys, tmp_path=tmp_path, output=output)
+
+    assert section == (
+        "failed targets: check-per-file-coverage\n"
+        "failing files (1):\n"
+        "- ansible/factory_workspace_manifest.py: uncovered lines 97 "
+        "(1 missed, 1 partial branch; 99% covered)\n"
+    )
+
+
 def test_an_affected_tests_refusal_without_a_target_list_names_its_recipe_test_and_coverage(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
