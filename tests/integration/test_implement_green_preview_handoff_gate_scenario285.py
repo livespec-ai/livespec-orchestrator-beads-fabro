@@ -147,6 +147,32 @@ def test_a_clean_seeded_green_with_preview_exit_two_ends_already_satisfied(
     assert "red declared" not in terminal.stderr
 
 
+def test_a_carried_seeded_green_with_preview_exit_two_reaches_commit_green(
+    tmp_path: Path,
+) -> None:
+    """A carried seed's no-change preview is not a Green refusal.
+
+    The seed itself is the implementation to publish.  Its Green turn has no
+    staged delta, so the preview correctly returns 2; the completion gate must
+    let ``commit_green`` retain that carried seed rather than treating the
+    no-op preview as a failed check and exhausting Green re-entries.
+    """
+    repo, _base = _clean_seeded_repo(tmp_path=tmp_path)
+    _ = (repo / "seeded.txt").write_text("carried implementation\n", encoding="utf-8")
+    _ = subprocess.run(["git", "add", "seeded.txt"], cwd=repo, check=True)
+    _ = subprocess.run(
+        ["git", "commit", "--quiet", "-m", "seeded implementation"], cwd=repo, check=True
+    )
+    _seed_clean_green_records(repo=repo)
+
+    completion = _run_gate(repo=repo)
+
+    assert completion.returncode == 0, completion.stderr
+    assert json.loads(completion.stdout) == {"preferred_next_label": "complete"}
+    handoff = (repo / ".git" / _HANDOFF).read_text(encoding="utf-8")
+    assert "## green-preview-refused" not in handoff
+
+
 def _seed_clean_green_records(*, repo: Path) -> None:
     git_dir = repo / ".git"
     _ = (git_dir / _PREVIEW_RECORD).write_text(
@@ -171,10 +197,10 @@ def _run_gate(*, repo: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_a_seeded_green_is_never_judged_clean_against_a_non_dispatch_remote_branch(
+def test_a_carried_seeded_green_with_an_unrelated_remote_reaches_commit_green(
     tmp_path: Path,
 ) -> None:
-    """With origin/HEAD absent, an unrelated remote branch is not the dispatch base."""
+    """An unrelated remote does not turn a carried seed into an already-satisfied run."""
     repo, _base = _clean_seeded_repo(tmp_path=tmp_path)
     _ = (repo / "changed.txt").write_text("seeded green change\n", encoding="utf-8")
     _ = subprocess.run(["git", "add", "changed.txt"], cwd=repo, check=True)
@@ -187,7 +213,7 @@ def test_a_seeded_green_is_never_judged_clean_against_a_non_dispatch_remote_bran
     completion = _run_gate(repo=repo)
 
     assert completion.returncode == 0, completion.stderr
-    assert json.loads(completion.stdout) == {"preferred_next_label": "incomplete"}
+    assert json.loads(completion.stdout) == {"preferred_next_label": "complete"}
 
 
 def test_a_seeded_green_fails_closed_when_the_dispatch_base_ref_is_missing(
