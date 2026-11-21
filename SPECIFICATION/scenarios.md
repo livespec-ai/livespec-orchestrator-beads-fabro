@@ -8675,6 +8675,18 @@ Feature: An agent stage does not act on instructions its stage prompt never gave
     Then the hook runs without the credential and its merge attempt fails
     And the pull request is not merged
 
+  Scenario: A legitimate pre-push hook reaches its push through the credential helper
+    Given a run reaching publish_draft, pr_refresh or pr whose repository carries an ordinary pre-push hook that pushes through git
+    When the stage pushes the run's publish branch and the hook runs
+    Then the push reaches origin through the credential helper and succeeds
+    And no LIVESPEC_AGENT_PUBLICATION_DENIED refusal is raised
+
+  Scenario: A hook or gate of a publication stage finds no forge credential
+    Given a run reaching publish_draft, pr_refresh or pr whose repository hooks and gates are repository-controlled code
+    When a hook or gate searches its environment and every file it can read for a forge token or a GitHub App key
+    Then it finds no forge token and no App key and no key from which one can be minted
+    And its own push still succeeds only through the credential helper
+
   Scenario: An agent stage still posts its proof records
     Given a proof_verify turn of a run
     When its agent posts a Proof of Done record through the posting primitive and uploads its proof assets through the proof asset store
