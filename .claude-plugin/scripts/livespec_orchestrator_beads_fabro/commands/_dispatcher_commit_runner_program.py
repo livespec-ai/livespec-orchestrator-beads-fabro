@@ -174,7 +174,9 @@ LLOC_TARGETS = frozenset({"check-file-lloc"})
 SOFT_BAND_TARGETS = frozenset({"check-no-lloc-soft-warnings"})
 # A coverage table row: name, statements, misses, optional branch columns, cover, missing.
 COVERAGE_ROW = re.compile(
-    r"^(?P<name>\S+)\s+\d+\s+\d+(?:\s+\d+\s+\d+)?\s+(?P<cover>\d+(?:\.\d+)?)%"
+    r"^(?P<name>\S+)\s+\d+\s+(?P<missed>\d+)"
+    r"(?:\s+\d+\s+(?P<partial_branches>\d+))?\s+"
+    r"(?P<cover>\d+(?:\.\d+)?)%"
     r"(?:\s+(?P<missing>\S.*?))?\s*$"
 )
 BELOW_COVERAGE_EVENT = "file below 100% coverage"
@@ -711,19 +713,20 @@ def structured_event(line):
     return value if isinstance(value, dict) else None
 
 
-def coverage_row_file(line, *, include_percent=False):
+def coverage_row_file(line, *, include_figures=False):
     """A coverage table row below 100% as (file, detail), or None."""
     row = COVERAGE_ROW.match(line)
     if row is None or row.group("name") == "TOTAL" or float(row.group("cover")) >= 100.0:
         return None
     missing = row.group("missing")
-    detail = (
-        "uncovered lines " + missing + " (" + row.group("cover") + "% covered)"
-        if missing and include_percent
-        else "uncovered lines " + missing
-        if missing
-        else row.group("cover") + "% covered"
-    )
+    detail = "uncovered lines " + missing if missing else row.group("cover") + "% covered"
+    if include_figures:
+        partial_branches = row.group("partial_branches")
+        if partial_branches is not None:
+            figures = row.group("missed") + " missed, " + partial_branches + " partial branch"
+            detail += " (" + figures + "; " + row.group("cover") + "% covered)"
+        elif missing:
+            detail += " (" + row.group("cover") + "% covered)"
     return row.group("name"), detail
 
 
@@ -831,8 +834,15 @@ def failing_files(text, targets):
     if affected_tests:
         for failed_test in PYTEST_FAILED_NODE.finditer(text):
             found.setdefault(failed_test.group("node"), "failed")
+    rounded_total = bool(COVERAGE_TARGETS.intersection(targets)) and any(
+        row is not None and row.group("name") == "TOTAL" and row.group("cover") == "100.00"
+        for line in text.splitlines()
+        for row in (COVERAGE_ROW.match(line),)
+    )
     for line in text.splitlines():
-        row = coverage_row_file(line, include_percent=affected_tests) if coverage else None
+        row = coverage_row_file(
+            line, include_figures=affected_tests or rounded_total
+        ) if coverage else None
         if row is None:
             event = structured_event(line)
             row = None if event is None else event_file(event, coverage, lloc, soft_band)
@@ -841,14 +851,14 @@ def failing_files(text, targets):
         name = row[0][2:] if row[0].startswith("./") else row[0]
         if name not in found or row[1].startswith("uncovered lines "):
             found[name] = row[1]
-    return list(found.items())
+    return list(found.items()), rounded_total
 
 
 def failing_section(text):
     """The ONE failed-target and failing-file section every commit-refusal brief carries."""
     text = text.replace("\r", "")
     targets = targets_for_refusal(text)
-    files = failing_files(text, targets)
+    files, rounded_total = failing_files(text, targets)
     lines = ["failed targets: " + (" ".join(targets) if targets else "none")]
     if not files:
         lines.append("failing files: none reported in the recorded output")
@@ -857,6 +867,13 @@ def failing_section(text):
         lines.extend("- " + name + ": " + detail for name, detail in files[:FAILING_FILE_CAP])
         if len(files) > FAILING_FILE_CAP:
             lines.append(str(len(files) - FAILING_FILE_CAP) + " further files omitted")
+    if rounded_total and files:
+        names = ", ".join(name for name, _ in files[:FAILING_FILE_CAP])
+        verb = "is" if len(files) == 1 else "are"
+        lines.append(
+            "rounded total coverage 100.00% is not the pass criterion; "
+            + names + " " + verb + " below 100%"
+        )
     return "\n".join(lines) + "\n"
 
 
