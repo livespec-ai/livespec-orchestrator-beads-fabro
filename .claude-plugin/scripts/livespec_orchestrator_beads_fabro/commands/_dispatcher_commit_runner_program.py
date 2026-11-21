@@ -109,13 +109,14 @@ from pathlib import Path
 
 RUNNING = "running"
 NO_VERDICT = "no-verdict"
+CHECKPOINT_OVERTAKEN = "overtaken-by-checkpoint"
 STAGE_SETTLES = {"fix": "fix_commit_settle", "review_fix": "review_fix_commit_settle"}
 AUTHORING_STAGES = ("implement", "fix", "review_fix")
 AUTHORING_TURN_VARIABLE = "LIVESPEC_AUTHORING_TURN"
 TAIL_LINES = 60
 BRIEF_TAIL_LINES = 80
 # Worst first: a settled set is described by its least settled run.
-SETTLE_ORDER = (RUNNING, "failed", NO_VERDICT, "passed")
+SETTLE_ORDER = (RUNNING, "failed", CHECKPOINT_OVERTAKEN, NO_VERDICT, "passed")
 # The gate aggregate's own list of failed recipes, ended by the first line that is not one.
 FAILED_TARGETS_HEADER = re.compile(r"^Failed targets \(\d+\):\s*$", re.MULTILINE)
 FAILED_TARGET_LINE = re.compile(r"^\s+-\s+(\S+)\s*$")
@@ -592,6 +593,8 @@ def worker(run_id):
         refusal = git_refusal_line(text) if exit_code != 0 else None
         if refusal is not None:
             terminal["git_refusal_line"] = refusal
+            if checkpoint_overtook_commit(record, refusal):
+                terminal["state"] = CHECKPOINT_OVERTAKEN
     if exit_code != 0:
         terminal["failed_targets"] = targets_for_refusal(text)
     if exit_code == 0:
@@ -610,7 +613,11 @@ def report_payload(run_id, path, record):
         output = full_output(path)
         if hook_passed(record, output):
             payload["hook_passed"] = True
-            refusal = recorded_git_refusal(record, output) if state == "failed" else None
+            refusal = (
+                recorded_git_refusal(record, output)
+                if state in ("failed", CHECKPOINT_OVERTAKEN)
+                else None
+            )
             if refusal is not None:
                 payload["git_refusal_line"] = refusal
         if state == "failed":
@@ -933,6 +940,22 @@ def git_refusal_line(text):
         if stripped and STRUCTURED_EVENT_LINE.fullmatch(stripped) is None:
             return stripped
     return None
+
+
+def checkpoint_overtook_commit(record, refusal):
+    """True when a passed hook lost its commit race after HEAD advanced.
+
+    Git's compare-and-swap refusal is specific to an attempted update of HEAD.
+    The runner's starting HEAD differs from the current one only when another
+    writer won that update while the hook was running; on a Fabro run that
+    writer is the end-of-node checkpoint.
+    """
+    start_head = record.get("start_head")
+    return (
+        isinstance(start_head, str)
+        and refusal.startswith("fatal: cannot lock ref 'HEAD':")
+        and git_output("rev-parse", "HEAD") != start_head
+    )
 
 
 def hook_passed(record, output):
