@@ -43,7 +43,10 @@ from pathlib import Path
 
 import pytest
 from livespec_orchestrator_beads_fabro._beads_client import reset_fake_singleton
-from livespec_orchestrator_beads_fabro._store_comments import read_work_item_comments
+from livespec_orchestrator_beads_fabro._store_comments import (
+    append_work_item_comment,
+    read_work_item_comments,
+)
 from livespec_orchestrator_beads_fabro.commands import needs_attention
 from livespec_orchestrator_beads_fabro.commands._dispatcher_filing_display import filing_display
 from livespec_orchestrator_beads_fabro.commands._dod_governing_heading import (
@@ -288,6 +291,42 @@ def test_filing_displays_the_parse_the_modes_the_capabilities_and_the_finding(
     assert lines[3].startswith("definition-of-done finding (advisory):")
     assert "tests prove" in lines[3]
     assert len(lines) == 4
+
+
+def test_filing_displays_a_recorded_tier_classification_and_its_linked_topic(
+    tmp_path: Path,
+) -> None:
+    """A filer can see the standing classification written on the item."""
+    repo = _project(root=tmp_path)
+    item = _seed(
+        id_="bd-display-tier",
+        description=_section(assertion=_TEST_EXISTENCE_ASSERTION, references=_RESOLVABLE_HEADING),
+    )
+    append_work_item_comment(
+        path=_config(),
+        work_item_id=item.id,
+        body=(
+            "livespec-spec-change-tier\n\n"
+            "work-item: bd-display-tier\n"
+            "stage: filing\n"
+            "tier: spec-change\n"
+            "classification: feature\n"
+            "verdict-kind: partial\n"
+            "generalization-target: (none)\n"
+            "linked-proposal-topic: visible-at-filing\n"
+            "spec-version: 1\n"
+            "behaviour-digest: display-tier\n"
+            "rationale: the specification needs an amendment\n"
+            "spec-change-tier-clause-provenance: complete"
+        ),
+    )
+
+    lines = filing_display(item=item, cwd=repo, governing=_taken_governing_heading).splitlines()
+
+    assert (
+        "recorded tier classification: spec-change (feature); linked proposal topic: visible-at-filing"
+        in lines
+    )
 
 
 def test_filing_distinguishes_a_supplied_reader_that_did_not_take_a_verdict(

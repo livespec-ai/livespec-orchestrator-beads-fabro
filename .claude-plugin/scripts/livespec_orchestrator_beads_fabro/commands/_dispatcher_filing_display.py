@@ -51,21 +51,36 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done_a
 from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done_findings import (
     definition_of_done_findings,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_comments import (
+    item_comment_bodies,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_effective_criteria import (
     EffectiveCriteria,
     effective_criteria,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import ShellCommandRunner
+from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import store_config
 from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_capabilities import (
     UNPUBLISHED_REPORT,
     mirrored_sandbox_capabilities,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_spec_commitments import (
+    ratified_proposal_topics,
 )
 from livespec_orchestrator_beads_fabro.commands._dod_governing_heading_judge import (
     GoverningHeadingReader,
     host_governing_heading_taking_reader,
 )
+from livespec_orchestrator_beads_fabro.commands._spec_change_tier import SPEC_DIRNAME
+from livespec_orchestrator_beads_fabro.commands._spec_change_tier_hold import spec_change_hold
+from livespec_orchestrator_beads_fabro.commands._spec_change_tier_record import (
+    recorded_spec_change_tier,
+)
 from livespec_orchestrator_beads_fabro.effects import AttemptFailure, attempt
-from livespec_orchestrator_beads_fabro.errors import LivespecConfigUnreadableError
+from livespec_orchestrator_beads_fabro.errors import (
+    ConnectionPrefixMissingError,
+    LivespecConfigUnreadableError,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -166,6 +181,7 @@ def filing_display(
             not_taken_reason=not_taken_reason,
         )
     )
+    lines.extend(_recorded_tier_lines(item=item, cwd=cwd))
     return "\n".join(lines)
 
 
@@ -245,4 +261,42 @@ def _finding_lines(
         lines.append(f"{GOVERNING_HEADING_NOT_TAKEN_PREFIX} {not_taken_reason}")
     if not lines:
         return [FINDINGS_NONE_REPORT]
+    return lines
+
+
+def _recorded_tier_lines(*, item: WorkItem, cwd: Path) -> list[str]:
+    """Render a recorded tier and its standing hold, when either is readable.
+
+    Filing remains advisory: an unavailable ledger or configuration cannot turn
+    this display into a refusal.  A classification is nevertheless read from
+    the same durable receipt and spec-history ratification projection as the
+    plan-child disposition, so the filing surface cannot claim an item is free
+    while that disposition later finds it held.
+    """
+    read = attempt(
+        action=lambda: store_config(repo=cwd),
+        exceptions=(ConnectionPrefixMissingError, LivespecConfigUnreadableError),
+    )
+    if isinstance(read, AttemptFailure):
+        return []
+    comments = item_comment_bodies(path=read, work_item_id=item.id)
+    recorded = recorded_spec_change_tier(comments=comments or ())
+    if recorded is None:
+        return []
+    topic = recorded.linked_proposal_topic or "(none)"
+    classification = f"{recorded.tier} ({recorded.classification})"
+    lines = [f"recorded tier classification: {classification}; linked proposal topic: {topic}"]
+    hold = spec_change_hold(
+        work_item_id=item.id,
+        recorded=recorded,
+        ratified_topics=ratified_proposal_topics(spec_root=cwd / SPEC_DIRNAME),
+    )
+    if hold is not None:
+        disposition = " ".join(
+            (
+                "this item cannot be closed or disposed by a session",
+                "until the hold is released",
+            )
+        )
+        lines.append(f"recorded spec-change-tier hold: held ({hold.reason}); {disposition}")
     return lines
