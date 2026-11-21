@@ -39,6 +39,72 @@ def _argv(*, action: str, root: Path) -> list[str]:
     ]
 
 
+def test_item_only_history_read_is_a_verified_history_reply(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """Operators may inspect an incident without reconstructing a fenced identity."""
+    attempt = IncidentAttempt(
+        repository="owner/repo",
+        item_id="item-1",
+        attempt_id="attempt-1",
+        phase="closed",
+        operation_id="close-1",
+        generation=3,
+        owner="operator:alice",
+        base="a" * 40,
+        head="b" * 40,
+        pr_number=7,
+        landed_commits=("b" * 40,),
+        landed_trees=("c" * 40,),
+        original_paths=("app.py",),
+        deferred_work=(),
+        repayment_required=True,
+    )
+    monkeypatch.setattr(command, "store_config", lambda **_kwargs: None)
+    monkeypatch.setattr(command, "make_beads_client", lambda **_kwargs: "client")
+    monkeypatch.setattr(
+        command, "read_incident_history", lambda **_kwargs: (attempt,), raising=False
+    )
+    try:
+        result = command.main(
+            argv=[
+                "read-history",
+                "--repo",
+                str(tmp_path),
+                "--repository",
+                "owner/repo",
+                "--item",
+                "item-1",
+            ]
+        )
+    except SystemExit as error:
+        result = error.code
+
+    captured = capsys.readouterr()
+    assert result == 0, captured.err
+    response = json.loads(captured.out)
+    assert response["result"]["generations"] == [
+        {
+            "attempt_id": "attempt-1",
+            "generation": 3,
+            "operation_id": "close-1",
+            "owner": "operator:alice",
+            "phase": "closed",
+            "outstanding": [],
+            "repository": "owner/repo",
+            "item_id": "item-1",
+            "base": "a" * 40,
+            "head": "b" * 40,
+            "pr_number": 7,
+            "landed_commits": ["b" * 40],
+            "landed_trees": ["c" * 40],
+            "original_paths": ["app.py"],
+            "deferred_work": [],
+            "repayment_required": True,
+        }
+    ]
+
+
 @pytest.mark.parametrize("action", ["read-current", "read-history"])
 def test_process_reply_never_upgrades_incident_evidence_to_normal_factory_proof(
     action: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
