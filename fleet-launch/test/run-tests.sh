@@ -3798,6 +3798,14 @@ else
     fail "the refusal line mislists blockers (rc=$blocker_rc): $blocker_line"
 fi
 
+scenario "31b. the REWORK ready-check uses the Dispatcher's read-only selection query"
+rework_ready_check=$(sed -n '/^ready_check() {/,/^}/p' "$LAUNCHER")
+if grep -qE 'dispatcher\.py" loop .*--dry-run' <<<"$rework_ready_check"; then
+    fail "the REWORK ready-check still invokes dispatcher.py loop --dry-run instead of a read-only selection query"
+else
+    pass "the REWORK ready-check does not invoke the Dispatcher's mutating loop dry-run"
+fi
+
 fi
 
 # --- parity with the running launcher copies (bd-ib-yax6gv, 2026-11-15) ---------------------------
