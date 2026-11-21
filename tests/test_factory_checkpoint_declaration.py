@@ -366,6 +366,18 @@ headroom while preserving the control relation. The credential-use window still
 governs: both trees require 111600 seconds of remaining credential lifetime,
 from the 108000-second window plus margin, rather than their larger allowances.
 
+TWO NEW TIMED NODES MOVED THE ALLOWANCE (work-items bd-ib-j6vebh and
+bd-ib-qmcode). The leased-republish contract landed a `1170s` node, which left
+master about 30 seconds under the 1800000 bound, and the unlabelled-seeded-Red
+route adds `red_seeded_fallthrough_route`, a classifier carrying `timeout="600s"`
+and up to four visits, about 2400 seconds more. Re-measured against the tree that
+carries both: the execution allowance is 1802370 seconds, past the old bound, and
+the retired fifteen-minute checkpoint control is 2698770. The bound moves from
+1800000 to 1810000, strictly between the two, leaving 7630 seconds of shipped
+headroom while preserving the control relation. The freshness requirement still
+fits a fresh Codex credential (864000 seconds): the credential-use window
+governs it, not the graph.
+
 The v175 lesson is kept: crossing the credential line fails loudly and cannot
 pass behind a bound the repository can move, because the fresh-credential
 lifetime is a constant of the host and not a bound.
@@ -394,7 +406,7 @@ _SHIPPED_WORKFLOW = _PAYLOAD / "workflow.toml"
 # nothing. The bound is the only figure here this repository chooses, and no
 # derived figure is pinned beside it: a node-timeout edit that keeps the
 # allowance under the bound needs no edit to this module.
-_ALLOWANCE_BOUND_SECONDS = 1_800_000
+_ALLOWANCE_BOUND_SECONDS = 1_810_000
 
 # The lifetime of a FRESH Codex credential. Not this repository's to choose: it
 # is what the host mints at renewal, so a requirement past it is a fact about
