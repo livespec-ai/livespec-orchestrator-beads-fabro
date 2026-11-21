@@ -9,7 +9,6 @@ pieces and renders the one step that installs the wrapper over `gh`.
 
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -28,7 +27,6 @@ __all__: list[str] = [
     "gh_mint_helper_source",
     "gh_wrapper_tail_source",
     "github_auth_support_relpaths",
-    "refreshing_gh_env_lines",
     "refreshing_gh_prepare_steps_block",
     "resolve_sandbox_gh_refresh_root",
 ]
@@ -309,17 +307,6 @@ def github_auth_support_relpaths(*, scripts_root: Path) -> tuple[Path, ...]:
         else:
             found.append(relpath)
     return tuple(found)
-
-
-def refreshing_gh_env_lines() -> str:
-    """Project GitHub App inputs for the sandbox-local mint helper."""
-    if not github_app_env_present():
-        return ""
-    return "".join(
-        f"{key} = {json.dumps(value)}\n"
-        for key in _GITHUB_APP_ENV_KEYS
-        if (value := os.environ.get(key)) not in (None, "")
-    )
 
 
 def github_app_env_present() -> bool:

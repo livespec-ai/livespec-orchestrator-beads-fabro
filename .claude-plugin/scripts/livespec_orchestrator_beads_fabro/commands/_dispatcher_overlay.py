@@ -52,7 +52,6 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_provenance i
     factory_run_id_prepare_steps_block,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_gh_refresh import (
-    refreshing_gh_env_lines,
     refreshing_gh_prepare_steps_block,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_git_author import (
@@ -336,7 +335,6 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
     # environment it inherits (bd-ib-rv2jk4).
     harness_settings_steps = harness_settings_prepare_steps_block()
     gh_refresh_steps = refreshing_gh_prepare_steps_block()
-    gh_refresh_env_lines = refreshing_gh_env_lines()
     # Rendered immediately after the wrapper it routes to, and unconditionally:
     # the Petri-era runner performs no Git operations of its own, so without this
     # every in-sandbox push reaches origin with no credential (bd-ib-52zt3o).
@@ -440,7 +438,6 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
         + author_env_lines
         + tmux_env_line
         + harness_shell_env
-        + gh_refresh_env_lines
         + clones.env_lines
         + currency_gate_env_line
         + otel_env_lines

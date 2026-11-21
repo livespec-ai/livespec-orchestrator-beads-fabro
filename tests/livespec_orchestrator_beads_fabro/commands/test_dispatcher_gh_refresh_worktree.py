@@ -27,6 +27,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import tomli
 from livespec_orchestrator_beads_fabro.commands._dispatcher_gh_refresh import (
     SANDBOX_GH_REFRESH_ROOT_ENV_VAR,
     refreshing_gh_prepare_steps_block,
@@ -37,6 +38,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_helper_registry impo
     LIVESPEC_ROOT,
     PLUGINS_ROOT,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_overlay import (
+    render_run_config_overlay,
+)
 
 from tests.prepare_step_support import fetch_helpers, runnable_script, steps_in
 
@@ -45,6 +49,47 @@ _BUNDLE_DIRNAME = ".livespec-gh-refresh"
 _FETCH = "<helper-fetch>"
 _DEFAULT_BRANCH = "master"
 _RUN_BRANCH = "fabro/run/01M4Q45S5AGK"
+_COMMITTED_WORKFLOW_TOML = (
+    "_version = 1\n"
+    "\n"
+    "[workflow]\n"
+    'graph = "workflow.fabro"\n'
+    "\n"
+    "[run.environment]\n"
+    'id = "livespec-ci"\n'
+)
+_OAUTH_TOKEN = "oauth-token-value-that-must-not-leak"
+_GITHUB_TOKEN = "github-token-value-that-must-not-leak"
+
+
+def test_run_scoped_environment_never_exposes_github_app_minting_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Agent stages cannot mint a publication credential by changing their stage name.
+
+    The environment table reaches every command and ACP node in the run.  An
+    App id plus private key in that table therefore gives an agent everything
+    the refreshing ``gh`` wrapper needs to mint an installation token; setting
+    ``LIVESPEC_AGENT_STAGE=pr`` then bypasses the advisory publication guard.
+    Publication stages must instead receive those inputs only through their
+    own publication or preservation operation.
+    """
+    monkeypatch.setenv("GITHUB_APP_ID", "42")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY", "stub-pem")
+    rendered = render_run_config_overlay(
+        committed_text=_COMMITTED_WORKFLOW_TOML,
+        workflow_dir=tmp_path,
+        token=_OAUTH_TOKEN,
+        github_token=_GITHUB_TOKEN,
+        siblings=None,
+    )
+    assert rendered is not None
+
+    environment = tomli.loads(rendered)["environments"]["livespec-ci"]["env"]
+
+    assert "GITHUB_APP_ID" not in environment
+    assert "GITHUB_PRIVATE_KEY" not in environment
 
 
 def test_a_run_branch_rebase_is_not_blocked_by_the_gh_refresh_bundle(

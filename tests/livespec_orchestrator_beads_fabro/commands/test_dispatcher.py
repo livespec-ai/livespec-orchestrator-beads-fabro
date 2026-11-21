@@ -1808,8 +1808,6 @@ _FAKE_GITHUB_TOKEN = "test-github-token"
 # gh/git prefer GH_TOKEN, so a projected GH_TOKEN would shadow Fabro's
 # fresh per-exec GITHUB_TOKEN and go stale past the ~60-min token TTL.
 _FAKE_GITHUB_TOKEN_LINE = 'GITHUB_TOKEN = "test-github-token"'
-_FAKE_GITHUB_APP_ID_LINE = 'GITHUB_APP_ID = "42"'
-_FAKE_GITHUB_PRIVATE_KEY_LINE = 'GITHUB_PRIVATE_KEY = "stub-pem"'
 _GH_REFRESH_BIN = "/workspace/.livespec-github-bin"
 
 # The dead interpolation channel: fabro resolves {{ env.* }} in the
@@ -1876,11 +1874,11 @@ def test_render_run_config_overlay_prepares_refreshing_gh_wrapper(
 ) -> None:
     """Long-lived agent sessions must not depend on the one-shot overlay token.
 
-    The sandbox receives the GitHub App inputs plus a `gh` wrapper that
-    replaces the sandbox-local `gh` binary after reading the sandbox's
-    live PATH. That makes an in-session `just check` past the
-    installation-token TTL use a fresh token without replacing the
-    container's mise/just/uv/node/npx PATH with the Fabro worker PATH.
+    The Dispatcher process uses GitHub App inputs only to provision the `gh`
+    wrapper. The run-wide environment never serializes them, so the wrapper
+    can receive the inputs only at an authorized publication or preservation
+    operation. It still replaces the sandbox-local `gh` binary after reading
+    the sandbox's live PATH.
     """
     monkeypatch.setenv("GITHUB_APP_ID", "42")
     monkeypatch.setenv("GITHUB_PRIVATE_KEY", "stub-pem")
@@ -1909,8 +1907,8 @@ def test_render_run_config_overlay_prepares_refreshing_gh_wrapper(
     env_table = rendered[env_table_at:]
     assert "\nPATH = " not in env_table
     assert "{{ env.PATH }}" not in rendered
-    assert _FAKE_GITHUB_APP_ID_LINE in rendered
-    assert _FAKE_GITHUB_PRIVATE_KEY_LINE in rendered
+    assert "GITHUB_APP_ID" not in env_table
+    assert "GITHUB_PRIVATE_KEY" not in env_table
 
 
 def test_render_run_config_overlay_projects_gh_mint_helper_for_target_without_scripts(
