@@ -10,6 +10,7 @@ from tests.integration import test_push_time_credentials as fixtures
 from tests.integration.test_push_time_credentials import (
     BRANCH,
     EXPIRED,
+    FRESH,
     PushSandbox,
     executable,
     git,
@@ -92,6 +93,77 @@ def test_a_publication_hook_pushes_without_being_able_to_read_a_forge_secret(
     assert box.head(ref=f"refs/heads/{BRANCH}") == git(
         "rev-parse", "HEAD", cwd=box.clone, env=box.env
     )
+
+
+def test_no_process_between_a_publication_hook_and_its_caller_holds_a_forge_secret(
+    push_sandbox: PushSandbox,
+) -> None:
+    """Scenario 202: every ancestor of the hook, up to the caller, is secret-free.
+
+    A hook runs as the same user as the helper that started it, so it can read
+    `/proc/<pid>/environ` and `/proc/<pid>/cmdline` of every ancestor. The
+    caller here is a shell that holds the App inputs in its environment, as a
+    publication node does; it is the control that the hook's scan can read a
+    secret at all, and it is the boundary the walk stops at.
+    """
+    box = push_sandbox
+    walked = box.root / "hook-walked"
+    control = box.root / "hook-control"
+    executable(
+        path=box.clone / ".git/hooks/pre-push",
+        source=(
+            "#!/bin/sh\n"
+            "names='^(GH_TOKEN|GITHUB_TOKEN|GITHUB_PRIVATE_KEY|GITHUB_APP_ID"
+            "|GITHUB_APP_INSTALLATION_ID|LIVESPEC_PUSH_TOKEN)='\n"
+            f"values='fixture-key|{FRESH}'\n"
+            "leaks() { tr '\\0' '\\n' < \"/proc/$1/$2\" 2>/dev/null"
+            ' | grep -Eq "$names|$values"; }\n'
+            "pid=$$\n"
+            "count=0\n"
+            'while test "$pid" != "$LIVESPEC_TEST_BOUNDARY_PID"; do\n'
+            '  test "$pid" -gt 1 || { echo hook-never-reached-its-caller >&2; exit 1; }\n'
+            "  for source in environ cmdline; do\n"
+            '    if leaks "$pid" "$source"; then\n'
+            '      echo "hook-read-a-forge-secret: pid $pid $source" >&2\n'
+            "      exit 1\n"
+            "    fi\n"
+            "  done\n"
+            "  count=$((count + 1))\n"
+            "  pid=$(awk '/^PPid:/ { print $2 }' \"/proc/$pid/status\")\n"
+            "done\n"
+            f'echo "$count" > "{walked}"\n'
+            'leaks "$pid" environ && echo readable > '
+            f'"{control}"\n'
+            "exit 0\n"
+        ),
+    )
+    box.env["LIVESPEC_TEST_BOUNDARY_PID"] = "unset"
+    result = subprocess.run(
+        [
+            "sh",
+            "-c",
+            'LIVESPEC_TEST_BOUNDARY_PID=$$ "$@"; exit $?',
+            "sh",
+            str(box.bundle / "bin/push_origin"),
+            "git",
+            "push",
+            "-u",
+            "origin",
+            f"HEAD:refs/heads/{BRANCH}",
+        ],
+        cwd=box.clone,
+        env=box.env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert box.head(ref=f"refs/heads/{BRANCH}") == git(
+        "rev-parse", "HEAD", cwd=box.clone, env=box.env
+    )
+    # The hook, git and the helper process that ran git are all ancestors.
+    assert int(walked.read_text()) >= 3
+    assert control.read_text().strip() == "readable"
 
 
 def test_the_helper_preserves_inherited_process_config(push_sandbox: PushSandbox) -> None:
