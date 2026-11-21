@@ -217,8 +217,11 @@ question of fact — the spec tree above all.
    `## <the H2> → ### <the nested heading>`, so the human reads the finding
    at the level the governing text actually sits at.
 
-   **The one exception is a recorded internal ruling.** When the item's newest `livespec-spec-change-tier` record is still current,
-   and reads `tier: none`, it is an internal ruling. When it names the referenced
+   **The one exception is a recorded internal ruling.** The subject's
+   `## Current spec-change-tier record` block identifies the newest `livespec-spec-change-tier` record that is still current; read its `tier`
+   and `generalization-target` fields rather than inferring an exception from a
+   ledger comment. When that block reads
+   `tier: none`, it is an internal ruling. When it names the referenced
    heading as its `generalization-target`, that heading is the item's nearest topic, not a governing clause.
    Report no coherence finding merely because that nearest topic does not state
    or derive the assertion. This exception applies only to that current newest

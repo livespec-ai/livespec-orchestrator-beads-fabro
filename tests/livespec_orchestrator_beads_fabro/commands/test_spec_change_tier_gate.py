@@ -40,6 +40,9 @@ from livespec_orchestrator_beads_fabro._store_comments import (
     read_work_item_comments,
 )
 from livespec_orchestrator_beads_fabro.commands import _spec_change_tier_record as record
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement import (
+    judgement_subject,
+)
 from livespec_orchestrator_beads_fabro.commands._spec_change_tier import (
     behaviour_digest,
     exempt_decision,
@@ -199,6 +202,33 @@ def test_an_unstated_feature_is_classified_once_and_reused_on_the_next_pass(
     # dispatch path" a ledger read rather than two model calls per pass.
     assert _calls(ledger=ledger) == 2
     assert len(_comments(repo=repo)) == 1
+
+
+def test_a_current_filing_internal_ruling_is_present_in_the_dod_subject(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The shared host/node subject carries check 4's internal-ruling evidence."""
+    repo = _repo(tmp_path=tmp_path)
+    item = _item(
+        description=(
+            "## Definition of Done\n\n"
+            "- The judge receives the filing classification.\n\n"
+            f"References: {_HEADING}\n"
+        )
+    )
+    _ = _install_judge(tmp_path=tmp_path, monkeypatch=monkeypatch, replies=("bug", _STATED))
+    append_work_item(path=_config(repo=repo), item=item)
+
+    outcome = classify_item_spec_change_tier(
+        item=item, repo=repo, path=_config(repo=repo), stage=STAGE_FILING
+    )
+    subject = judgement_subject(item=item, cwd=repo, comments=_comments(repo=repo))
+
+    assert outcome.recorded is not None
+    assert outcome.recorded.generalization_target == _HEADING
+    assert "## Current spec-change-tier record" in subject
+    assert "tier: none" in subject
+    assert f"generalization-target: {_HEADING}" in subject
 
 
 def test_a_taken_tier_record_carries_its_selected_and_named_clause_bodies(
