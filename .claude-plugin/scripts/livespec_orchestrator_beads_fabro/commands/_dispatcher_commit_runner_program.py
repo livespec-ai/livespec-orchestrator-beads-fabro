@@ -586,7 +586,7 @@ def worker(run_id):
         path.with_suffix(".output").write_text(text, encoding="utf-8")
         exit_code = 1
     terminal = {"state": "passed" if exit_code == 0 else "failed"}
-    for key in ("start_head", "operation"):
+    for key in ("command", "root", "start_head", "operation"):
         if record.get(key) is not None:
             terminal[key] = record[key]
     if subjectless is not None:

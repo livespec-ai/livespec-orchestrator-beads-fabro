@@ -238,3 +238,53 @@ def test_a_runner_commit_refused_after_a_checkpoint_advance_is_overtaken_by_chec
 
     assert report["state"] == "overtaken-by-checkpoint"
     assert str(report["git_refusal_line"]).startswith("fatal: cannot lock ref 'HEAD':")
+
+
+def test_fix_commit_settle_retries_a_checkpoint_overtaken_runner_commit(tmp_path: Path) -> None:
+    """An overtaken run retains the command its settle node needs to retry it."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _ = _git(repo, "init", "--quiet")
+    _ = _git(repo, "config", "user.name", "Fixture")
+    _ = _git(repo, "config", "user.email", "fixture@example.invalid")
+    _write(repo, "base.txt", "base\n")
+    _commit(repo, "base")
+
+    real_git, plugins, runner, environment = _delayed_commit_runner(tmp_path, repo)
+    _write(repo, "runner.txt", "runner change\n")
+    _ = _git(repo, "add", "runner.txt")
+    started = subprocess.run(
+        [sys.executable, str(runner), "start", "--", "git", "commit", "-m", "runner change"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    run_id = started.stdout.strip()
+    created = repo / ".git" / "runner-commit-created"
+    deadline = time.monotonic() + 10
+    while not created.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert created.is_file()
+
+    _checkpoint(repo, real_git)
+    (repo / ".git" / "release-runner-commit").touch()
+    report = json.loads(_runner(repo, plugins, "wait", run_id, "--timeout-seconds", "10"))
+    assert report["state"] == "overtaken-by-checkpoint"
+
+    parsed = parse_dot_graph(text=_GRAPH.read_text(encoding="utf-8"))
+    assert not isinstance(parsed, str), parsed
+    settled = subprocess.run(
+        ["sh", "-c", parsed.nodes["fix_commit_settle"]["script"]],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**_environment(), "LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT": str(plugins)},
+    )
+
+    assert settled.returncode == 0, settled.stderr
+    assert _git(repo, "log", "-1", "--format=%s") == "runner change"
+    original = json.loads((repo / ".git" / "livespec-commit-runs" / f"{run_id}.json").read_text())
+    assert isinstance(original["retried_by"], str)

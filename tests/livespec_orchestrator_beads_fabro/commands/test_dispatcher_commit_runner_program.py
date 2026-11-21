@@ -615,14 +615,21 @@ def test_the_worker_records_the_commit_s_own_exit_status_and_head(tmp_path: Path
     """`passed` carries the resulting HEAD; `failed` carries the refusal's status."""
     passing = _FakeSubprocess(returncode=0)
     program = _program(tmp_path, passing)
-    path = _record(tmp_path, _RUN_ID, {"state": "running", "command": ["git", "commit"]}, 1)
+    path = _record(
+        tmp_path,
+        _RUN_ID,
+        {"state": "running", "command": ["git", "commit"], "root": str(tmp_path)},
+        1,
+    )
 
     assert program["worker"](_RUN_ID) == 0
     assert json.loads(path.read_text(encoding="utf-8")) == {
+        "command": ["git", "commit"],
         "state": "passed",
         "exit_code": 0,
         "head": "0123abc",
         "hook_ran": True,
+        "root": str(tmp_path),
     }
     assert path.with_suffix(".pid").read_text(encoding="utf-8").strip().isdigit()
 
@@ -633,6 +640,7 @@ def test_the_worker_records_the_commit_s_own_exit_status_and_head(tmp_path: Path
     _ = program["worker"](_RUN_ID)
 
     assert json.loads(path.read_text(encoding="utf-8")) == {
+        "command": ["git", "commit"],
         "state": "failed",
         "exit_code": 1,
         "hook_ran": True,
