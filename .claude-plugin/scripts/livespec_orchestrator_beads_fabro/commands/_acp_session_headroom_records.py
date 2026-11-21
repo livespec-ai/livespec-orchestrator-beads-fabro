@@ -54,9 +54,14 @@ from livespec_orchestrator_beads_fabro.commands._acp_session_headroom import (
     SessionHeadroomReading,
     SevenDayReading,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_central_factory_selection import (
+    CentralFactorySelection,
+)
 
 __all__: list[str] = [
+    "CENTRAL_FACTORY_SELECTION_STAGE",
     "SESSION_HEADROOM_STAGE",
+    "central_selection_record",
     "headroom_refusal_fields",
     "session_headroom_assessment_record",
     "session_headroom_projection_fields",
@@ -71,6 +76,8 @@ __all__: list[str] = [
 # reading is an observation and most readings refuse nothing, so a reader
 # filtering for refusals must not sweep up the ordinary admitted case.
 SESSION_HEADROOM_STAGE = "acp-session-headroom"
+# The journal stage naming the central factory selection record one evaluation followed.
+CENTRAL_FACTORY_SELECTION_STAGE = "central-factory-selection"
 
 
 def session_headroom_assessment_record(
@@ -309,4 +316,35 @@ def headroom_refusal_fields(*, verdict: AcpPreflightVerdict) -> dict[str, object
             for reading in verdict.headroom_assessments
         ],
         "session_headroom_skipped": skipped,
+    }
+
+
+def central_selection_record(
+    *,
+    work_item_id: str,
+    selection: CentralFactorySelection,
+    verdict: AcpPreflightVerdict,
+    slot_identity: str | None,
+) -> dict[str, object]:
+    """The journal row naming the central factory selection one evaluation followed.
+
+    It carries the record's `profile` and `written_at`, the derived slot's opaque
+    non-secret credential identity (`slot_identity`, null when no slot was named), and the
+    outcome: the `no-central-factory-selection` skip with its condition, a
+    headroom skip of the named slot, or admission. No credential value appears.
+    """
+    if selection.refusal is not None:
+        outcome = selection.refusal.skip_condition
+    elif any(skip.reason == HEADROOM_SKIP for node in verdict.nodes for skip in node.skipped):
+        outcome = "named-slot-headroom-skipped"
+    else:
+        outcome = "named-slot-admitted"
+    return {
+        "stage": CENTRAL_FACTORY_SELECTION_STAGE,
+        "work_item_id": work_item_id,
+        "profile": selection.profile,
+        "written_at": selection.written_at,
+        "reason": selection.reason,
+        "slot_identity": slot_identity,
+        "outcome": outcome,
     }

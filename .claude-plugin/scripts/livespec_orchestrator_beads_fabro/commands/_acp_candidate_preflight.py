@@ -364,7 +364,7 @@ def _headroom_skip(
         return ephemeral_skip(
             candidate=candidate,
             reason=CLAUDE_CREDENTIAL_SKIP,
-            condition=policy.credential_refusal.cause,
+            condition=policy.credential_refusal.skip_condition,
         )
     reading = policy.read()
     pooled = () if policy.pool_read is None else policy.pool_read()

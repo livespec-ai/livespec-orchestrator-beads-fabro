@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Final, cast
 
@@ -41,6 +42,10 @@ from returns.unsafe import unsafe_perform_io
 
 from livespec_orchestrator_beads_fabro.commands import (
     _dispatcher_claude_credential_policy as credential_policy,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_central_factory_selection import (
+    CentralFactorySelection,
+    central_selection_for,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential import (
     CLAUDE_OAUTH_TOKEN_ENV,
@@ -57,8 +62,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential_po
 __all__: list[str] = [
     "SELECTED_ACCOUNT_RECORD_REL",
     "FactoryCredentialChoice",
+    "admission_central_and_refusal",
     "admission_credential_refusal",
     "admission_slot_chooser_registered",
+    "central_selection_for",
     "claude_credential_policy_for",
     "factory_credential_env_name",
     "injected_credential_slots",
@@ -106,7 +113,10 @@ def claude_credential_policy_for(*, repo: Path) -> ClaudeCredentialPolicy | Clau
 
 
 def injected_credential_slots(
-    *, environ: Mapping[str, str], policy: ClaudeCredentialPolicy
+    *,
+    environ: Mapping[str, str],
+    policy: ClaudeCredentialPolicy,
+    central: CentralFactorySelection | None = None,
 ) -> tuple[str, ...]:
     """Every pool slot's env-var NAME under the declared `policy`.
 
@@ -114,7 +124,11 @@ def injected_credential_slots(
     `numbered-slots` the pool is only the DECLARED injected slots, in declaration
     order, and may be empty. Under `legacy-independent` it is every injected
     numbered slot, sorted, and the unnumbered token only when no numbered slot is.
+    Under `central-factory-selection` the pool is the ONE slot `central` names,
+    or nothing when it names none.
     """
+    if central is not None:
+        return () if central.slot is None else (central.slot,)
     if policy.mode == NUMBERED_SLOTS:
         return tuple(name for name in policy.slots if environ.get(name))
     numbered = tuple(
@@ -125,20 +139,43 @@ def injected_credential_slots(
     return (CLAUDE_OAUTH_TOKEN_ENV,) if environ.get(CLAUDE_OAUTH_TOKEN_ENV) else ()
 
 
-def policy_pool_slots(*, repo: Path, environ: Mapping[str, str]) -> tuple[str, ...]:
+def policy_pool_slots(
+    *,
+    repo: Path,
+    environ: Mapping[str, str],
+    central: CentralFactorySelection | None = None,
+) -> tuple[str, ...]:
     """The pool `repo`'s declared policy allows; none under an absent or invalid one."""
     resolved = claude_credential_policy_for(repo=repo)
     if isinstance(resolved, ClaudeCredentialRefusal):
         return ()
-    return injected_credential_slots(environ=environ, policy=resolved)
+    return injected_credential_slots(
+        environ=environ,
+        policy=resolved,
+        central=central
+        or central_selection_for(
+            policy=resolved, environ=environ, home=Path.home(), now=datetime.now(timezone.utc)
+        ),
+    )
 
 
 def repo_credential_refusal(
     *, repo: Path, environ: Mapping[str, str]
 ) -> ClaudeCredentialRefusal | None:
     """`admission_credential_refusal` under `repo`'s committed policy."""
-    return admission_credential_refusal(
-        resolved=claude_credential_policy_for(repo=repo), environ=environ
+    return admission_central_and_refusal(
+        repo=repo, environ=environ, now=datetime.now(timezone.utc)
+    )[1]
+
+
+def admission_central_and_refusal(
+    *, repo: Path, environ: Mapping[str, str], now: datetime
+) -> tuple[CentralFactorySelection | None, ClaudeCredentialRefusal | None]:
+    """One admission evaluation's central selection (read once) and the refusal it implies."""
+    resolved = claude_credential_policy_for(repo=repo)
+    central = central_selection_for(policy=resolved, environ=environ, home=Path.home(), now=now)
+    return central, admission_credential_refusal(
+        resolved=resolved, environ=environ, central=central
     )
 
 
@@ -146,10 +183,13 @@ def admission_credential_refusal(
     *,
     resolved: ClaudeCredentialPolicy | ClaudeCredentialRefusal,
     environ: Mapping[str, str],
+    central: CentralFactorySelection | None = None,
 ) -> ClaudeCredentialRefusal | None:
     """Why no covered candidate may be admitted, or `None` when the pool may be assessed."""
     if isinstance(resolved, ClaudeCredentialRefusal):
         return resolved
+    if central is not None:
+        return central.refusal
     if resolved.mode == NUMBERED_SLOTS and not injected_credential_slots(
         environ=environ, policy=resolved
     ):
@@ -269,6 +309,7 @@ def select_factory_credential(
     environ: Mapping[str, str],
     home: Path,
     warn: Callable[[str], object],
+    now: datetime | None = None,
 ) -> FactoryCredentialChoice | ClaudeCredentialRefusal:
     """Resolve the credential env-var name under `repo`'s policy, or refuse.
 
@@ -281,7 +322,12 @@ def select_factory_credential(
     resolved = claude_credential_policy_for(repo=repo)
     if isinstance(resolved, ClaudeCredentialRefusal):
         return resolved
-    pool = injected_credential_slots(environ=environ, policy=resolved)
+    central = central_selection_for(
+        policy=resolved, environ=environ, home=home, now=now or datetime.now(timezone.utc)
+    )
+    if central is not None and central.refusal is not None:
+        return central.refusal
+    pool = injected_credential_slots(environ=environ, policy=resolved, central=central)
     chooser = _ADMISSION_CHOOSER.get("chooser")
     admitted = None if chooser is None else chooser()
     if admitted is not None and admitted in pool:
