@@ -368,7 +368,20 @@ def test_the_interactive_selection_is_never_read(tmp_path: Path) -> None:
     assert choice.env_name == _SLOT_5
 
 
-def test_pool_and_admission_helpers_follow_the_central_selection(tmp_path: Path) -> None:
+class _FrozenDatetime(datetime):
+    """`datetime` whose `now()` is the fixture's pinned `_NOW`, whatever the wall clock reads."""
+
+    @classmethod
+    def now(cls, tz: Any = None) -> datetime:  # type: ignore[override]
+        return _NOW if tz is None else _NOW.astimezone(tz)
+
+
+def test_pool_and_admission_helpers_follow_the_central_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The no-`central` helper calls below read the real clock; pin it to `_NOW` so the record's
+    # age is fixed (a wall clock past the freshness window made this test fail on every master).
+    monkeypatch.setattr(selector, "datetime", _FrozenDatetime)
     _central_config(repo=tmp_path)
     _write_record(home=tmp_path, payload=_record())
     policy = _central_policy()
