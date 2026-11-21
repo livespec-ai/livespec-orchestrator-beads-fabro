@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.345.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.345.0...v0.345.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* a Red turn that ends with no preferred label on a seeded tree that already carries the change routes to green_admission or already_satisfied_route, never to commit_red (bd-ib-qmcode) ([4ed09d4](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/4ed09d4f404bedd63224e1030e6733960e3734c9))
+* needs-attention names the repository from a resolved root so a relative --project-root . keeps its hygiene candidate ids valid (bd-ib-sliucq) ([8c260b6](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/8c260b66d8bdcb123e5074f88c401a3175f72f54))
+* report every short coverage file's figures ([880091c](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/880091c92c36af4726349c018c7e1c6b3c6d83c5))
+* retain coverage figures independently of total ([9e09563](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/9e095632b4eaf4f7719aab99ee12028742c82fe2))
+* retain figures for every short coverage file ([a52ecac](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/a52ecacb2f9c63d2cbef43dfbeb2aef7de7735e0))
+* run a publication stage's hooks and gates without the forge credential, reaching a push only through the credential helper (bd-ib-b3nosr) ([a90cd8e](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/a90cd8e7b0410d54c23cb035b4ed36087b61022f))
+* **workflow:** state the run-owned-tip lease republish contract and drop dead repair_pending ([13e7299](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/13e729951d1fe87f9c41bb6f17c6e9a45e4d8bb1))
+
 ## [0.345.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.344.2...v0.345.0) (2026-11-21)
 
 
