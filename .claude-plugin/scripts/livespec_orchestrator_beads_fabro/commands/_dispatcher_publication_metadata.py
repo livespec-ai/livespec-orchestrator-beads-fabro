@@ -81,6 +81,7 @@ __all__: list[str] = [
     "PUBLICATION_BODY_FILENAME",
     "PUBLICATION_BODY_MARKER",
     "PUBLICATION_BODY_MAX_BYTES",
+    "PUBLICATION_SUBJECT_GUARD_ENV_VAR",
     "PUBLICATION_TITLE_MAX_CHARS",
     "PublicationMetadata",
     "publication_body_path_expansion",
@@ -91,6 +92,7 @@ __all__: list[str] = [
 
 PR_TITLE_ENV_VAR = "LIVESPEC_PR_TITLE"
 PR_BODY_FILE_ENV_VAR = "LIVESPEC_PR_BODY_FILE"
+PUBLICATION_SUBJECT_GUARD_ENV_VAR = "LIVESPEC_PUBLICATION_SUBJECT_GUARD"
 
 PUBLICATION_BODY_FILENAME = "livespec-pr-body.md"
 
@@ -177,6 +179,7 @@ def publication_metadata_for(*, item: WorkItem) -> PublicationMetadata:
     paraphrase as the item's own. An item with none SAYS so, rather than leaving
     a section containing nothing, which reads as a body that lost its contents.
     """
+    conventional_type = "fix" if item.type == "bug" else "feat"
     criteria = (item.acceptance_criteria or "").strip() or _NO_CRITERIA
     body = (
         f"Work-item `{item.id}` — {item.title}\n"
@@ -193,7 +196,7 @@ def publication_metadata_for(*, item: WorkItem) -> PublicationMetadata:
         "🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
     )
     return PublicationMetadata(
-        title=_bounded_title(title=item.title, work_item_id=item.id),
+        title=_bounded_title(title=f"{conventional_type}: {item.title}", work_item_id=item.id),
         body=_bounded_body(body=body),
     )
 
@@ -227,7 +230,10 @@ def publication_metadata_env_lines(*, metadata: PublicationMetadata | None) -> s
     """
     if metadata is None:
         return ""
-    return f"{PR_TITLE_ENV_VAR} = {json.dumps(metadata.title)}\n"
+    return (
+        f"{PR_TITLE_ENV_VAR} = {json.dumps(metadata.title)}\n"
+        f"{PUBLICATION_SUBJECT_GUARD_ENV_VAR} = true\n"
+    )
 
 
 def publication_metadata_prepare_steps_block(*, metadata: PublicationMetadata | None) -> str:

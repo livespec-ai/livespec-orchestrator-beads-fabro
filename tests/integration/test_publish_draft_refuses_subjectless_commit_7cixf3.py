@@ -91,6 +91,8 @@ def _env(*, tmp_path: Path) -> dict[str, str]:
             "LIVESPEC_GIT_AUTHOR_NAME": "Subjectless Test",
             "LIVESPEC_GIT_AUTHOR_EMAIL": "subjectless-test@example.invalid",
             "LIVESPEC_PUBLISH_BRANCH": _PUBLISH_BRANCH,
+            "LIVESPEC_PR_TITLE": "feat: publication subject guard",
+            "LIVESPEC_PUBLICATION_SUBJECT_GUARD": "true",
         }
     )
     return env
@@ -165,6 +167,22 @@ def test_a_bare_red_subject_head_is_not_pushed_and_names_its_commit_and_subject(
     assert _pushed(work=work) == ""
     assert f"{bare_red} {placeholder}" in publish.stderr
     assert "LIVESPEC_PUBLISH_DRAFT_BARE_RED_SUBJECT" in publish.stderr
+
+
+def test_a_non_conventional_subject_head_is_not_pushed_and_names_its_commit_and_subject(
+    tmp_path: Path,
+) -> None:
+    """The publication boundary rejects subjects release-please cannot interpret."""
+    subject = "root-fix: a stranded release"
+    work = _sandbox(tmp_path=tmp_path, message=subject)
+    head = _git(work, "rev-parse", "HEAD")
+
+    publish = _publish(work=work, env=_env(tmp_path=tmp_path))
+
+    assert publish.returncode != 0
+    assert _pushed(work=work) == ""
+    assert f"{head} {subject}" in publish.stderr
+    assert "LIVESPEC_PUBLISH_DRAFT_NONCONVENTIONAL_SUBJECT" in publish.stderr
 
 
 def test_a_branch_with_authored_subjects_is_pushed_as_before(tmp_path: Path) -> None:

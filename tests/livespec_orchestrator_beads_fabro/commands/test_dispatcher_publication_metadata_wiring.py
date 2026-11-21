@@ -39,6 +39,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_overlay import (
 from livespec_orchestrator_beads_fabro.commands._dispatcher_publication_metadata import (
     PR_TITLE_ENV_VAR,
     PUBLICATION_BODY_FILENAME,
+    PUBLICATION_SUBJECT_GUARD_ENV_VAR,
     PublicationMetadata,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_entry import ResumeCheckout
@@ -87,6 +88,7 @@ def test_the_rendered_title_reaches_the_runs_environment_table(tmp_path: Path) -
     parsed = tomli.loads(_overlay(tmp_path=tmp_path, metadata=_metadata()))
 
     assert parsed["environments"][_ENVIRONMENT_ID]["env"][PR_TITLE_ENV_VAR] == _TITLE
+    assert parsed["environments"][_ENVIRONMENT_ID]["env"][PUBLICATION_SUBJECT_GUARD_ENV_VAR] is True
 
 
 def test_the_rendered_body_rides_a_prepare_step_that_actually_writes_it(
@@ -143,6 +145,7 @@ def test_a_caller_holding_no_work_item_renders_a_byte_identical_overlay(
     without = _overlay(tmp_path=tmp_path, metadata=None)
 
     assert PR_TITLE_ENV_VAR not in without
+    assert PUBLICATION_SUBJECT_GUARD_ENV_VAR not in without
     assert PUBLICATION_BODY_FILENAME not in without
     assert without == render_run_config_overlay(
         committed_text=_WORKFLOW_TOML,

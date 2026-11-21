@@ -295,6 +295,7 @@ def test_factory_authentication_precedes_vault_materialization(
         # wiring fault behind an empty title or an empty assertion set.
         item=SimpleNamespace(
             id="wi-secret-review",
+            type="task",
             title="a secret-review ordering control",
             description="",
             acceptance_criteria=None,
