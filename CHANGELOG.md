@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.345.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.344.2...v0.345.0) (2026-11-21)
+
+
+### Features
+
+* central-factory-selection claude_credential_policy mode (overseer-nspnuw) ([d2b5ee0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/d2b5ee0313d4487fe713a9447a4b86688e8d98ad))
+
 ## [0.344.2](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.344.1...v0.344.2) (2026-11-20)
 
 
