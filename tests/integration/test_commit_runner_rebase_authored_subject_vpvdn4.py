@@ -143,7 +143,7 @@ def _delayed_commit_runner(tmp_path: Path, repo: Path) -> tuple[str, Path, Path,
     )
 
 
-def _checkpoint(repo: Path, real_git: str) -> None:
+def _checkpoint(repo: Path, real_git: str, subject: str = "fabro(run): fix (success)") -> None:
     """Move HEAD using the engine's checkpoint-shaped, hooks-disabled commit."""
     _ = subprocess.run(
         [real_git, "-c", "core.hooksPath=/dev/null", "add", "-A"],
@@ -162,7 +162,7 @@ def _checkpoint(repo: Path, real_git: str) -> None:
             "--quiet",
             "--allow-empty",
             "-m",
-            "fabro(run): fix (success)",
+            subject,
         ],
         cwd=repo,
         check=True,
@@ -238,6 +238,46 @@ def test_a_runner_commit_refused_after_a_checkpoint_advance_is_overtaken_by_chec
 
     assert report["state"] == "overtaken-by-checkpoint"
     assert str(report["git_refusal_line"]).startswith("fatal: cannot lock ref 'HEAD':")
+
+
+def test_a_runner_commit_refused_after_a_non_checkpoint_advance_is_a_failure_not_overtaken(
+    tmp_path: Path,
+) -> None:
+    """Only engine checkpoints count as overtaking: another HEAD move is a real refusal."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _ = _git(repo, "init", "--quiet")
+    _ = _git(repo, "config", "user.name", "Fixture")
+    _ = _git(repo, "config", "user.email", "fixture@example.invalid")
+    _write(repo, "base.txt", "base\n")
+    _commit(repo, "base")
+
+    real_git, plugins, runner, environment = _delayed_commit_runner(tmp_path, repo)
+    _write(repo, "runner.txt", "runner change\n")
+    _ = _git(repo, "add", "runner.txt")
+    started = subprocess.run(
+        [sys.executable, str(runner), "start", "--", "git", "commit", "-m", "runner change"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    run_id = started.stdout.strip()
+    created = repo / ".git" / "runner-commit-created"
+    deadline = time.monotonic() + 10
+    while not created.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert created.is_file()
+
+    _checkpoint(repo, real_git, "fabro(run): fix (success)")
+    _checkpoint(repo, real_git, "feat: a concurrent authored commit")
+    (repo / ".git" / "release-runner-commit").touch()
+    report = json.loads(_runner(repo, plugins, "wait", run_id, "--timeout-seconds", "10"))
+
+    assert report["state"] == "failed"
+    assert str(report["git_refusal_line"]).startswith("fatal: cannot lock ref 'HEAD':")
+    assert _git(repo, "log", "-1", "--format=%s") == "feat: a concurrent authored commit"
 
 
 def test_fix_commit_settle_retries_a_checkpoint_overtaken_runner_commit(tmp_path: Path) -> None:
