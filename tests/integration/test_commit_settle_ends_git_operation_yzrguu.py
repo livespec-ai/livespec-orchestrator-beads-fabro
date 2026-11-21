@@ -125,9 +125,12 @@ def _runner(repo: Path, plugins: Path, *argv: str) -> str:
     return result.stdout.strip()
 
 
-def _hook(repo: Path, *, status: int) -> None:
+def _hook(repo: Path, *, status: int, output: str = "") -> None:
     path = repo / ".git" / "hooks" / "pre-commit"
-    _ = path.write_text(_BANNER_HOOK.format(status=status), encoding="utf-8")
+    _ = path.write_text(
+        _BANNER_HOOK.format(status=status).replace(f"exit {status}\n", output + f"exit {status}\n"),
+        encoding="utf-8",
+    )
     path.chmod(0o755)
 
 
@@ -317,6 +320,43 @@ def test_the_third_failed_fix_commit_run_routes_to_needs_human_with_its_preserve
         cause = (repo / ".git" / "livespec-stage-cause").read_text(encoding="utf-8")
         assert cause.startswith("stage: fix\ncause: LIVESPEC_FIX_COMMIT_RUN_FAILED_EXHAUSTED")
         assert all(run in cause for run in failed_runs)
+
+
+def test_fix_settle_records_the_runner_settled_run_not_a_prior_commit_token_in_its_brief(
+    tmp_path: Path,
+) -> None:
+    """The exhausted record names only failed runs reported settled by the runner."""
+    repo = _repo(tmp_path)
+    plugins = _plugins(tmp_path)
+    settled_runs: list[str] = []
+
+    for attempt in range(3):
+        _integrate(repo, "merge")
+        _hook(
+            repo,
+            status=1,
+            output="printf '%s\\n' 'Failed targets (1):' ' - commit-RANGE'\n",
+        )
+        run_id, report = _run_commit(repo, plugins)
+        assert report["state"] == "failed"
+        settled_runs.append(run_id)
+
+        result = _settle(repo, plugins, node="fix_commit_settle")
+
+        if attempt < 2:
+            assert result.returncode != 0
+            continue
+
+        assert result.returncode == 0, result.stderr
+        assert "LIVESPEC_FIX_COMMIT_RUN_FAILED_EXHAUSTED" in result.stderr
+        assert "commit-RANGE" not in result.stderr
+        assert all(run_id in result.stderr for run_id in settled_runs)
+        failed = (
+            (repo / ".git" / "livespec-fix-failed-commit-runs")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+        assert failed == settled_runs
 
 
 _WAITING_HOOK = (
