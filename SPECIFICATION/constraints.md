@@ -516,6 +516,8 @@ on the same host as a queue drain, so both are bound identically.
   request URL is a violation of this section regardless of whether the
   run subsequently succeeded.
 
+- **Repository-controlled hooks and gates of a publication stage reach a push only through an unreadable credential helper, and never see a forge credential.** The FACTORY SANDBOX's publication command stages (`publish_draft`, `pr_refresh`, `pr`) run the repository's own pre-push hooks and gates. Such a hook or gate MUST succeed in pushing when it is legitimate: its push MUST reach origin through the Dispatcher-materialized credential helper that holds the credential outside the hook's reach. The process of a hook or gate those stages run MUST find no forge token and no GitHub App key, nor any key from which one can be minted, in its environment or in any file it can read; the credential is never exposed to repository-controlled code through an environment variable or a readable file. Consequently a hook or gate an agent stage changed to publish or merge runs without the credential and its attempt fails without changing origin or the run's pull request. This is the safety guarantee behind `contracts.md` paragraph 'Publication is mechanically confined to the scripted publication stages', stated here as a constraint an operator can observe; the wire-level mechanism stays in `contracts.md`. It is a rule about CAPABILITY: a credential reachable by any route a hook or gate can read is held by the hook or gate, whatever the route is named.
+
 **Verification.** For each capability withheld under this section, the
 governing check is that the factory sandbox's credential does not hold it and
 that an item requiring it is refused at admission rather than at publish. A
