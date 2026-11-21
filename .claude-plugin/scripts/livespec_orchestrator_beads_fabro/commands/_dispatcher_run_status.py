@@ -86,6 +86,10 @@ class PrView:
     terminal_check_failures: tuple[str, ...] = ()
     running_checks: tuple[str, ...] = ()
     terminal_check_failure_details: tuple[TerminalCheckFailure, ...] = ()
+    # This is deliberately a boolean rather than the entry's enqueue time: the
+    # merge poll needs to compare consecutive forge observations, and the
+    # presence transition is the fact it routes on.
+    merge_queue_queued: bool = False
 
     def matches_publication(self, *, branch: str, head: str, repository: str) -> bool:
         """Whether this is a live or merged publication of the checkpoint head."""
@@ -158,6 +162,7 @@ def parse_pr_view(*, stdout: str) -> PrView | None:
         terminal_check_failures=tuple(item.name for item in terminal_failure_details),
         terminal_check_failure_details=terminal_failure_details,
         running_checks=running,
+        merge_queue_queued=parsed.get("mergeQueueEntry") is not None,
     )
 
 

@@ -9,6 +9,7 @@ from typing import Protocol, TypeVar, cast
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_base_advance import (
     BASE_ADVANCED_AFTER_ARMING,
+    MERGE_QUEUE_REMOVED_AFTER_ARMING,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_base_advance_record_files import (
     record_file_resume_paths,
@@ -127,6 +128,59 @@ def resume_overtaken_record_files(
     conflict set that could not be measured, a head or tip the forge never
     reported, or any conflicted path that is not a declared record file.
     """
+    measured = outcome.base_advanced
+    if measured is None:
+        return None
+    if measured.cause == MERGE_QUEUE_REMOVED_AFTER_ARMING:
+        return _resume_after_queue_removal(
+            outcome=outcome,
+            journal=journal,
+            resolve_ready=resolve_ready,
+            resume=resume,
+        )
+    return _resume_record_file_conflict(
+        outcome=outcome,
+        config_text=config_text,
+        journal=journal,
+        resolve_ready=resolve_ready,
+        resume=resume,
+    )
+
+
+def _resume_after_queue_removal(
+    *,
+    outcome: DispatchOutcome,
+    journal: _JournalWriter,
+    resolve_ready: Callable[..., None],
+    resume: Callable[..., DispatchOutcome],
+) -> DispatchOutcome | None:
+    """Release and resume the dequeue-conflict route at the normal refresh entry."""
+    measured = outcome.base_advanced
+    if measured is None or measured.pr_head is None or measured.default_branch_tip is None:
+        return None
+    journal.append(
+        record={
+            "stage": "merge-queue-removed-resume",
+            "work_item_id": outcome.work_item_id,
+            "run_id": outcome.fabro_run_id,
+            "pr_number": outcome.pr_number,
+            "pr_head": measured.pr_head,
+            "default_branch_tip": measured.default_branch_tip,
+        }
+    )
+    resolve_ready(work_item_id=outcome.work_item_id)
+    return resume(work_item_id=outcome.work_item_id)
+
+
+def _resume_record_file_conflict(
+    *,
+    outcome: DispatchOutcome,
+    config_text: str,
+    journal: _JournalWriter,
+    resolve_ready: Callable[..., None],
+    resume: Callable[..., DispatchOutcome],
+) -> DispatchOutcome | None:
+    """Keep the original record-file-only automatic resume narrowly scoped."""
     measured = outcome.base_advanced
     if measured is None or measured.cause != BASE_ADVANCED_AFTER_ARMING:
         return None
