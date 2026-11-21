@@ -56,12 +56,16 @@ verdicts is that judgement's concern and is owned separately.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from livespec_runtime import spec_stated
 from returns.pipeline import is_successful
 
 from livespec_orchestrator_beads_fabro._store_comments import append_work_item_comment
+from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done import (
+    definition_of_done,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement import (
     CAUSE_UNPARSEABLE_VERDICT,
 )
@@ -78,6 +82,7 @@ from livespec_orchestrator_beads_fabro.commands._dod_governing_heading import (
 from livespec_orchestrator_beads_fabro.commands._drift_run_judge import drift_judge
 from livespec_orchestrator_beads_fabro.commands._spec_change_tier import (
     CONFIGURATION_RUBRIC,
+    NO_TIER,
     SPEC_DIRNAME,
     asked_for_behaviour,
     behaviour_digest,
@@ -92,6 +97,7 @@ from livespec_orchestrator_beads_fabro.commands._spec_change_tier_outcome import
     standing_outcome,
 )
 from livespec_orchestrator_beads_fabro.commands._spec_change_tier_record import (
+    STAGE_FILING,
     TierClauseProvenance,
     recorded_spec_change_tier,
 )
@@ -106,10 +112,13 @@ from livespec_orchestrator_beads_fabro.effects import AttemptFailure, attempt
 from livespec_orchestrator_beads_fabro.spec_reader import read_current_specification
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
     from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandRunner
+    from livespec_orchestrator_beads_fabro.commands._spec_change_tier import (
+        SpecChangeTierDecision,
+    )
     from livespec_orchestrator_beads_fabro.types import SpecSnapshot, StoreConfig, WorkItem
 
 __all__: list[str] = [
@@ -241,15 +250,22 @@ def classify_spec_change_tier(
             append=append,
         )
     standing = recorded_spec_change_tier(comments=comments)
+    decision = decide_spec_change_tier(
+        item=item,
+        classification=item_class,
+        verdict=verdict.unwrap(),
+        linked_proposal_topic=None if standing is None else standing.linked_proposal_topic,
+    )
+    decision = _filing_internal_ruling(
+        decision=decision,
+        description=item.description,
+        spec_tree=snapshot.files,
+        stage=stage,
+    )
     return recorded_outcome(
         item=item,
         stage=stage,
-        decision=decide_spec_change_tier(
-            item=item,
-            classification=item_class,
-            verdict=verdict.unwrap(),
-            linked_proposal_topic=None if standing is None else standing.linked_proposal_topic,
-        ),
+        decision=decision,
         context=TierRecordContext(
             spec_version=spec_version,
             digest=digest,
@@ -258,14 +274,37 @@ def classify_spec_change_tier(
                 named=clauses_named(
                     spec_tree=snapshot.files,
                     headings=verdict_named_headings(
-                        stated_by=verdict.unwrap().stated_by,
-                        generalization_target=verdict.unwrap().generalization_target,
+                        stated_by=decision.verdict.stated_by if decision.verdict else (),
+                        generalization_target=(
+                            None
+                            if decision.verdict is None
+                            else decision.verdict.generalization_target
+                        ),
                     ),
                 ),
             ),
         ),
         append=append,
     )
+
+
+def _filing_internal_ruling(
+    *,
+    decision: SpecChangeTierDecision,
+    description: str,
+    spec_tree: Mapping[str, str],
+    stage: str,
+) -> SpecChangeTierDecision:
+    """Name the resolved filing reference that makes a free tier an internal ruling."""
+    if stage != STAGE_FILING or decision.tier != NO_TIER or decision.verdict is None:
+        return decision
+    for reference in definition_of_done(description=description).references:
+        if clauses_named(spec_tree=spec_tree, headings=(reference,)):
+            return replace(
+                decision,
+                verdict=replace(decision.verdict, generalization_target=reference),
+            )
+    return decision
 
 
 def classify_item_spec_change_tier(

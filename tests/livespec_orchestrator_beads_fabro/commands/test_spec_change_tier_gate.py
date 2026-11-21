@@ -274,6 +274,29 @@ def test_a_bug_with_stated_behaviour_records_a_free_tier(
     assert _calls(ledger=ledger) == 2
 
 
+def test_a_filing_none_tier_records_its_referenced_heading_as_the_internal_ruling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path=tmp_path)
+    _ = _install_judge(tmp_path=tmp_path, monkeypatch=monkeypatch, replies=("bug", _STATED))
+    item = _item(
+        description=(
+            "## Definition of Done\n\n"
+            "- The cited topic is the nearest topic, not a governing clause.\n\n"
+            f"References: {_HEADING}\n"
+        )
+    )
+    append_work_item(path=_config(repo=repo), item=item)
+
+    outcome = classify_item_spec_change_tier(
+        item=item, repo=repo, path=_config(repo=repo), stage=STAGE_FILING
+    )
+
+    assert outcome.recorded is not None
+    assert outcome.recorded.tier == "none"
+    assert outcome.recorded.generalization_target == _HEADING
+
+
 @pytest.mark.parametrize("classification", ["bug", "chore", "non_functional"])
 def test_an_exempt_record_is_reused_until_its_asked_for_behaviour_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, classification: ItemClass
