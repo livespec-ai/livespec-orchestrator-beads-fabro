@@ -34,6 +34,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_leg import (
     PROOF_RECORD_EVIDENCE_LEG,
     AssertionEvidence,
     ProofLeg,
+    unreproduced_factory_captured_assertions,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_record import (
     VERDICT_HOST_VERIFIED,
@@ -229,3 +230,20 @@ def test_the_journal_projection_reports_no_record_when_none_was_attributed() -> 
     assert projection["record_comment"] is None
     assert projection["record_run_id"] is None
     assert projection["record_verdict"] is None
+
+
+def test_an_unrecorded_proof_leg_has_no_unreproduced_factory_assertion() -> None:
+    """A negative assertion cannot be parked until a proof-only record reports it."""
+    leg = _leg(
+        assertions=(
+            _evidence(
+                text=_FACTORY,
+                mode=PROOF_MODE_FACTORY_CAPTURED,
+                leg=PROOF_RECORD_EVIDENCE_LEG,
+                passed=False,
+            ),
+        ),
+        host=HostLeg(grades=(), verified_record=None, refused=()),
+    )
+
+    assert unreproduced_factory_captured_assertions(proof=leg) == ()

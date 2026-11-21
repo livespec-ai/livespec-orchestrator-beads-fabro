@@ -30,7 +30,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_acceptance_rework im
 from livespec_orchestrator_beads_fabro.commands._dispatcher_blocked import (
     escalate_needs_human_block,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_claim_writes import LEDGER_WRITE_ERRORS
+from livespec_orchestrator_beads_fabro.commands._dispatcher_completion_bounce import (
+    bounce_non_convergence_to_backlog as _bounce_non_convergence_to_backlog,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_completion_claims import CompletionClaim
 from livespec_orchestrator_beads_fabro.commands._dispatcher_completion_close import (
     close_dispatch_item,
@@ -38,6 +40,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_completion_close imp
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_decision_journal import (
     auto_disposition_journal_record,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done import (
+    PROOF_MODE_FACTORY_CAPTURED,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_effective_criteria import (
     effective_criteria,
@@ -59,26 +64,22 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_lifecycle_writes imp
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_non_convergence_cap import (
     NON_CONVERGENCE_BOUNCE_STAGE,
-    non_convergence_cap,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import store_config
-from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import (
-    is_non_convergence_outcome,
-    item_sizing_warnings,
-)
-from livespec_orchestrator_beads_fabro.commands._dispatcher_stall_window import (
-    resolve_stall_window,
+from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import item_sizing_warnings
+from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_record import (
+    VERDICT_NOT_REPRODUCED,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_valves import (
     DEFAULT_ACCEPTANCE_POLICY,
     effective_acceptance_policy,
 )
-from livespec_orchestrator_beads_fabro.effects import AttemptFailure, attempt
 from livespec_orchestrator_beads_fabro.io import write_stderr
 from livespec_orchestrator_beads_fabro.store import update_work_item_status
 from livespec_orchestrator_beads_fabro.types import WorkItem
 
 __all__: list[str] = [
+    "NON_CONVERGENCE_BOUNCE_STAGE",
     "bounce_non_convergence_to_backlog",
     "complete_and_accept",
     "escalate_needs_human_block",
@@ -95,6 +96,7 @@ def complete_and_accept(  # noqa: PLR0911, PLR0915 — one return per dispositio
     item: WorkItem,
     outcome: DispatchOutcome,
     journal: JournalFile,
+    park_unreproduced_factory_captured: bool = False,
 ) -> AcceptanceDisposition:
     """Run the post-merge acceptance valve for a green dispatch.
 
@@ -190,6 +192,23 @@ def complete_and_accept(  # noqa: PLR0911, PLR0915 — one return per dispositio
             journal=journal,
         )
         return AcceptanceDisposition(verdict=acceptance_pass.verdict, closed=False)
+    if park_unreproduced_factory_captured and _proof_only_arm_did_not_reproduce_factory_assertion(
+        acceptance_pass=acceptance_pass
+    ):
+        # A proof-only resume is evidence gathering after the item's merge, not
+        # a new implementation attempt.  Its negative factory observation
+        # therefore stays in acceptance under every policy: it neither changes
+        # the item's status nor spends an acceptance rework attempt or starts a
+        # fix stage.
+        park_in_acceptance(
+            repo=repo,
+            item_id=item.id,
+            policy=decision.policy,
+            acceptance_pass=acceptance_pass,
+            outcome=outcome,
+            journal=journal,
+        )
+        return AcceptanceDisposition(verdict=acceptance_pass.verdict, closed=False)
     verdict = acceptance_pass.verdict
     if verdict == NO_CHANGE_NEEDED_VERDICT and decision.to_done:
         refused = claim.hold_for_close(intent="close-no-change-needed")
@@ -271,6 +290,21 @@ def complete_and_accept(  # noqa: PLR0911, PLR0915 — one return per dispositio
     return AcceptanceDisposition(verdict=acceptance_pass.verdict, closed=False)
 
 
+def _proof_only_arm_did_not_reproduce_factory_assertion(
+    *, acceptance_pass: AcceptancePassResult
+) -> bool:
+    """Whether this re-accept read a negative factory result from the proof-only arm."""
+    proof = acceptance_pass.proof
+    if proof is None or proof.record is None or proof.record.verdict != VERDICT_NOT_REPRODUCED:
+        return False
+    return any(
+        assertion.proof_mode == PROOF_MODE_FACTORY_CAPTURED
+        and assertion.check is not None
+        and not assertion.check.passed
+        for assertion in proof.assertions
+    )
+
+
 def _pending_legs(*, item: WorkItem, acceptance_pass: AcceptancePassResult) -> tuple[str, ...]:
     """The assertions whose pending leg still holds this item in `acceptance`.
 
@@ -295,88 +329,17 @@ def _pending_legs(*, item: WorkItem, acceptance_pass: AcceptancePassResult) -> t
 
 
 def bounce_non_convergence_to_backlog(
-    *,
-    repo: Path,
-    item: WorkItem,
-    outcome: DispatchOutcome,
-    journal: JournalFile,
+    *, repo: Path, item: WorkItem, outcome: DispatchOutcome, journal: JournalFile
 ) -> None:
-    """Bounce a non-converging slice to `backlog` and surface it (n5kina).
-
-    Per SPECIFICATION/contracts.md and
-    SPECIFICATION/scenarios.md "Scenario 11 — Dispatcher bounces a
-    non-converging slice to backlog": when a dispatched slice will
-    not converge through the janitor gate within the bounded fix-loop cap,
-    the Dispatcher MUST escalate it (escalate-don't-drop) — non-convergence
-    is the empirical "too big" signal, never a reason to infinite-retry. The
-    single Fabro DOT tweak (work-item livespec-impl-beads-rw75ym,
-    Scenario 14) routes the fix-loop-cap exhaustion back to the Dispatcher;
-    THIS is the Dispatcher-side counterpart that bounces the slice.
-
-    Under the work-item-state-machine lifecycle the bounce target is the
-    first-class `backlog` status (the slice leaves the WIP and re-enters
-    intake for re-grooming), not a separate regroom label. Runs AFTER
-    the terminal `outcome` is journaled and only for a non-convergence
-    terminal (`is_non_convergence_outcome`): it transitions the item to
-    `backlog` via the store seam and journals a `non-convergence-bounce`
-    record plus a stderr SURFACE line. It does NOT retry and does NOT close
-    the item — the slice waits at `backlog` for the groom front-end to
-    decompose.
-
-    Fail-soft on the ledger write: the verdict is already final, so a
-    `WorkItemNotFoundError` (the item was pruned between dispatch and
-    bounce) or a beads command/connection failure is journaled as
-    `non-convergence-bounce-error` and swallowed — the dispatch never
-    crashes on the escalation write (mirroring the cost-gate / calibration
-    fail-soft stages). A genuine bug still propagates.
-
-    The bounce is a claim-changing write: with `dispatcher.claim_tokens` true it
-    lands only after winning the item's current claim token, and a bounce that
-    loses it writes nothing to the item and journals `claim-write-refused`.
-    """
-    if not is_non_convergence_outcome(outcome=outcome):
-        return
-    # WHICH cap tripped, and what it observed (plan slice S4, `bd-ib-tbgxm4`).
-    # Resolved BEFORE the ledger write so both arms below carry it: an escalation
-    # that could not land is the one most worth naming, and an error record that
-    # said only "the write failed" leaves nobody able to tell a hung sandbox from
-    # a slice that genuinely would not converge.
-    cap = non_convergence_cap(outcome=outcome, stall_seconds=resolve_stall_window(cwd=repo).seconds)
-    updated = attempt(
-        action=lambda: CompletionClaim(
-            repo=repo, path=store_config(repo=repo), item=item, outcome=outcome, journal=journal
-        ).bounce(write=update_work_item_status),
-        exceptions=LEDGER_WRITE_ERRORS,
+    """Bounce through the legacy seam so callers can observe its ledger write."""
+    _bounce_non_convergence_to_backlog(
+        repo=repo,
+        item=item,
+        outcome=outcome,
+        journal=journal,
+        store_config_resolver=store_config,
+        status_writer=update_work_item_status,
     )
-    if isinstance(updated, AttemptFailure):
-        journal.append(
-            record={
-                "stage": "non-convergence-bounce-error",
-                "work_item_id": item.id,
-                "reason": f"{type(updated.error).__name__}",
-                **cap.as_record(),
-            }
-        )
-        return
-    if updated is not None:
-        # The claim-token protocol refused the write and journaled why; the
-        # slice was not bounced, so no bounce record or surface line is owed.
-        return
-    journal.append(
-        record={
-            "stage": NON_CONVERGENCE_BOUNCE_STAGE,
-            "work_item_id": item.id,
-            "outcome_stage": outcome.stage,
-            "outcome_status": outcome.status,
-            **cap.as_record(),
-        }
-    )
-    surface_line = (
-        f"SURFACE: work-item {item.id} did not converge through the janitor gate "
-        f"({outcome.status} at {outcome.stage}); bounced to backlog and surfaced "
-        f"for re-grooming — NOT infinite-retried.\n"
-    )
-    _ = write_stderr(text=surface_line)
 
 
 def warn_item_sizing(*, item: WorkItem, journal: JournalFile) -> None:

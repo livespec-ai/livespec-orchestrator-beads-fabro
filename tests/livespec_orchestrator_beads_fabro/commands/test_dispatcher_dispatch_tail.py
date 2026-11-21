@@ -68,11 +68,12 @@ def _outcome() -> DispatchOutcome:
     )
 
 
-def _args(*, repo: Path) -> argparse.Namespace:
+def _args(*, repo: Path, resume_proof_only: bool = False) -> argparse.Namespace:
     return argparse.Namespace(
         repo=str(repo),
         journal=str(repo / "journal.jsonl"),
         as_json=False,
+        resume_proof_only=resume_proof_only,
     )
 
 
@@ -143,6 +144,71 @@ def test_the_returned_code_is_the_verdict_the_stages_cannot_change(
 
     assert exit_code == 4
     assert tuple(calls) == _EXPECTED_ORDER
+
+
+def test_a_completed_proof_only_resume_reconciles_acceptance_after_its_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scenario 257: the new verified record is read only after the arm has ended."""
+    assert _module_path().is_file()
+    module = importlib.import_module(_MODULE)
+    calls: list[str] = []
+    _record_every_stage(module=module, monkeypatch=monkeypatch, calls=calls, verdict=0)
+    monkeypatch.setattr(
+        module,
+        "reconcile_proof_only_acceptance",
+        lambda **_kwargs: calls.append("reconcile_proof_only_acceptance"),
+        raising=False,
+    )
+    journal = JournalFile(path=tmp_path / "journal.jsonl", identity="test:tail")
+
+    exit_code = module.dispatch_tail_exit(
+        args=_args(repo=tmp_path, resume_proof_only=True),
+        repo=tmp_path,
+        outcome=_outcome(),
+        journal=journal,
+    )
+
+    assert exit_code == 0
+    assert tuple(calls) == (*_EXPECTED_ORDER, "reconcile_proof_only_acceptance")
+
+
+def test_the_proof_only_reaccept_passes_the_merged_arm_facts_to_reconcile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scenario 257's re-accept arm remains scoped to its completed proof-only run."""
+    module = importlib.import_module(_MODULE)
+    received: list[argparse.Namespace] = []
+
+    def _capture(*, args: argparse.Namespace) -> None:
+        received.append(args)
+
+    monkeypatch.setattr(
+        module,
+        "run_reconcile_merged_command",
+        _capture,
+    )
+    journal = JournalFile(path=tmp_path / "journal.jsonl", identity="test:tail")
+
+    module.reconcile_proof_only_acceptance(
+        args=argparse.Namespace(invoker="factory:test", as_json=True),
+        repo=tmp_path,
+        outcome=_outcome(),
+        journal=journal,
+    )
+
+    assert vars(received[0]) == {
+        "repo": str(tmp_path),
+        "item": "bd-ib-one",
+        "janitor": None,
+        "journal": str(journal.path),
+        "invoker": "factory:test",
+        "force": True,
+        "regrade": False,
+        "as_json": True,
+        "pr": 7,
+        "proof_only_reaccept": True,
+    }
 
 
 def test_the_dispatch_command_runs_the_shared_tail_rather_than_its_own_copy() -> None:
