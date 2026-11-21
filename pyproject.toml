@@ -742,6 +742,16 @@ destructive_cli_allowlist = [
 # - test_gate_preview_running_step_42erfz.py runs the same materialized preview
 #   to read the process tree of a live hook, which only a real child has. It
 #   drops the same variables.
+# - test_publication_broker.py launches the publication broker as its OWN
+#   process, through the module's real `python -m` entry point, over a real
+#   standard-input stream and a stand-in `gh` on `PATH`. The scenario's claim is
+#   that the credential lives in a process the agent stage does not share, so
+#   what it reads -- the broker process's own environment as the kernel reports
+#   it, and what the broker's child can see -- exists only across a real process
+#   boundary, and an in-process `main()` call would put the credential in the
+#   test's own address space. It passes an explicit `env` holding only `PATH`,
+#   `PYTHONPATH` and the stand-in's record file, so no COVERAGE_PROCESS_START or
+#   COV_CORE_ variable reaches the child.
 #
 # This key MUST stay above the `[[...mirror_pairings]]` array-of-tables
 # below (same TOML attachment reason as `destructive_cli_allowlist`).
@@ -786,6 +796,7 @@ subprocess_spawn_allowlist = [
     "tests/integration/test_routing_schema_nodes_emit_a_directive.py",
     "tests/integration/test_gate_preview_progress_and_record_42erfz.py",
     "tests/integration/test_gate_preview_running_step_42erfz.py",
+    "tests/livespec_orchestrator_beads_fabro/commands/test_publication_broker.py",
 ]
 
 [[tool.livespec_dev_tooling.mirror_pairings]]
