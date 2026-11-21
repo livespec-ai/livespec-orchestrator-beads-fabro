@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from datetime import datetime, timezone
+from inspect import signature
 from pathlib import Path
 from typing import Any
 
@@ -410,6 +411,16 @@ def test_pool_and_admission_helpers_follow_the_central_selection(
     assert selector.policy_pool_slots(repo=tmp_path, environ=_TOKENS) == (_SLOT_5,)
     assert selector.repo_credential_refusal(repo=tmp_path, environ=_TOKENS) is None
     assert selector.policy_pool_slots(repo=tmp_path, environ=_TOKENS, central=none_named) == ()
+
+
+def test_policy_pool_slots_uses_the_callers_clock_for_an_implicit_central_selection(
+    tmp_path: Path,
+) -> None:
+    _central_config(repo=tmp_path)
+    _write_record(home=tmp_path, payload=_record())
+
+    assert "now" in signature(selector.policy_pool_slots).parameters
+    assert selector.policy_pool_slots(repo=tmp_path, environ=_TOKENS, now=_NOW) == (_SLOT_5,)
 
 
 def test_central_selection_for_is_none_unless_the_policy_asks_for_it(tmp_path: Path) -> None:
