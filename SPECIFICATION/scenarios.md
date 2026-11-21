@@ -5208,7 +5208,7 @@ Feature: A dead run's publish branch does not block the item's next dispatch, an
     And the dispatch journal carries a publish-branch-reclaim-held record naming which measurement stopped the reclaim
     And the dispatch is not refused by the reclaim
   Scenario: The reclaim is a host-side act and publish_draft is unchanged
-    Given a dispatched run whose publish_draft stage runs with no refresh-repair round before it
+    Given a dispatched run whose publish_draft stage meets an origin publish branch that is absent or whose tip is an ancestor of the head to publish
     When it pushes the publish branch
     Then the push is a plain fast-forward and no other ref is rewritten
 ```
@@ -6718,9 +6718,32 @@ Feature: A green run survives a default branch that moved under it
     Then publish_draft pushes R with an explicit lease against the recorded remote head of this run's own publish branch, P
     And the run enters proof_capture for R rather than needs_human
 
-  Scenario: publish_draft still refuses a foreign divergent tip after a repair
-    Given a run that re-enters publish_draft after a refresh-repair round with repaired head R and previously published head P
+  Scenario: A fix turn that rebuilt the run's published commit is republished over the run's own published head
+    Given a run whose publish_draft pushed head P to origin and recorded it
+    And the janitor's range check-red-green-replay rejected the run's history
+    And a fix turn rebuilt the run's commits into a head R that does not contain P, with no refresh-repair round taken
+    And origin's publish branch tip equals P
+    When the run re-enters publish_draft after janitor passes on R
+    Then publish_draft pushes R with an explicit lease against the recorded remote head of this run's own publish branch, P
+    And the repository's hooks run during that push
+    And the run enters proof_capture for R rather than needs_human
+
+  Scenario: A visit that follows a review-fix round republishes only over the run's own published head
+    Given a run that completed publish_draft at P and then took a review-fix round whose commits rebuilt the run's published history into R
+    And origin's publish branch tip equals P
+    When the run re-enters publish_draft
+    Then publish_draft pushes R with an explicit lease against P
+    And the repository's hooks run during that push
+
+  Scenario: publish_draft still refuses a foreign divergent tip whichever route led to the visit
+    Given a run that re-enters publish_draft with head to publish R and an established previously published head P
     And origin's publish branch tip is T, which is neither an ancestor of R nor equal to P
+    When publish_draft publishes
+    Then publish_draft fails closed with its divergent-prior-run cause and pushes nothing
+
+  Scenario: publish_draft refuses a non-ancestor tip when the run has no established previously published head
+    Given a run whose previously published head can be established neither from its publication record nor from its validated resume provenance
+    And origin's publish branch tip is T, which is not an ancestor of the head to publish R
     When publish_draft publishes
     Then publish_draft fails closed with its divergent-prior-run cause and pushes nothing
 
