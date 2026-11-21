@@ -255,6 +255,41 @@ def test_an_agent_stage_cannot_reach_gh_pull_request_publication(
     assert not capture.exists()
 
 
+def test_an_agent_stage_cannot_relabel_its_gh_publication_command_as_pr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scenario 202: an inline stage reassignment cannot publish a pull request."""
+    repo = _git_repo(root=tmp_path / "clone")
+    bundle_root = repo / _BUNDLE_DIRNAME
+    scripts = _rendered_prepare_scripts(monkeypatch=monkeypatch, bundle_root=bundle_root)
+    capture = tmp_path / "gh-calls.txt"
+    bin_dir = _stub_path_dir(root=tmp_path / "bin", capture=capture)
+    _run_prepare_chain(scripts=scripts, repo=repo, bin_dir=bin_dir, tmp_path=tmp_path)
+    _write_executable(
+        path=bin_dir / "python3",
+        source="#!/usr/bin/env bash\nset -eu\nprintf minted-token\n",
+    )
+
+    result = subprocess.run(
+        ["bash", "-c", "LIVESPEC_AGENT_STAGE=pr gh pr create"],
+        cwd=repo,
+        env={
+            **_chain_env(bin_dir=bin_dir, capture=capture, mint_log=tmp_path / "mint-args.txt"),
+            "LIVESPEC_AGENT_STAGE": "proof_verify",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert (
+        "LIVESPEC_AGENT_PUBLICATION_DENIED: stage=proof_verify action=gh_pr_create" in result.stderr
+    )
+    assert not capture.exists()
+
+
 @pytest.mark.parametrize(
     ("command", "action"),
     [
