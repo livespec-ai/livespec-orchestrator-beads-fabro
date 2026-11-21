@@ -720,7 +720,7 @@ def coverage_row_file(line, *, include_figures=False):
         return None
     missing = row.group("missing")
     detail = "uncovered lines " + missing if missing else row.group("cover") + "% covered"
-    if include_figures:
+    if include_figures or row.group("cover") == "99":
         partial_branches = row.group("partial_branches")
         if partial_branches is not None:
             figures = row.group("missed") + " missed, " + partial_branches + " partial branch"
