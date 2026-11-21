@@ -217,18 +217,14 @@ def test_a_subjectless_rebase_brief_names_the_resumable_authored_forms(tmp_path:
     assert "git commit -m <subject>" in brief
 
 
-@pytest.mark.parametrize(
-    ("stage", "settle"),
-    [("fix", "fix_commit_settle"), ("review_fix", "review_fix_commit_settle")],
-)
-def test_a_stage_visit_refuses_a_second_wait_after_the_first_reported_running(
+@pytest.mark.parametrize("stage", ["fix", "review_fix"])
+def test_a_stage_visit_repeats_its_wait_until_the_commit_run_is_terminal(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
     stage: str,
-    settle: str,
 ) -> None:
-    """Scenario 179: one running report leaves the commit for that stage's settle."""
+    """Scenario 179: a repair turn keeps waiting so its end never races the engine checkpoint."""
     monkeypatch.setenv("LIVESPEC_AGENT_STAGE", stage)
     program = _program(tmp_path)
     program["group_alive"] = _alive
@@ -237,17 +233,13 @@ def test_a_stage_visit_refuses_a_second_wait_after_the_first_reported_running(
     assert program["wait"](_RUN_ID, 0) == 0
     assert _last_report(capsys) == {REPORT_RUN_ID_KEY: _RUN_ID, REPORT_STATE_KEY: "running"}
 
-    with pytest.raises(program["RunnerRefusal"], match=rf"{_RUN_ID}.*running.*{settle}"):
-        _ = program["wait"](_RUN_ID, 0)
+    assert program["wait"](_RUN_ID, 0) == 0
+    assert _last_report(capsys) == {REPORT_RUN_ID_KEY: _RUN_ID, REPORT_STATE_KEY: "running"}
     assert json.loads(path.read_text(encoding="utf-8")) == {"state": "running"}
 
     program["group_alive"] = _gone
-    assert program["settle"](0, str(tmp_path / "brief"), stage=stage) == 0
-    _ = path.write_text(json.dumps({"state": "running"}), encoding="utf-8")
-    program["group_alive"] = _alive
-
     assert program["wait"](_RUN_ID, 0) == 0
-    assert _last_report(capsys) == {REPORT_RUN_ID_KEY: _RUN_ID, REPORT_STATE_KEY: "running"}
+    assert _last_report(capsys)[REPORT_STATE_KEY] == "no-verdict"
 
 
 def test_a_running_record_whose_processes_are_gone_reads_as_no_verdict(
