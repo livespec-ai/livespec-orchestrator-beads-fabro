@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_commit_runner_program import (
@@ -96,6 +98,81 @@ def _runner(repo: Path, plugins: Path, *argv: str) -> str:
     return result.stdout.strip()
 
 
+def _delayed_commit_runner(tmp_path: Path, repo: Path) -> tuple[str, Path, Path, dict[str, str]]:
+    """Install a runner whose final expected-HEAD update waits for the checkpoint."""
+    real_git = shutil.which("git")
+    assert real_git is not None
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text(
+        "#!/bin/sh\n" "printf '%s\\n' 'lefthook hook: pre-commit' 'All 1 targets passed.'\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "git").write_text(
+        "#!/bin/sh\n"
+        'if test "${LIVESPEC_TEST_DELAYED_COMMIT:-}" = 1 && test "${1:-}" = commit; then\n'
+        '  git_dir="$($LIVESPEC_TEST_REAL_GIT rev-parse --git-dir)"\n'
+        '  "$git_dir/hooks/pre-commit" || exit $?\n'
+        '  start="$($LIVESPEC_TEST_REAL_GIT rev-parse HEAD)"\n'
+        '  tree="$($LIVESPEC_TEST_REAL_GIT write-tree)"\n'
+        '  commit="$($LIVESPEC_TEST_REAL_GIT commit-tree "$tree" -p "$start" -m \'runner change\')"\n'
+        '  touch "$git_dir/runner-commit-created"\n'
+        '  while test ! -f "$git_dir/release-runner-commit"; do sleep 0.01; done\n'
+        '  exec "$LIVESPEC_TEST_REAL_GIT" update-ref HEAD "$commit" "$start"\n'
+        "fi\n"
+        'exec "$LIVESPEC_TEST_REAL_GIT" "$@"\n',
+        encoding="utf-8",
+    )
+    (bin_dir / "git").chmod(0o755)
+    plugins = tmp_path / "plugins"
+    plugins.mkdir()
+    runner = plugins / COMMIT_RUNNER_PROGRAM_FILENAME
+    runner.write_text(commit_runner_program_source(), encoding="utf-8")
+    return (
+        real_git,
+        plugins,
+        runner,
+        {
+            **_environment(),
+            "LIVESPEC_TEST_DELAYED_COMMIT": "1",
+            "LIVESPEC_TEST_REAL_GIT": real_git,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        },
+    )
+
+
+def _checkpoint(repo: Path, real_git: str) -> None:
+    """Move HEAD using the engine's checkpoint-shaped, hooks-disabled commit."""
+    _ = subprocess.run(
+        [real_git, "-c", "core.hooksPath=/dev/null", "add", "-A"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_environment(),
+    )
+    checkpoint = subprocess.run(
+        [
+            real_git,
+            "-c",
+            "core.hooksPath=/dev/null",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "fabro(run): fix (success)",
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_environment(),
+    )
+    assert checkpoint.returncode == 0
+
+
 def test_a_rebase_resolution_reuses_the_picked_authored_subject_and_settles(tmp_path: Path) -> None:
     repo = _stopped_rebase_repo(tmp_path)
     plugins = tmp_path / "plugins"
@@ -123,3 +200,41 @@ def test_a_rebase_resolution_reuses_the_picked_authored_subject_and_settles(tmp_
     assert settled.returncode == 0, settled.stderr
     assert _git(repo, "log", "-1", "--format=%s") == "fix: next pick"
     assert not (repo / ".git" / "rebase-merge").exists()
+
+
+def test_a_runner_commit_refused_after_a_checkpoint_advance_is_overtaken_by_checkpoint(
+    tmp_path: Path,
+) -> None:
+    """A passed hook plus Git's expected-HEAD refusal is not a hook refusal."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _ = _git(repo, "init", "--quiet")
+    _ = _git(repo, "config", "user.name", "Fixture")
+    _ = _git(repo, "config", "user.email", "fixture@example.invalid")
+    _write(repo, "base.txt", "base\n")
+    _commit(repo, "base")
+
+    real_git, plugins, runner, environment = _delayed_commit_runner(tmp_path, repo)
+    _write(repo, "runner.txt", "runner change\n")
+    _ = _git(repo, "add", "runner.txt")
+    started = subprocess.run(
+        [sys.executable, str(runner), "start", "--", "git", "commit", "-m", "runner change"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    run_id = started.stdout.strip()
+    created = repo / ".git" / "runner-commit-created"
+    deadline = time.monotonic() + 10
+    while not created.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert created.is_file()
+
+    _checkpoint(repo, real_git)
+    (repo / ".git" / "release-runner-commit").touch()
+    report = json.loads(_runner(repo, plugins, "wait", run_id, "--timeout-seconds", "10"))
+
+    assert report["state"] == "overtaken-by-checkpoint"
+    assert str(report["git_refusal_line"]).startswith("fatal: cannot lock ref 'HEAD':")

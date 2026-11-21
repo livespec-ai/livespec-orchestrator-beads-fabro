@@ -109,13 +109,14 @@ from pathlib import Path
 
 RUNNING = "running"
 NO_VERDICT = "no-verdict"
+OVERTAKEN_BY_CHECKPOINT = "overtaken-by-checkpoint"
 STAGE_SETTLES = {"fix": "fix_commit_settle", "review_fix": "review_fix_commit_settle"}
 AUTHORING_STAGES = ("implement", "fix", "review_fix")
 AUTHORING_TURN_VARIABLE = "LIVESPEC_AUTHORING_TURN"
 TAIL_LINES = 60
 BRIEF_TAIL_LINES = 80
 # Worst first: a settled set is described by its least settled run.
-SETTLE_ORDER = (RUNNING, "failed", NO_VERDICT, "passed")
+SETTLE_ORDER = (RUNNING, "failed", NO_VERDICT, OVERTAKEN_BY_CHECKPOINT, "passed")
 # The gate aggregate's own list of failed recipes, ended by the first line that is not one.
 FAILED_TARGETS_HEADER = re.compile(r"^Failed targets \(\d+\):\s*$", re.MULTILINE)
 FAILED_TARGET_LINE = re.compile(r"^\s+-\s+(\S+)\s*$")
@@ -154,6 +155,10 @@ TICKS = os.sysconf("SC_CLK_TCK")
 STOP_GRACE_SECONDS = 10.0
 # An engine checkpoint's subject, `fabro(<run-id>): <node> (<status>)`.
 ENGINE_CHECKPOINT_SUBJECT = re.compile(r"^fabro\([^)]*\): ")
+# The engine checkpoint and the runner both update HEAD with an expected old
+# value.  A checkpoint that wins that narrow window produces this refusal only
+# after the repository hook has passed; it is not a gate refusal.
+CHECKPOINT_OVERTAKE_REFUSAL = re.compile(r"\bcannot lock ref 'HEAD':")
 # The red_green_replay trailers that make a commit an open Red: Red without Green.
 TDD_RED_TRAILER = "TDD-Red-Test-File-Checksum:"
 TDD_GREEN_TRAILER = "TDD-Green-Verified-At:"
@@ -460,7 +465,7 @@ def fold_checkpoints_onto_open_red(arguments):
     )
 
 
-def start(command, program):
+def start(command, program, announce=True):
     arguments = commit_arguments(command)
     if arguments is None:
         raise RunnerRefusal("the runner starts only an ordinary `git commit` command")
@@ -497,7 +502,8 @@ def start(command, program):
             close_fds=True,
         )
     path.with_suffix(".pid").write_text(str(worker.pid) + "\n", encoding="utf-8")
-    print(run_id)
+    if announce:
+        print(run_id)
     return 0
 
 
@@ -592,8 +598,12 @@ def worker(run_id):
         refusal = git_refusal_line(text) if exit_code != 0 else None
         if refusal is not None:
             terminal["git_refusal_line"] = refusal
+            if CHECKPOINT_OVERTAKE_REFUSAL.search(refusal):
+                terminal["state"] = OVERTAKEN_BY_CHECKPOINT
     if exit_code != 0:
-        terminal["failed_targets"] = targets_for_refusal(text)
+        terminal["failed_targets"] = (
+            [] if terminal["state"] == OVERTAKEN_BY_CHECKPOINT else targets_for_refusal(text)
+        )
     if exit_code == 0:
         terminal["head"] = git_output("rev-parse", "HEAD")
     write_record(path, terminal)
@@ -610,7 +620,11 @@ def report_payload(run_id, path, record):
         output = full_output(path)
         if hook_passed(record, output):
             payload["hook_passed"] = True
-            refusal = recorded_git_refusal(record, output) if state == "failed" else None
+            refusal = (
+                recorded_git_refusal(record, output)
+                if state in ("failed", OVERTAKEN_BY_CHECKPOINT)
+                else None
+            )
             if refusal is not None:
                 payload["git_refusal_line"] = refusal
         if state == "failed":
@@ -626,6 +640,49 @@ def report(run_id, path, record):
     payload, _ = report_payload(run_id, path, record)
     print(json.dumps(payload, sort_keys=True))
     return 0
+
+
+def restore_overtaken_starting_head(record):
+    """Restore the checkpoint's staged tree to the runner's starting HEAD.
+
+    The checkpoint is an engine-owned commit, so dropping it with a soft reset
+    keeps exactly the staged change the runner lost and lets a fresh runner
+    commit own that change.  Refuse to rewrite an unrelated head.
+    """
+    start_head = record.get("start_head")
+    if not isinstance(start_head, str) or not start_head:
+        raise RunnerRefusal("the checkpoint-overtaken commit run has no starting HEAD")
+    head = git_output("rev-parse", "HEAD")
+    if head == start_head:
+        return
+    if not is_ancestor(start_head):
+        raise RunnerRefusal(
+            "the checkpoint-overtaken commit run's starting HEAD is not an ancestor of HEAD"
+        )
+    git_output("reset", "--soft", start_head)
+
+
+def retry_overtaken(run_id, timeout_seconds, program):
+    """Re-commit a checkpoint-overtaken runner change and wait for its own verdict."""
+    path = state_path(runs_directory(), run_id)
+    record = read_record(path)
+    if record is None:
+        raise RunnerRefusal("no commit run " + run_id + " is recorded in this repository")
+    if recorded_state(record) != OVERTAKEN_BY_CHECKPOINT:
+        raise RunnerRefusal("commit run " + run_id + " was not overtaken by a checkpoint")
+    command = record.get("command")
+    if not isinstance(command, list) or not all(isinstance(word, str) for word in command):
+        raise RunnerRefusal("the checkpoint-overtaken commit run has no retryable commit command")
+    restore_overtaken_starting_head(record)
+    before = set(runs_directory().glob("*.json"))
+    start(command, program, announce=False)
+    after = set(runs_directory().glob("*.json"))
+    retry_paths = after - before
+    if len(retry_paths) != 1:
+        raise RunnerRefusal("the checkpoint-overtaken commit retry did not create one commit run")
+    retry_path = retry_paths.pop()
+    write_record(path, {**record, "retried_by": retry_path.stem})
+    return wait(retry_path.stem, timeout_seconds)
 
 
 def wait(run_id, timeout_seconds):
@@ -931,6 +988,12 @@ def git_refusal_line(text):
     for line in text[start:].splitlines():
         stripped = line.strip()
         if stripped and STRUCTURED_EVENT_LINE.fullmatch(stripped) is None:
+            lock_refusal = "cannot lock ref 'HEAD':"
+            if lock_refusal in stripped:
+                # `git update-ref` prefixes the same Git refusal with
+                # `update_ref failed for ref`; retain the refusal itself in
+                # the canonical form the runner report promises.
+                return "fatal: " + lock_refusal + stripped.split(lock_refusal, 1)[1]
             return stripped
     return None
 
@@ -963,6 +1026,16 @@ def brief_text(run_id, path, record, state, timeout_seconds):
         return (
             named + "was STILL RUNNING when the bounded wait of " + str(int(timeout_seconds))
             + " seconds expired, so it has no verdict yet and no commit is known to exist.\n"
+        )
+    if state == OVERTAKEN_BY_CHECKPOINT:
+        refusal = recorded_git_refusal(record, full_output(path))
+        return (
+            named
+            + "was OVERTAKEN BY AN ENGINE CHECKPOINT after its repository hook passed; Git "
+            + "refused its expected-HEAD update: "
+            + (refusal if refusal is not None else "Git's refusal line was not captured")
+            + ". Its staged change must be re-committed through the runner, not treated as a "
+            + "hook refusal.\n"
         )
     output = full_output(path)
     tail = "\n".join(output.splitlines()[-BRIEF_TAIL_LINES:])
@@ -1110,7 +1183,7 @@ def record_stopped_run(path, record):
     recorded as running or as having ended without one is recorded as stopped.
     """
     fresh = read_record(path) or record
-    if recorded_state(fresh) in ("passed", "failed"):
+    if recorded_state(fresh) in ("passed", "failed", OVERTAKEN_BY_CHECKPOINT):
         return fresh, recorded_state(fresh)
     stopped = {"state": NO_VERDICT, "stopped": True}
     write_record(path, stopped)
@@ -1130,6 +1203,10 @@ def settle_runs(timeout_seconds, brief_file, restore_head_before_wait, stage):
         record = read_record(path)
         if record is None:
             continue
+        # A checkpoint-overtaken attempt has been replaced by its own runner
+        # retry.  Its original refusal is evidence, not a competing verdict.
+        if isinstance(record.get("retried_by"), str):
+            continue
         records.append((path, record))
         if recorded_state(record) == RUNNING:
             live.append(path)
@@ -1139,23 +1216,28 @@ def settle_runs(timeout_seconds, brief_file, restore_head_before_wait, stage):
             reset_running_waits(directory, stage)
             return None, None
         path, record = max(records, key=lambda item: item[0].stat().st_mtime_ns)
-        if (
-            recorded_state(record) != "failed"
-            or not (record.get("hook_ran") is True or record.get("no_authored_subject"))
-            or record.get("settled") is True
-        ):
+        state = recorded_state(record)
+        if state == OVERTAKEN_BY_CHECKPOINT:
+            retry_overtaken(path.stem, timeout_seconds, os.path.abspath(sys.argv[0]))
+            return settle_runs(timeout_seconds, brief_file, restore_head_before_wait, stage)
+        recordable_failure = (
+            state == "failed"
+            and (record.get("hook_ran") is True or record.get("no_authored_subject"))
+        )
+        already_settled = record.get("settled") is True
+        if not (recordable_failure or state == OVERTAKEN_BY_CHECKPOINT) or already_settled:
             brief.unlink(missing_ok=True)
             reset_running_waits(directory, stage)
-            return recorded_state(record), path
+            return state, path
         write_record(path, {**record, "settled": True})
         brief.parent.mkdir(parents=True, exist_ok=True)
         brief.write_text(
-            "failed\n" + brief_text(path.stem, path, record, "failed", timeout_seconds),
+            state + "\n" + brief_text(path.stem, path, record, state, timeout_seconds),
             encoding="utf-8",
         )
-        print(json.dumps({"settled": [{"run_id": path.stem, "state": "failed"}]}, sort_keys=True))
+        print(json.dumps({"settled": [{"run_id": path.stem, "state": state}]}, sort_keys=True))
         reset_running_waits(directory, stage)
-        return "failed", path
+        return state, path
     if restore_head_before_wait:
         for path in live:
             record = read_record(path)
@@ -1177,6 +1259,11 @@ def settle_runs(timeout_seconds, brief_file, restore_head_before_wait, stage):
             write_record(path, {"state": NO_VERDICT})
         outcomes.append((path, record, state))
     path, record, state = min(outcomes, key=lambda one: SETTLE_ORDER.index(one[2]))
+    if state == OVERTAKEN_BY_CHECKPOINT:
+        retry_overtaken(
+            path.stem, max(0.0, deadline - time.monotonic()), os.path.abspath(sys.argv[0])
+        )
+        return settle_runs(timeout_seconds, brief_file, restore_head_before_wait, stage)
     if state == "failed" and (record.get("hook_ran") is True or record.get("no_authored_subject")):
         write_record(path, {**record, "settled": True})
     brief.parent.mkdir(parents=True, exist_ok=True)
@@ -1578,6 +1665,9 @@ def main(argv, program):
     wait_parser = operations.add_parser("wait")
     wait_parser.add_argument("run_id")
     wait_parser.add_argument("--timeout-seconds", required=True, type=float)
+    retry_parser = operations.add_parser("retry-overtaken")
+    retry_parser.add_argument("run_id")
+    retry_parser.add_argument("--timeout-seconds", required=True, type=float)
     settle_parser = operations.add_parser("settle")
     settle_parser.add_argument("--timeout-seconds", required=True, type=float)
     settle_parser.add_argument("--brief-file", required=True)
@@ -1596,6 +1686,8 @@ def main(argv, program):
             return start(command, program)
         if args.operation == "wait":
             return wait(args.run_id, args.timeout_seconds)
+        if args.operation == "retry-overtaken":
+            return retry_overtaken(args.run_id, args.timeout_seconds, program)
         if args.operation == "settle":
             return settle(
                 args.timeout_seconds,

@@ -97,21 +97,13 @@ _FOREGROUND_TURN_END_BOUND = (
     "FOREGROUND `git commit` TOOL CALL. That commit is waited out in the",
 )
 
-# bd-ib-oueyxf — a fix turn whose only remaining work is a runner-started commit
-# the runner still reports as running ends succeeded and names the commit run, so
-# the graph's `fix_commit_settle` node waits it out instead of the turn being cut.
-_LEAVE_RUNNING_COMMIT_FOR_SETTLE = (
-    "A COMMIT RUN THAT YOU STARTED THROUGH THE COMMIT RUNNER AND THAT THE RUNNER",
-    "STILL REPORTS AS RUNNING IS LEFT FOR `fix_commit_settle`.",
-    "end the turn as SUCCEEDED, not failed,",
-    "and name that commit run's id in your final message.",
-)
-
-# The waiting direction must hold for the detached commit runner's bounded waits
-# too, so bd-ib-sufca7 can ship that runner without contradicting this prose.
-_RUNNER_COMPATIBILITY = (
-    "where this stage prompt names a commit runner, repeat that runner's bounded",
-    "Reaping a hook run that outlived a limit belongs to the run itself, never",
+# bd-ib-fj3rjo — the engine checkpoints directly after a turn, so a repair
+# turn must retain its live runner commit until that commit reaches a verdict.
+_RUNNER_TERMINAL_BEFORE_TURN_END = (
+    "A COMMIT RUN THAT YOU STARTED THROUGH THE COMMIT RUNNER MUST REACH ITS OWN",
+    "TERMINAL VERDICT BEFORE YOU END THIS TURN.",
+    "Repeat the runner's bounded",
+    "is not a handoff for a live runner commit.",
 )
 
 
@@ -181,20 +173,11 @@ def test_the_fix_prompt_limits_the_turn_end_rule_to_its_own_foreground_commit() 
         assert phrase in section, f"the fix prompt's commit-hook section omits {phrase!r}"
 
 
-def test_the_fix_prompt_leaves_a_still_running_runner_commit_for_fix_commit_settle() -> None:
+def test_the_fix_prompt_waits_a_runner_commit_to_its_own_verdict() -> None:
     section = _section(node="fix")
 
-    for phrase in _LEAVE_RUNNING_COMMIT_FOR_SETTLE:
+    for phrase in _RUNNER_TERMINAL_BEFORE_TURN_END:
         assert phrase in section, f"the fix prompt's commit-hook section omits {phrase!r}"
-
-
-@pytest.mark.parametrize("node", _COMMITTING_STAGE_NODES)
-def test_the_waiting_direction_holds_for_a_commit_runner_s_bounded_waits(node: str) -> None:
-    """The prose must not contradict the clause bd-ib-sufca7 implements."""
-    section = _section(node=node)
-
-    for phrase in _RUNNER_COMPATIBILITY:
-        assert phrase in section, f"the {node} prompt's commit-hook section omits {phrase!r}"
 
 
 _NON_COMMITTING_IMPLEMENT_NODES = ("red", "green")

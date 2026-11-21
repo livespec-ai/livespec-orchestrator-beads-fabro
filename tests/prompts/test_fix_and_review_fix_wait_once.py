@@ -1,10 +1,10 @@
-"""The committing repair prompts hand a still-running runner commit to settle.
+"""Repair turns wait for their runner commits before the engine checkpoint.
 
-Scenario 179 makes this prompt instruction observable at the runner boundary:
-`fix` and `review_fix` may wait once for a commit run, but must finish their
-turn instead of polling when that wait reports `running`.  The two prompts are
-derived from their committed graph nodes, so a later prompt rewire cannot leave
-one stage untested.
+The engine checkpoints immediately after an ACP node.  The repair prompts must
+therefore keep a runner commit in the turn until it reaches its own verdict;
+the settle nodes only process terminal outcomes.  The prompts are derived from
+their committed graph nodes, so a later prompt rewire cannot leave one stage
+untested.
 """
 
 from __future__ import annotations
@@ -36,13 +36,12 @@ def _prompt(*, stage: str) -> str:
     return (_PROMPTS / matches[0].group("file")).read_text(encoding="utf-8")
 
 
-def test_repair_prompts_wait_once_then_leave_a_running_commit_to_their_settle() -> None:
-    """A hook outlasting one tool call cannot turn either repair stage into a poller."""
+def test_repair_prompts_wait_for_a_terminal_commit_before_the_checkpoint() -> None:
+    """A hook outlasting one tool call cannot escape either repair turn."""
     for stage, settle in _STAGES.items():
         prompt = _prompt(stage=stage)
 
-        assert "Wait at most once on each commit run you start." in prompt
-        assert (
-            "If that wait reports `running`, do not call `wait` again and do not stop it." in prompt
-        )
-        assert f"End the turn and leave it for `{settle}` to wait out." in prompt
+        assert "Repeat that bounded wait until the runner reports a terminal" in prompt
+        assert "Do not end this turn while a runner commit is still `running`" in prompt
+        assert f"`{settle}`" in prompt
+        assert "not a handoff for a live runner commit" in prompt

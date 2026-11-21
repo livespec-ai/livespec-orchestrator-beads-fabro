@@ -25,17 +25,18 @@ names. Start the commit with
 (the same `git commit` you would run in the foreground, with its own
 arguments), which prints a run id at once, then wait once
 `python3 "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-runner.py" wait <run-id> --timeout-seconds 300`
-in a later tool call. Wait at most once on each commit run you start. If that wait reports `running`, do not call `wait` again and do not stop it. End the turn and leave it for `review_fix_commit_settle` to wait out. The runner invokes the
+in a later tool call. Repeat that bounded wait until the runner reports a terminal
+verdict. Do not end this turn while a runner commit is still `running`: the engine
+checkpoints immediately after this node, and it must never race that commit's HEAD
+update. The runner invokes the
 commit unchanged, so the repository hooks still run exactly as they would in
 the foreground. A `running` report is not a failed commit. Only `passed` is a
 commit; `failed` is the hook's refusal, with its exit status and output, and
 `no-verdict` means the commit's process ended without a verdict, so neither is
 a commit. The detached commit run and its bounded waits are the one exception
-to the rule against backgrounding a tool call. Ordinarily, every commit run you
-start must be terminal before your final message. But when the only remaining
-work is a commit you started through the sandbox commit runner and that runner
-still reports it as `running`, end the turn as succeeded, name that commit run's id in your final message, and leave it for `review_fix_commit_settle` to wait out. This exception takes precedence over the generic turn-ending rule below;
-every other commit run you start must be terminal before your final message.
+to the rule against backgrounding a tool call, but every commit run you start
+must be terminal before your final message. `review_fix_commit_settle` records
+an already-terminal result; it is not a handoff for a live runner commit.
 
 When a rebase stops on a conflict, resolve and stage it, then use the runner
 with `git commit -C REBASE_HEAD` to reuse the picked commit's authored subject,
