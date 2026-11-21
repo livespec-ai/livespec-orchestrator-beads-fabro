@@ -9,6 +9,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dot_graph import par
 
 _ROOT = Path(__file__).resolve().parents[2]
 _GRAPH = _ROOT / ".claude-plugin/.fabro/workflows/implement-work-item/workflow.fabro"
+_RED_PROMPT = _ROOT / ".claude-plugin/.fabro/workflows/implement-work-item/prompts/red.md"
 
 
 def _run(*, cwd: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -99,3 +100,45 @@ def test_exhausted_commit_nodes_retain_targets_before_a_long_output_tail(tmp_pat
         assert result.returncode != 0, result.stderr
         for target in targets:
             assert target in cause
+
+
+def test_missing_red_test_file_reentry_briefs_the_red_turn_and_preserves_its_last_section(
+    tmp_path: Path,
+) -> None:
+    """bd-ib-orez2i: a third missing-label refusal rests with the Red evidence.
+
+    Run 01M7XVTN6HK0's three Red turns each left prose instead of either field
+    that ``commit_red`` accepts.  Its command node consequently refused with
+    the same message three times, but the later turns received none of that
+    diagnostic and the terminal record retained only the command section.
+    """
+    graph = parse_dot_graph(text=_GRAPH.read_text(encoding="utf-8"))
+    assert not isinstance(graph, str), graph
+    repo = _repo(tmp_path=tmp_path)
+    git_dir = repo / ".git"
+    handoff = git_dir / "livespec-implement-handoff.md"
+    latest_red = "## red\nThe whole change was implemented and published.\n"
+    refusal = "## commit_red\n\nExit status: 2\n" "Cause: latest red section names no test file\n"
+    handoff.write_text(latest_red + "\n" + refusal, encoding="utf-8")
+
+    first_reentry = _run(cwd=repo, args=["sh", "-c", str(graph.nodes["red_admission"]["script"])])
+
+    brief = git_dir / "livespec-red-missing-test-file-brief"
+    assert first_reentry.returncode == 0, first_reentry.stderr
+    assert brief.is_file(), "a missing-label refusal must leave the next Red its brief"
+    assert brief.read_text(encoding="utf-8") == (
+        "commit_red: latest red section names no test file\n"
+        "Write the Red test path using one accepted handoff label:\n"
+        "Red test file: <path>\n"
+        "Test file: <path>\n"
+    )
+    assert "livespec-red-missing-test-file-brief" in _RED_PROMPT.read_text(encoding="utf-8")
+
+    (git_dir / "livespec-red-admission-count").write_text("3\n", encoding="utf-8")
+    exhausted = _run(cwd=repo, args=["sh", "-c", str(graph.nodes["red_admission"]["script"])])
+
+    cause = (git_dir / "livespec-stage-cause").read_text(encoding="utf-8")
+    assert exhausted.returncode != 0, exhausted.stderr
+    assert "LIVESPEC_IMPLEMENT_RED_BOUND_EXHAUSTED" in cause
+    assert "commit_red: latest red section names no test file" in cause
+    assert latest_red.strip() in cause

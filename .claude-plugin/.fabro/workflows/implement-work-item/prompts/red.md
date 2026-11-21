@@ -18,6 +18,12 @@ Never run `git push` and never publish a branch or pull request.
   refuses a Red whose change touches a product file, names those paths in
   the handoff file, and the run re-enters `red`.
 
+On a re-entry, first read `$(git rev-parse --git-path
+livespec-red-missing-test-file-brief)` when it exists and is non-empty. It
+records a `commit_red` refusal because the last Red section omitted a test-file
+field. Follow its instruction: the new `## red` handoff section must include
+either `Red test file: <path>` or `Test file: <path>` before ending the turn.
+
 Before Step 1, inspect
    the nearest non-checkpoint commit below the current run's `fabro(...)`
    checkpoints. If it carries `TDD-Red-Test-File-Checksum:` but no
