@@ -9,6 +9,7 @@ throwaway origin; the forge itself is the only doubled boundary.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shlex
@@ -432,6 +433,71 @@ def test_reentry_after_master_advances_preserves_the_published_tip(
     assert _git(run, "merge-base", "--is-ancestor", published_tip, "HEAD").returncode == 0
     remote_head = _git(run, "ls-remote", "origin", f"refs/heads/{_PUBLISH_BRANCH}").stdout
     assert remote_head.split()[0] == refreshed_tip
+
+
+def test_history_fold_replays_red_checksum_after_a_fix_changes_the_red_test(
+    tmp_path: Path,
+) -> None:
+    """A folded publication must not retain a Red checksum for stale test bytes."""
+    origin = tmp_path / "origin.git"
+    _git(tmp_path, "init", "--bare", "-b", "master", str(origin))
+
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    _git(seed, "init", "-b", "master")
+    _configure(repo=seed)
+    _commit(repo=seed, path="README.md", content="seed\n", message="initial commit")
+    _git(seed, "remote", "add", "origin", str(origin))
+    _git(seed, "push", "-u", "origin", "master")
+
+    run = tmp_path / "run"
+    _git(tmp_path, "clone", str(origin), str(run))
+    _configure(repo=run)
+    _git(run, "switch", "-c", "fabro/run/checksum")
+    red_test = "tests/test_subject.py"
+    red_bytes = "def test_subject() -> None:\n    assert False\n"
+    red_checksum = hashlib.sha256(red_bytes.encode()).hexdigest()
+    _commit(
+        repo=run,
+        path=red_test,
+        content=red_bytes,
+        message=(
+            "fix: implement subject\n\n"
+            f"TDD-Red-Test-File-Checksum: sha256:{red_checksum}\n"
+            "TDD-Green-Verified-At: 2026-11-21T00:00:00Z"
+        ),
+    )
+    _commit(
+        repo=run,
+        path=".fabro/checkpoint",
+        content="janitor\n",
+        message="fabro(run): janitor (success)",
+    )
+    fixed_bytes = "def test_subject() -> None:\n    assert True\n"
+    _commit(
+        repo=run,
+        path=red_test,
+        content=fixed_bytes,
+        message="fix: repair subject test",
+    )
+    _commit(
+        repo=run,
+        path=".fabro/publish-checkpoint",
+        content="publish\n",
+        message="fabro(run): publish_draft (success)",
+    )
+
+    published = _publish(tmp_path=tmp_path, run=run)
+
+    assert published.result.returncode == 0, published.result.stderr
+    folded_message = _git(run, "log", "-1", "--format=%B").stdout
+    recorded = re.search(
+        r"^TDD-Red-Test-File-Checksum: sha256:([0-9a-f]{64})$",
+        folded_message,
+        re.MULTILINE,
+    )
+    assert recorded is not None
+    assert recorded.group(1) == hashlib.sha256((run / red_test).read_bytes()).hexdigest()
 
 
 def test_a_landed_publication_ends_before_push_or_draft_creation(tmp_path: Path) -> None:
