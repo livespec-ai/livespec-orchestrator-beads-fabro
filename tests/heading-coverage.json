@@ -2816,9 +2816,9 @@
     "heading": "## Scenario 308 — A required check that fails terminally on infrastructure is re-run once and files a flake item",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: bd-ib-xwwn23 owes it, replacing the closed owner bd-ib-tckulg, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
-    "work_item": "bd-ib-xwwn23"
+    "test": "tests.integration.test_merge_poll_rerun_scenario308_edges.test_scenario308_all_infrastructure_rerun_outcomes",
+    "reason": "Integration-tier coverage drives the production merge-poll recovery surface with scripted forge and work-item transports. It asserts the teardown and OOM classifications re-run once, the flake filing and journal rows, and every terminal no-rerun path: a failed re-run attempt, rejected request, touched failed test, unattributed job and ordinary pytest failure.",
+    "work_item": "bd-ib-llmefe"
   },
   {
     "heading": "## Scenario 309 — Fleet-launch launchers share one WIP claim-count read per repository per time-to-live",
@@ -2848,9 +2848,9 @@
     "heading": "## Scenario 312 — A fleet launcher that exits without a run leaves a terminal line, and its ready item's ticket is re-taken or reported",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: bd-ib-xwwn23 owes it, replacing the closed owner bd-ib-rk7mbd, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
-    "work_item": "bd-ib-xwwn23"
+    "test": "tests.integration.test_fleet_launch_scenarios312_316.test_scenario312_terminal_exit_ticket_and_stall_paths",
+    "reason": "Integration-tier coverage runs the committed scenario312 fleet-launch harness against its stub boards, ledger, queue, lock, in-flight and state directories. It asserts the terminal-line and dropped-ticket accounting, bounded ready-set retry and report paths, and dead-pid stall ordering.",
+    "work_item": "bd-ib-llmefe"
   },
   {
     "heading": "## Scenario 313 — A failed scheduled default-branch workflow run becomes one ledger item per failed job",
@@ -2888,9 +2888,9 @@
     "heading": "## Scenario 316 — A repository hold scoped to dispatch launches holds fresh dispatches and lets resumes run",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: bd-ib-xwwn23 owes it, replacing the closed owner bd-ib-fa5elg, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
-    "work_item": "bd-ib-xwwn23"
+    "test": "tests.integration.test_fleet_launch_scenarios312_316.test_scenario316_repository_hold_scope_and_launch_point",
+    "reason": "Integration-tier coverage runs the committed scenario316 fleet-launch harness against its hermetic launcher environment. It asserts dispatch-scoped and no-kinds holds and re-reads the hold at the mutex launch point, releasing the mutex and in-flight marker without dispatching.",
+    "work_item": "bd-ib-llmefe"
   },
   {
     "heading": "## Scenario 317 — Each committing step of a run preserves the run branch's tip to an ordered work-in-progress ref",
