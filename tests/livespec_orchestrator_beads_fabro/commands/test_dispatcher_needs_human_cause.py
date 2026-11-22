@@ -142,16 +142,18 @@ class _RecordingJournal:
 
 def _outcome(
     *,
+    status: str = "blocked",
     kind: str,
     stages: tuple[str, ...] | None = None,
     cause: str | None = None,
+    reason: str | None = None,
     category: str | None = None,
     signature: str | None = None,
     provider: str | None = None,
 ) -> DispatchOutcome:
     return DispatchOutcome(
         work_item_id=_ITEM,
-        status="blocked",
+        status=status,
         stage="fabro-run",
         pr_number=None,
         merge_sha=None,
@@ -163,6 +165,7 @@ def _outcome(
         provider_usage_limit=provider is not None,
         provider_usage_limit_provider=provider,
         needs_human_kind=kind,
+        needs_human_reason=reason,
         **{_STAGES_FIELD: stages},
     )
 
@@ -224,6 +227,36 @@ def test_a_backgrounded_tool_fault_is_persisted_on_the_item(tmp_path: Path) -> N
     assert _SIGNATURE in body
     assert "no answer is owed" in body
     assert _VALVE in body
+
+
+def test_a_failed_factory_run_records_its_node_visit_signature_and_terminal_reason(
+    tmp_path: Path,
+) -> None:
+    """A non-zero terminal must leave its complete causal account on the item.
+
+    The terminal mapper supplies these fields from the finished Fabro record;
+    this assertion holds the post-run writer to preserving them rather than
+    silently reserving durable outcome comments for the needs-human route.
+    """
+    _assert_field_exists()
+
+    body = _recorded(
+        tmp_path=tmp_path,
+        outcome=_outcome(
+            status="failed",
+            kind=STAGE_FAILURE,
+            stages=("implement@2",),
+            cause="LIVESPEC_IMPLEMENT_FAILURE: the acceptance assertion failed",
+            reason="the acceptance assertion failed",
+            category="deterministic",
+            signature="LIVESPEC_IMPLEMENT_FAILURE",
+        ),
+    )
+
+    assert f"run id: {_RUN}" in body
+    assert "failed stage: implement@2" in body
+    assert "failure signature: LIVESPEC_IMPLEMENT_FAILURE" in body
+    assert "terminal reason: the acceptance assertion failed" in body
 
 
 def test_a_genuine_request_record_claims_no_fault(tmp_path: Path) -> None:
