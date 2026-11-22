@@ -27,6 +27,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_routes impo
     RecoverySeed,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_run_age import (
+    published_head_attribution_gap,
     published_head_relation,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_reflection_journal import (
@@ -78,21 +79,29 @@ def protected_resume_seed(
         and gather.anchor.head == head
         and gather.anchor.run_id == preserved.source_run_id
     )
+    relation = (
+        False
+        if same_run
+        else published_head_relation(
+            records=journaled,
+            preserved_run_id=preserved.source_run_id,
+            published_head=head,
+            publications=gather.publications,
+        )
+    )
+    gap = published_head_attribution_gap(
+        records=journaled,
+        preserved_run_id=preserved.source_run_id,
+        published_head=head,
+        publications=gather.publications,
+    )
     comparison = preserved_descendant(
         runner=runner,
         repo=repo,
         preservation=preserved,
         published_head=head,
-        head_is_later=(
-            False
-            if same_run
-            else published_head_relation(
-                records=journaled,
-                preserved_run_id=preserved.source_run_id,
-                published_head=head,
-                publications=gather.publications,
-            )
-        ),
+        head_is_later=relation,
+        attribution_gap=gap or "published-head",
     )
     return preserved if isinstance(comparison, PreservedDescendant) else comparison
 
