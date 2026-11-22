@@ -34,6 +34,9 @@ renderers is how an operator comes to read a remedy the journal does not record.
 
 from __future__ import annotations
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_rider_seed import (
+    rider_route_label,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_routes import (
     RecoveryHold,
     RecoveryLoss,
@@ -67,7 +70,7 @@ PRESERVED_WORK_VERIFIED = "verified"
 PRESERVED_WORK_ABSENT = "absent"
 
 
-def recovery_route_record(
+def recovery_route_record(  # noqa: PLR0913 — kw-only row fields; `seeded_by_riders` is one more independent fact the row records, not a coupled one.
     *,
     work_item_id: str,
     route: str,
@@ -75,6 +78,7 @@ def recovery_route_record(
     loss: RecoveryLoss | None = None,
     preserved_work: str | None = None,
     fresh: RecoveryRoute | None = None,
+    seeded_by_riders: tuple[str, ...] = (),
 ) -> dict[str, object]:
     """One non-held route's row, with the SAME key set whichever route it is.
 
@@ -90,11 +94,16 @@ def recovery_route_record(
     sources that were asked. Only a confirmed absence has an asked-set with no
     answer to point at, which is exactly why the clause requires that one
     recorded.
+
+    `seeded_by_riders` names each carried rider that hands the dispatch's agent
+    an earlier run's preserved work (`_dispatcher_recovery_rider_seed`). A `fresh`
+    route carrying any is recorded `seeded`, because its goal seeds the run
+    whatever the routing measured; the list is empty, never omitted, otherwise.
     """
     return {
         "stage": RECOVERY_ROUTE_STAGE,
         "work_item_id": work_item_id,
-        "route": route,
+        "route": rider_route_label(route=route, riders=seeded_by_riders),
         "preserved_work": preserved_work,
         "source_run_id": _source_run_id(seed=seed, loss=loss),
         "remote": None if seed is None else seed.remote,
@@ -103,6 +112,7 @@ def recovery_route_record(
         "preservation_sources_asked": None if loss is None else list(loss.sources_asked),
         "fresh_ruling_instant": None if fresh is None else fresh.fresh_ruling_instant,
         "passed_over_needs_human": _passed_over(seed=seed, fresh=fresh),
+        "seeded_by_riders": list(seeded_by_riders),
     }
 
 

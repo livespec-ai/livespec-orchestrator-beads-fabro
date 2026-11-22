@@ -364,6 +364,7 @@ def _stub_wave_seams(
         return _green_outcome(item_id=str(kwargs["item"].id))
 
     monkeypatch.setattr(loop_wave, "dispatch_one", _launch)
+    monkeypatch.setattr(loop_wave, "launching_preserved_work_riders", lambda **_kwargs: ())
 
 
 def _run_the_wave(
@@ -426,6 +427,7 @@ def _stub_single_dispatch(
         return _green_outcome(item_id=str(kwargs["item"].id))
 
     monkeypatch.setattr(run_launch, "dispatch_one", _launch)
+    monkeypatch.setattr(run_launch, "launching_preserved_work_riders", lambda **_kwargs: ())
     monkeypatch.setattr(run_commands, "dispatch_tail_exit", lambda **_kwargs: 0)
 
 

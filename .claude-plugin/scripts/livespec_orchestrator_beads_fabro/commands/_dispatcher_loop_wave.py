@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 
 from livespec_orchestrator_beads_fabro.commands._acp_factory_run_reader import (
@@ -53,6 +54,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_launch impo
     LaunchPins,
     journal_recovery_route,
     recovery_launch_args,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_rider_read import (
+    launching_preserved_work_riders,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_routing import (
     route_recovery,
@@ -229,7 +233,13 @@ def _admit_and_dispatch_loop_wave(  # noqa: PLR0913 — see `dispatch_loop_wave`
     # happened to start the launches in.
     with profile.during(name="recovery-route"):
         for item in picked:
-            journal_recovery_route(route=routing.route_for(work_item_id=item.id), journal=journal)
+            journal_recovery_route(
+                route=routing.route_for(work_item_id=item.id),
+                journal=journal,
+                carried_riders=partial(
+                    launching_preserved_work_riders, repo=repo, item=item, journal_path=journal.path
+                ),
+            )
     # Every later launch in the wave waited behind the same pre-admission phases,
     # so each gets its own profile (and dispatch id) carrying those rows.
     profiles: dict[str, PrelaunchCpuProfile] = {}

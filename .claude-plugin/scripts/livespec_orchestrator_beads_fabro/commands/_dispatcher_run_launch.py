@@ -17,6 +17,7 @@ already, and stays one.
 from __future__ import annotations
 
 import argparse
+from functools import partial
 from pathlib import Path
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_admission import (
@@ -38,6 +39,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_launch impo
     LaunchPins,
     journal_recovery_route,
     recovery_launch_args,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_rider_read import (
+    launching_preserved_work_riders,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_routing import (
     RecoveryRouting,
@@ -154,13 +158,26 @@ def admit_and_dispatch_target(  # noqa: PLR0913 — kw-only targeted dispatch; `
     # must carry nothing out of this one.
     if prelaunch_profile is None:
         for item in launching:
-            journal_recovery_route(route=routing.route_for(work_item_id=item.id), journal=journal)
+            journal_recovery_route(
+                route=routing.route_for(work_item_id=item.id),
+                journal=journal,
+                carried_riders=partial(
+                    launching_preserved_work_riders, repo=repo, item=item, journal_path=journal.path
+                ),
+            )
     else:
         _ = prelaunch_profile.phase(
             name="recovery-route",
             action=lambda: [
                 journal_recovery_route(
-                    route=routing.route_for(work_item_id=item.id), journal=journal
+                    route=routing.route_for(work_item_id=item.id),
+                    journal=journal,
+                    carried_riders=partial(
+                        launching_preserved_work_riders,
+                        repo=repo,
+                        item=item,
+                        journal_path=journal.path,
+                    ),
                 )
                 for item in launching
             ],

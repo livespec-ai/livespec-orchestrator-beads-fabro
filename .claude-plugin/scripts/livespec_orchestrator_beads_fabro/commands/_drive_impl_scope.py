@@ -193,9 +193,19 @@ def scope_launch_failure(*, unit: str, returncode: int, stderr: str) -> str | No
 
 
 def launch_record(
-    *, work_item_id: str, launch: str, scope_unit: str | None, detail: str | None = None
+    *,
+    work_item_id: str,
+    launch: str,
+    scope_unit: str | None,
+    detail: str | None = None,
+    route: str | None = None,
 ) -> dict[str, object]:
-    """The one dispatch-journal record a launch leaves, naming which launch it used."""
+    """The one dispatch-journal record a launch leaves, naming which launch it used.
+
+    `route` is the route the launched loop journaled in the dispatch's own
+    `recovery-route` record, so the launch record and the route row name the same
+    label (bd-ib-e547bt); it is absent when the loop journaled no route.
+    """
     record: dict[str, object] = {
         "stage": SCOPE_STAGE,
         "work_item_id": work_item_id,
@@ -205,4 +215,6 @@ def launch_record(
         record["scope_unit"] = scope_unit
     if detail is not None:
         record["detail"] = detail
+    if route is not None:
+        record["route"] = route
     return record

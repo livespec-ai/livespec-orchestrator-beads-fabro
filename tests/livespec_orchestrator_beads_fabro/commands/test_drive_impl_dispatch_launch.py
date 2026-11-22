@@ -31,7 +31,7 @@ class _Runner:
         return CommandRun(argv=argv, returncode=0, stdout="[]", stderr="")
 
 
-def _dispatch(*, repo: Path, runner: _Runner) -> dict[str, object]:
+def _dispatch(*, repo: Path, runner: _Runner | _RoutingRunner) -> dict[str, object]:
     return run_impl_dispatch(
         repo=repo,
         work_item_ref=_ITEM,
@@ -73,3 +73,51 @@ def test_a_fault_writing_the_launch_record_does_not_fail_the_dispatch(tmp_path: 
     assert len(runner.calls) == 1
     assert result["status"] == "green"
     assert result["launch"] == "unscoped"
+
+
+class _RoutingRunner:
+    """A loop that journals its dispatch's `recovery-route` row, as the real loop does."""
+
+    def __init__(self, *, journal: Path, route: str) -> None:
+        self._journal = journal
+        self._route = route
+
+    def __call__(self, *, argv: tuple[str, ...], cwd: Path | None = None) -> CommandRun:
+        del cwd
+        row = {"stage": "recovery-route", "work_item_id": _ITEM, "route": self._route}
+        with self._journal.open("a", encoding="utf-8") as handle:
+            _ = handle.write(json.dumps(row) + "\n")
+        return CommandRun(argv=argv, returncode=0, stdout="[]", stderr="")
+
+
+def _launch_records(*, journal: Path) -> list[dict[str, object]]:
+    rows = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
+    return [row for row in rows if row["stage"] == "dispatch-launch-scope"]
+
+
+def test_the_launch_record_carries_the_route_its_loop_journaled(tmp_path: Path) -> None:
+    journal = tmp_path / "tmp" / "fabro-dispatch-journal.jsonl"
+    journal.parent.mkdir(parents=True)
+    _ = journal.write_text(
+        json.dumps({"stage": "recovery-route", "work_item_id": _ITEM, "route": "fresh"}) + "\n",
+        encoding="utf-8",
+    )
+
+    _ = _dispatch(repo=tmp_path, runner=_RoutingRunner(journal=journal, route="seeded"))
+
+    (record,) = _launch_records(journal=journal)
+    assert record["route"] == "seeded"
+
+
+def test_a_launch_whose_loop_journaled_no_route_carries_none(tmp_path: Path) -> None:
+    journal = tmp_path / "tmp" / "fabro-dispatch-journal.jsonl"
+    journal.parent.mkdir(parents=True)
+    _ = journal.write_text(
+        json.dumps({"stage": "recovery-route", "work_item_id": _ITEM, "route": "fresh"}) + "\n",
+        encoding="utf-8",
+    )
+
+    _ = _dispatch(repo=tmp_path, runner=_Runner())
+
+    (record,) = _launch_records(journal=journal)
+    assert "route" not in record

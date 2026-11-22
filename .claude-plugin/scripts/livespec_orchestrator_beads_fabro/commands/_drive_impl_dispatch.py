@@ -26,8 +26,14 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_invoker import (
     default_invoker_identity,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_journal_file import JournalFile
+from livespec_orchestrator_beads_fabro.commands._dispatcher_journal_tail import (
+    journal_tail_records,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_merge_wait_handoff import (
     HANDED_OFF_STATUS,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_records import (
+    RECOVERY_ROUTE_STAGE,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_reconcile_hook import (
     dispatch_journal_path,
@@ -67,6 +73,7 @@ def run_impl_dispatch(  # noqa: PLR0913 — kw-only transport; `workflow_name` i
     identity: InvokerIdentity | None,
 ) -> dict[str, Any]:
     """Run one `impl:<id>` action as a `dispatcher.py loop` subprocess."""
+    journal_before = len(journal_tail_records(journal_path=dispatch_journal_path(repo=repo)))
     resolved_runner = _SubprocessRunner() if runner is None else runner
     resolved_dispatcher = _resolve_dispatcher_bin(dispatcher_bin=dispatcher_bin)
     argv = build_dispatcher_argv(
@@ -102,6 +109,7 @@ def run_impl_dispatch(  # noqa: PLR0913 — kw-only transport; `workflow_name` i
         launch=launch,
         scope_unit=unit,
         detail=detail,
+        route=_launched_route(repo=repo, work_item_ref=work_item_ref, after=journal_before),
     )
     parsed = _parse_json_object_or_array(text=result.stdout)
     status = _dispatch_status(returncode=result.returncode, parsed=parsed)
@@ -128,7 +136,22 @@ def run_impl_dispatch(  # noqa: PLR0913 — kw-only transport; `workflow_name` i
     }
 
 
-def _record_launch(
+def _launched_route(*, repo: Path, work_item_ref: str, after: int) -> str | None:
+    """The route the launched loop journaled for this item, or None when it journaled none.
+
+    Only rows appended after the launch began are read, so an earlier dispatch's
+    route row is never reported as this launch's.
+    """
+    routes = [
+        str(record.get("route"))
+        for record in journal_tail_records(journal_path=dispatch_journal_path(repo=repo))[after:]
+        if record.get("stage") == RECOVERY_ROUTE_STAGE
+        and record.get("work_item_id") == work_item_ref
+    ]
+    return routes[-1] if routes else None
+
+
+def _record_launch(  # noqa: PLR0913 — kw-only record fields; `route` is one more independent fact the launch record carries, not a coupled one.
     *,
     repo: Path,
     identity: InvokerIdentity | None,
@@ -136,6 +159,7 @@ def _record_launch(
     launch: str,
     scope_unit: str | None,
     detail: str | None,
+    route: str | None,
 ) -> None:
     """Append the launch's journal record; a journal fault never fails the dispatch."""
     journal = JournalFile(
@@ -143,7 +167,11 @@ def _record_launch(
         identity=default_invoker_identity() if identity is None else identity,
     )
     record = scope.launch_record(
-        work_item_id=work_item_ref, launch=launch, scope_unit=scope_unit, detail=detail
+        work_item_id=work_item_ref,
+        launch=launch,
+        scope_unit=scope_unit,
+        detail=detail,
+        route=route,
     )
     _ = attempt(action=lambda: journal.append(record=record), exceptions=(OSError,))
 
