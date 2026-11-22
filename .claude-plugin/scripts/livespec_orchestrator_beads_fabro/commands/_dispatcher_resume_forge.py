@@ -47,6 +47,9 @@ __all__: list[str] = [
     "branch_pull_request",
     "branch_pull_request_argv",
     "branch_pull_request_from_stdout",
+    "merged_item_pull_request",
+    "merged_item_pull_request_argv",
+    "replacement_for_closed_publication",
 ]
 
 _LIST_TIMEOUT_SECONDS = 120.0
@@ -134,6 +137,56 @@ def branch_pull_request(*, repo: Path, branch: str, runner: CommandRunner) -> Br
     if result.exit_code != 0:
         return BranchPullRequestRead(observed=False, pull_request=None)
     return branch_pull_request_from_stdout(stdout=result.stdout)
+
+
+def merged_item_pull_request_argv(*, work_item_id: str) -> list[str]:
+    """The forge listing for a merged pull request that names one work item."""
+    return [
+        "gh",
+        "pr",
+        "list",
+        "--state",
+        "merged",
+        "--search",
+        work_item_id,
+        "--json",
+        "number,state,headRefOid,mergedAt",
+        "--limit",
+        _LIST_LIMIT,
+    ]
+
+
+def merged_item_pull_request(
+    *, repo: Path, work_item_id: str, runner: CommandRunner
+) -> BranchPullRequestRead:
+    """Ask the forge for the newest merged pull request that names this item.
+
+    A factory publication can be closed unmerged while a hand redo lands the
+    same item from another branch.  The proof-only arm belongs on that landed
+    pull request, not on the dead publication branch.  Its work-item search is
+    the same forge identity read used by stranded-claim recovery, so a hand
+    redo title such as ``fix: recover bd-ib-...`` remains discoverable after
+    its branch is deleted.
+    """
+    result = runner.run(
+        argv=merged_item_pull_request_argv(work_item_id=work_item_id),
+        cwd=repo,
+        timeout_seconds=_LIST_TIMEOUT_SECONDS,
+    )
+    if result.exit_code != 0:
+        return BranchPullRequestRead(observed=False, pull_request=None)
+    return branch_pull_request_from_stdout(stdout=result.stdout)
+
+
+def replacement_for_closed_publication(
+    *,
+    published: BranchPullRequestRead,
+    hand_redo: BranchPullRequestRead,
+) -> BranchPullRequestRead:
+    """Prefer an observed merged hand redo, otherwise retain the publication."""
+    if hand_redo.observed and hand_redo.pull_request is not None:
+        return hand_redo
+    return published
 
 
 def _pull_request(*, entry_raw: object) -> BranchPullRequest | None:

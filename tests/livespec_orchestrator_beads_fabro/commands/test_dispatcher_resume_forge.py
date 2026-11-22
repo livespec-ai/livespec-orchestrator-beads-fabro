@@ -191,6 +191,32 @@ def test_a_nonzero_exit_is_unobserved_whatever_it_printed() -> None:
     assert read.pull_request is None
 
 
+def test_a_failed_hand_redo_listing_is_unobserved() -> None:
+    """A failed hand-redo search cannot replace the closed publication pull request."""
+    assert _MODULE_PATH.is_file()
+    module = importlib.import_module(_MODULE)
+    runner = _StubRunner(
+        result=CommandResult(
+            exit_code=1,
+            stdout=_listing(rows=[{"number": 5487, "state": "MERGED", "headRefOid": _HEAD}]),
+            stderr="gh: could not resolve host",
+        )
+    )
+    read = module.merged_item_pull_request(
+        repo=Path("/repo"), work_item_id="bd-ib-n5v53o", runner=runner
+    )
+    assert runner.argvs == [module.merged_item_pull_request_argv(work_item_id="bd-ib-n5v53o")]
+    assert read.observed is False
+    assert read.pull_request is None
+    publication = module.branch_pull_request_from_stdout(
+        stdout=_listing(rows=[{"number": 2639, "state": "CLOSED", "headRefOid": _HEAD}])
+    )
+    assert (
+        module.replacement_for_closed_publication(published=publication, hand_redo=read)
+        == publication
+    )
+
+
 def test_the_read_runs_the_listing_it_declares() -> None:
     """One argv builder, one caller: a second spelling is how the two would drift."""
     assert _MODULE_PATH.is_file()

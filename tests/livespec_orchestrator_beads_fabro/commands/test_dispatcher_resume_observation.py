@@ -89,6 +89,8 @@ _RESUMED_RUN = "01M4RJ3H6VQ0K4XBV9MTBSPXE4"
 _CANCELLED_RUN = "01M4Q4XBZ5398FJAWQ131QER60"
 _CANCELLED_DISPATCH = "7a636b5e7d60425c942ebdaf10fe7e53"
 _PR = 2639
+_HAND_REDO_PR = 5487
+_HAND_REDO_HEAD = "b" * 40
 _ASSERTION = "The resume enters at the unfinished stage."
 _COMMENT_URL = "https://github.test/c/1"
 _FACTORY_READ_WRAPPER_ENV = "LIVESPEC_FACTORY_READ_WRAPPER"
@@ -145,6 +147,20 @@ def _comments(*, body: str) -> str:
 
 def _pr_listing(*, state: str = "OPEN", head: str | None = _HEAD) -> str:
     return json.dumps([{"number": _PR, "state": state, "headRefOid": head}])
+
+
+def _merged_item_listing() -> str:
+    """The hand-redo merge that identifies this item after its publication closed."""
+    return json.dumps(
+        [
+            {
+                "number": _HAND_REDO_PR,
+                "state": "MERGED",
+                "headRefOid": _HAND_REDO_HEAD,
+                "title": f"fix: recover {_ITEM_ID}",
+            }
+        ]
+    )
 
 
 def _held(*, status: str = "failed") -> str:
@@ -209,18 +225,30 @@ def _args() -> argparse.Namespace:
 def _runner(
     *,
     listing: CommandResult | None = None,
+    merged_listing: CommandResult | None = None,
     view: CommandResult | None = None,
     ps: CommandResult | None = None,
     inspect: CommandResult | None = None,
 ) -> _StubRunner:
-    return _StubRunner(
-        answers={
-            "list": listing if listing is not None else _ok(stdout=_pr_listing()),
-            "view": view if view is not None else _ok(stdout=_comments(body=_record_body())),
-            "ps": ps if ps is not None else _ok(stdout=_held()),
-            "inspect": inspect if inspect is not None else _ok(stdout=_inspect(node="pr")),
-        }
-    )
+    answers = {
+        "list": listing if listing is not None else _ok(stdout=_pr_listing()),
+        "view": view if view is not None else _ok(stdout=_comments(body=_record_body())),
+        "ps": ps if ps is not None else _ok(stdout=_held()),
+        "inspect": inspect if inspect is not None else _ok(stdout=_inspect(node="pr")),
+    }
+    runner = _StubRunner(answers=answers)
+    if merged_listing is not None:
+        original_run = runner.run
+
+        def run(**kwargs: Any) -> CommandResult:
+            argv = kwargs["argv"]
+            if argv[:3] == ["gh", "pr", "list"] and "merged" in argv:
+                runner.argvs.append(argv)
+                return merged_listing
+            return original_run(**kwargs)
+
+        runner.run = run  # type: ignore[method-assign]
+    return runner
 
 
 def _gather(*, repo: Path, item: WorkItem, runner: _StubRunner) -> Any:
@@ -462,6 +490,64 @@ def test_a_merged_proof_only_resume_carries_the_parking_record_that_authorized_i
     assert gather.observation.proof_only_parking_record == "comment-park-9"
     assert gather.anchor is not None
     assert gather.anchor.parking_record == "comment-park-9"
+
+
+def test_an_acceptance_proof_resume_anchors_on_the_merged_hand_redo_not_its_closed_publication(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A closed publication defers proof capture to the merge that names the item."""
+    proof_only_module = importlib.import_module(
+        "livespec_orchestrator_beads_fabro.commands._dispatcher_resume_proof_only_observation"
+    )
+    monkeypatch.setattr(
+        proof_only_module,
+        "read_dispatch_comments",
+        lambda **_kwargs: (_parking_comment(pending=f"proof of done record for {_ASSERTION!r}"),),
+    )
+
+    gather = _gather(
+        repo=repo,
+        item=_item(status="acceptance"),
+        runner=_runner(
+            listing=_ok(stdout=_pr_listing(state="CLOSED")),
+            merged_listing=_ok(stdout=_merged_item_listing()),
+            view=_ok(stdout=_comments(body="")),
+        ),
+    )
+
+    assert gather.observation.proof_only_resume is True
+    assert gather.observation.pull_request == _HAND_REDO_PR
+    assert gather.anchor is not None
+    assert gather.anchor.head == _HAND_REDO_HEAD
+    assert gather.anchor.resumed_at == "proof_capture"
+
+
+def test_a_hand_redo_refusal_names_its_closed_publication_and_proof_resume_route(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hand redo needs acceptance to establish its proof-only resume anchor."""
+    proof_only_module = importlib.import_module(
+        "livespec_orchestrator_beads_fabro.commands._dispatcher_resume_proof_only_observation"
+    )
+    monkeypatch.setattr(proof_only_module, "read_dispatch_comments", lambda **_kwargs: ())
+
+    gather = _gather(
+        repo=repo,
+        item=_item(status="acceptance"),
+        runner=_runner(
+            listing=_ok(stdout=_pr_listing(state="CLOSED")),
+            merged_listing=_ok(stdout=_merged_item_listing()),
+            view=_ok(stdout=_comments(body="")),
+        ),
+    )
+
+    refusals = resume_refusals(observation=gather.observation)
+
+    assert gather.observation.proof_only_resume is False
+    assert "journaled pull request #2639 closed without merging" in refusals[-1]
+    assert "merged pull request #5487" in refusals[-1]
+    assert f"dispatcher.py reconcile-merged --item {_ITEM_ID}" in refusals[-1]
+    assert "anchors a later proof-only resume on #5487" in refusals[-1]
 
 
 def test_the_items_own_status_and_blocked_reason_are_carried(repo: Path) -> None:
