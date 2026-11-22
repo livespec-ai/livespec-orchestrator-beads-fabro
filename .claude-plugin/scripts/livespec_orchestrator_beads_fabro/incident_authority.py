@@ -40,6 +40,8 @@ from livespec_orchestrator_beads_fabro.effects._incident_authority_reader import
     read_incident_head,
 )
 from livespec_orchestrator_beads_fabro.effects._incident_authority_transition import (
+    HumanAttestedWorkflowReceipt,
+    attest_workflow_paths,
     commit_transition,
 )
 from livespec_orchestrator_beads_fabro.effects._incident_entry_writer import (
@@ -61,8 +63,10 @@ __all__: list[str] = [
     "FilingRequest",
     "GenesisReceipt",
     "GenesisRequest",
+    "HumanAttestedWorkflowReceipt",
     "IncidentAttempt",
     "IncidentReading",
+    "attest_workflow_paths",
     "carrier_selection",
     "close_drill",
     "commit_incident_transition",
