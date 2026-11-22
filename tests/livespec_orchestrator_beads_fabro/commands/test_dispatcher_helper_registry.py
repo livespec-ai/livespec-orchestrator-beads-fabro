@@ -153,6 +153,12 @@ def test_a_registry_read_from_another_tree_digests_that_tree(tmp_path: Path) -> 
         "typing_extensions.py",
     ):
         _ = (vendor / relative).write_text(f"# {relative}\n", encoding="utf-8")
+    # The publication broker's package files are read from the same tree too.
+    for broker_file in registry.helper_registry():
+        if broker_file.name.startswith("publication-broker-support/"):
+            target = tmp_path / broker_file.name.removeprefix("publication-broker-support/")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            _ = target.write_text("# broker\n", encoding="utf-8")
     helpers = registry.helper_registry(scripts_root=tmp_path)
     support = {h.path: h for h in helpers if h.name.startswith("gh-refresh-support/")}
     assert sorted(support) == [

@@ -753,6 +753,13 @@ destructive_cli_allowlist = [
 #   `PYTHONPATH` and the stand-in's record file, so no COVERAGE_PROCESS_START or
 #   COV_CORE_ variable reaches the child.
 #
+# - test_dispatcher_publication_broker_helpers.py materializes the helper bundle
+#   into a scratch root and runs the BUNDLED publication broker as its own process
+#   from an unrelated empty git repository, with no `PYTHONPATH`: the claim is
+#   that the broker runs from the bundle alone, which only a real child can show.
+#   It passes an explicit `env` holding only `PATH`, so no COVERAGE_PROCESS_START
+#   or COV_CORE_ variable reaches the child.
+#
 # This key MUST stay above the `[[...mirror_pairings]]` array-of-tables
 # below (same TOML attachment reason as `destructive_cli_allowlist`).
 subprocess_spawn_allowlist = [
@@ -798,6 +805,7 @@ subprocess_spawn_allowlist = [
     "tests/integration/test_gate_preview_running_step_42erfz.py",
     "tests/livespec_orchestrator_beads_fabro/commands/test_publication_broker.py",
     "tests/livespec_orchestrator_beads_fabro/commands/test_dispatcher_agent_stage_read_only_token.py",
+    "tests/livespec_orchestrator_beads_fabro/commands/test_dispatcher_publication_broker_helpers.py",
 ]
 
 [[tool.livespec_dev_tooling.mirror_pairings]]
