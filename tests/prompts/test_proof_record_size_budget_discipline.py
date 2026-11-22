@@ -6,7 +6,8 @@ PRIMITIVES (`post-host-record`, `post-plan-record`) enforce the budget in code,
 because a Python caller renders through them. The two factory STAGES do not: they
 hand-format their record and post it with `gh pr comment`, so for them the budget
 is a prompt instruction, and this module is what stops that instruction from
-drifting away from the number the code enforces.
+drifting away from the number the code enforces. The brokered replay stage
+uses the broker executable in place of the direct forge call.
 
 WHY THE NUMBERS ARE IMPORTED RATHER THAN SPELLED. A prompt stating a budget the
 code does not enforce is worse than a prompt stating none: the stage would bound
@@ -53,10 +54,12 @@ _PROMPTS_DIR = (
 )
 
 # What makes a prompt a RECORD PUBLISHER: it names the record's ratified first-line
-# title AND the forge call that posts one. Either alone is too loose — the review
-# prompt discusses records without publishing one, and several prompts call `gh`.
+# title AND its publication operation. Either alone is too loose — the review
+# prompt discusses records without publishing a Proof of Done record, and several
+# prompts call `gh`. The replay stage uses the broker executable while capture
+# retains its direct call until its own routing change.
 _RECORD_TITLE = "Proof of Done —"
-_POST_CALL = "gh pr comment"
+_POST_CALL_MARKERS = ("gh pr comment", "publication_broker.py")
 
 # The publishers known today. Asserted as a SUBSET of the derived set rather than
 # as its definition, so a later third publisher widens the set instead of failing.
@@ -70,7 +73,7 @@ def _publisher_prompts() -> tuple[str, ...]:
             one.name
             for one in _PROMPTS_DIR.glob("*.md")
             if _RECORD_TITLE in one.read_text(encoding="utf-8")
-            and _POST_CALL in one.read_text(encoding="utf-8")
+            and any(marker in one.read_text(encoding="utf-8") for marker in _POST_CALL_MARKERS)
         )
     )
 
