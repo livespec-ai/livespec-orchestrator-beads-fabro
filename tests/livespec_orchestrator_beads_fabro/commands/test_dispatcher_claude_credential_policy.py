@@ -49,7 +49,9 @@ from livespec_orchestrator_beads_fabro.commands import (
     _dispatcher_session_headroom_gate as headroom_gate,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential_policy import (
+    CENTRAL_FACTORY_SELECTION,
     LEGACY_INDEPENDENT,
+    LOCAL_RANKING,
     NUMBERED_SLOTS,
     ClaudeCredentialPolicy,
     parse_claude_credential_policy,
@@ -62,6 +64,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_sele
 )
 from returns.io import IOFailure, IOSuccess
 from returns.result import Failure, Success
+from returns.unsafe import unsafe_perform_io
 
 _NOW = "2026-11-16T08:00:00Z"
 _PREFIX = "CLAUDE_CODE_OAUTH_TOKEN__"
@@ -175,9 +178,17 @@ def test_a_malformed_policy_refuses_naming_its_defect(
 
 
 def test_the_committed_declaration_is_the_factory_half_of_the_partition() -> None:
-    assert resolve_claude_credential_policy(cwd=_REPO_ROOT) == IOSuccess(
-        ClaudeCredentialPolicy(mode=NUMBERED_SLOTS, slots=tuple(_slot(n) for n in range(1, 7)))
-    )
+    """The invariant, not the committed values: which selection is declared is config."""
+    result = resolve_claude_credential_policy(cwd=_REPO_ROOT)
+
+    assert isinstance(result, IOSuccess)
+    policy = unsafe_perform_io(result.unwrap())
+    assert policy.mode == NUMBERED_SLOTS
+    assert policy.selection in {LOCAL_RANKING, CENTRAL_FACTORY_SELECTION}
+    assert policy.slots
+    assert len(set(policy.slots)) == len(policy.slots)
+    assert _slot(0) not in policy.slots
+    assert all(slot.startswith(_slot(0)[:-1]) for slot in policy.slots)
 
 
 # --- the selector ------------------------------------------------------------
