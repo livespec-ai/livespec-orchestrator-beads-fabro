@@ -17,10 +17,18 @@ def _graph() -> object:
     return graph
 
 
+# Every command node that holds no credential by contract starts by withdrawing them
+# (bd-ib-sgnfom; tests/integration/test_workflow_command_node_credential_scope_sgnfom.py).
+_WITHDRAWAL = (
+    "unset GITHUB_TOKEN GH_TOKEN GITHUB_APP_ID GITHUB_PRIVATE_KEY"
+    " GITHUB_APP_INSTALLATION_ID LIVESPEC_PUSH_TOKEN; "
+)
+
+
 def test_commit_red_uses_the_program_materialized_in_the_plugin_root() -> None:
     """Red must not resolve the target repository's dev-tooling directory."""
     assert _graph().nodes["commit_red"]["script"] == (
-        f'bash "{_PLUGINS_ROOT}/livespec-commit-red.sh"'
+        _WITHDRAWAL + f'bash "{_PLUGINS_ROOT}/livespec-commit-red.sh"'
     )
 
 
@@ -29,7 +37,7 @@ def test_remaining_implement_commands_use_programs_materialized_in_the_plugin_ro
     graph = _graph()
 
     assert graph.nodes["commit_green"]["script"] == (
-        f'bash "{_PLUGINS_ROOT}/livespec-commit-green.sh"'
+        _WITHDRAWAL + f'bash "{_PLUGINS_ROOT}/livespec-commit-green.sh"'
         " {{ inputs.implement_mechanical_reentries }} {{ inputs.implement_mechanical_targets }}"
     )
     assert (
