@@ -4,8 +4,9 @@
 # tool bd-ib-jr6w7v (see fleet-launch/README.md).
 """Report whether a work-item is in the Dispatcher's own ready set.
 
-It asks the installed plugin build's ``ready_items()``, so the answer cannot diverge
-from the Dispatcher's ``--item`` selection.
+It asks the installed plugin build's ``ready_items()`` and read-only rework
+projection, so the answer cannot diverge from the Dispatcher's ``--item``
+selection.
 
 Usage: ready-set-check.py <plugin-root> <repo-path> <item-id>
 Exit 0: dispatchable (in the ready set, or pending-approval with clear dependencies,
@@ -63,6 +64,19 @@ def main(*, argv: list[str]) -> int:
     if item_id in {i.id for i in ready_items(items=items, repo=repo)}:
         print(f"READY-CHECK {item_id}: in the ready set")
         return 0
+    if getattr(me, "rework_pending", False):
+        from livespec_orchestrator_beads_fabro.commands._dispatcher_io import JournalFile
+        from livespec_orchestrator_beads_fabro.commands._dispatcher_rework_admission import (
+            rework_redispatch_eligible_ids,
+        )
+
+        if item_id in rework_redispatch_eligible_ids(
+            repo=repo,
+            items=items,
+            journal=JournalFile(path=repo / "tmp" / "fabro-dispatch-journal.jsonl"),
+        ):
+            print(f"READY-CHECK {item_id}: eligible for rework re-dispatch")
+            return 0
     by_id = {i.id: i for i in items}
     deps = [
         getattr(d, "work_item_id", None)

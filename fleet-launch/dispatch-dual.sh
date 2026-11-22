@@ -740,17 +740,15 @@ size_screen() {
 
 echo "=== fleet-launch dispatch $ITEM at $(date -u +%FT%TZ) (wrapper: $(wrapper_description))"
 ready_check() {
-  local p pick
+  local p
   : > "$ready_check_stderr"
   p=$(installed_plugin_dir) || return 1
   if [ -n "${REWORK:-}" ]; then
-    # A rework:pending row is `active`, so it is never in ready_items(); ask the Dispatcher's own loop
-    # selection (the path drive impl:<id> runs) whether it would pick this item.
-    pick=$(cd "$REPO" && wrap -- python3 "$p/scripts/bin/dispatcher.py" loop --repo "$REPO" --budget 1 --item "$ITEM" --dry-run --json --invoker "claude:$SEAT" 2>"$ready_check_stderr")
-    if printf '%s' "$pick" | python3 -c 'import json,sys; rows=json.loads(sys.stdin.read() or "[]"); sys.exit(0 if any(r.get("stage")=="loop-pick" and r.get("status")=="dry-run" and r.get("work_item_id")==sys.argv[1] for r in rows) else 3)' "$ITEM"; then
-      echo "READY-CHECK $ITEM: REWORK, the Dispatcher's loop dry-run picks it"; return 0
-    fi
-    echo "READY-CHECK $ITEM: REWORK, the Dispatcher's loop dry-run does NOT pick it"; return 3
+    # A rework:pending row is `active`, so it is absent from ready_items().  The
+    # helper also asks the Dispatcher's side-effect-free rework projection, the
+    # same eligibility query its --item path uses, without entering loop.
+    (cd "$REPO" && wrap -- python3 "$FLEET_LAUNCH_DIR/ready-set-check.py" "$p" "$REPO" "$ITEM" 2>"$ready_check_stderr")
+    return $?
   fi
   (cd "$REPO" && wrap -- python3 "$FLEET_LAUNCH_DIR/ready-set-check.py" "$p" "$REPO" "$ITEM" 2>"$ready_check_stderr")
 }
