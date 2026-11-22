@@ -69,6 +69,12 @@ _RECORDED_INTERNAL_RULING_EXCEPTION = (
     "nearest topic, not a governing clause",
     "no coherence finding",
 )
+_UNSTATED_VERDICT_DOES_NOT_LICENSE_REPOSITORY_ONLY_COHERENCE = (
+    "A `kind: unstated` governing-heading verdict does NOT license a pass",
+    "An assertion remains incoherent when the referenced heading's whole section",
+    "does not state or derive its subject, even if an engineer could check that",
+    "subject from repository state without the specification.",
+)
 
 
 def _dod_gate_prompt() -> Path:
@@ -154,4 +160,18 @@ def test_check_four_accepts_a_current_recorded_internal_ruling_for_the_nearest_t
     check_four = _check_four()
 
     for needle in _RECORDED_INTERNAL_RULING_EXCEPTION:
+        assert needle in check_four, needle
+
+
+def test_check_four_refuses_a_repository_only_claim_after_an_unstated_verdict() -> None:
+    """Checkability outside the specification never makes an ungoverned claim coherent.
+
+    An unstated verdict means no spec clause can repair the References line; it
+    does not excuse check 4 from refusing an assertion whose cited section does
+    not govern its subject.  Without this rule, repository-only observability
+    can produce a PASS beside the same rubric's non-governance failure.
+    """
+    check_four = _check_four()
+
+    for needle in _UNSTATED_VERDICT_DOES_NOT_LICENSE_REPOSITORY_ONLY_COHERENCE:
         assert needle in check_four, needle
