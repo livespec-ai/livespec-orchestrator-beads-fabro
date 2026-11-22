@@ -46,12 +46,15 @@ curl_json() {
   if [[ "$#" -eq 3 ]]; then
     data_arg=(--data @"$3")
   fi
-  printf 'X-Honeycomb-Team: %s\n' "${api_key}" | curl --fail-with-body --silent --show-error \
+  # The header goes to curl on a here-string, not a pipe: under pipefail a
+  # printf writer that loses the race to an early-exiting curl dies of SIGPIPE
+  # (exit 141) (bd-ib-k3xswd).
+  curl --fail-with-body --silent --show-error \
     --request "${method}" \
     --url "${url}" \
     --header @- \
     --header "Content-Type: application/json" \
-    "${data_arg[@]}"
+    "${data_arg[@]}" <<<"X-Honeycomb-Team: ${api_key}"
 }
 
 curl_json GET "${api_base}/1/recipients" >"${recipients_json}"

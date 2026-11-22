@@ -183,9 +183,9 @@ done
 
 # T1.b — fabro version + doctor; server reachable + GitHub configured.
 log "T1.b fabro version + doctor (redacted)"
-docker exec "$CONTAINER" fabro version 2>&1 | sed -E 's/[A-Za-z0-9_-]{24,}/<redacted>/g' | head -8
+docker exec "$CONTAINER" fabro version 2>&1 | sed -E 's/[A-Za-z0-9_-]{24,}/<redacted>/g' | sed -n '1,8p'
 echo "--- fabro doctor ---"
-docker exec "$CONTAINER" fabro doctor 2>&1 | sed -E 's/[A-Za-z0-9_-]{24,}/<redacted>/g' | head -30 || true
+docker exec "$CONTAINER" fabro doctor 2>&1 | sed -E 's/[A-Za-z0-9_-]{24,}/<redacted>/g' | sed -n '1,30p' || true
 
 # T1.c — web UI reachable on the published (host-loopback) port. Status only.
 log "T1.c fabro web UI HTTP probe (host loopback)"

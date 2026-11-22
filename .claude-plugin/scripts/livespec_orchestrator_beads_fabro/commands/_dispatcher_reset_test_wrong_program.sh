@@ -53,7 +53,8 @@ if ! git diff --quiet "origin/$default_branch" HEAD 2>/dev/null; then
             diff_size="$(git diff --shortstat "origin/$default_branch...HEAD" 2>/dev/null || true)"
             echo "LIVESPEC_TEST_WRONG_LAP_PRESERVED: $lap_ref merge-base diff: ${diff_size:-unmeasured}" >&2
         else
-            push_error="$(printf '%s\n' "$push_out" | sed -e 's#[^[:space:]/@][^[:space:]/@]*:[^[:space:]/@][^[:space:]/@]*@#<credential-redacted>@#g' | head -c 2000)"
+            push_error="$(sed -e 's#[^[:space:]/@][^[:space:]/@]*:[^[:space:]/@][^[:space:]/@]*@#<credential-redacted>@#g' <<<"$push_out")"
+            push_error="${push_error:0:2000}"
             echo "LIVESPEC_TEST_WRONG_LAP_NOT_PRESERVED: step=push-lap-ref (exit $push_status); the lap tree ($lap_sha) was not preserved. Push output: $push_error" >&2
         fi
     fi
