@@ -137,7 +137,8 @@ request directory. The directory is scratch space, never a repository path;
 do not print the credential file or its contents.
 
     broker="$(pwd)/.claude-plugin/scripts/bin/publication_broker.py"
-    broker_dir="$(mktemp -d \"${TMPDIR:-/tmp}/proof-verify/broker.XXXXXX\")"
+    mkdir -p "${TMPDIR:-/tmp}/proof-verify"
+    broker_dir="$(mktemp -d "${TMPDIR:-/tmp}/proof-verify/broker.XXXXXX")"
     broker_launch="$broker_dir/launch.json"
     broker_credential="$broker_dir/credential"
     broker_request="$broker_dir/request.json"
