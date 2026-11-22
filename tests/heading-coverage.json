@@ -3336,8 +3336,7 @@
     "heading": "## Scenario 383 — An item-only read-history returns every generation of an incident from its work-item id and computes the closed generation's outstanding list",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "TODO",
-    "work_item": "bd-ib-l4dowx",
-    "reason": "A real test at the integration tier or above is owed for this heading: the incident authority CLI driven with an item-only read-history against an incident of several attempts and generations, a closed head with a computed outstanding list, an unknown item, and the unchanged full-identity invocation. bd-ib-l4dowx owns it."
+    "test": "tests.integration.test_incident_item_only_history_scenario383.test_every_generation_of_every_attempt_is_returned_oldest_first",
+    "reason": "Bound to an integration-tier test, per the heading taxonomy's pyramid-tier requirement: `tests/integration/test_incident_item_only_history_scenario383.py` drives the incident authority CLI's `main` with an item-only read-history against a retained chain in the in-memory tenant: five generations of two attempts oldest first, a closed head's read-time outstanding list on the last generation only and in no authority record, incident-authority-missing for an ordinary or unknown item, and the unchanged full-identity read."
   }
 ]
