@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from livespec_orchestrator_beads_fabro._beads_client import BeadsClient
     from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_types import CommandRunner
 
-__all__: list[str] = ["recorded_drill_evidence"]
+__all__: list[str] = ["master_reachable_evidence", "recorded_drill_evidence"]
 
 _SCRATCH = "incident-scratch/"
 _NOT_A_DRILL = "incident-not-a-recorded-drill"
@@ -123,9 +123,15 @@ def _recorded_commits(
 
 
 def _landed_evidence(
-    *, commits: tuple[tuple[str, str], ...], runner: CommandRunner, repo: Path, repository: str
+    *,
+    commits: tuple[tuple[str, str], ...],
+    runner: CommandRunner,
+    repo: Path,
+    repository: str,
+    landed_code: str = _NOT_A_DRILL,
+    unavailable_code: str = _UNAVAILABLE,
 ) -> AuthorityRefusal | None:
-    """Refuse a drill if any retained landed or revert commit is already reachable from master."""
+    """Refuse if any retained landed or revert commit is already reachable from master."""
     for kind, commit in commits:
         result = runner.run(
             argv=["gh", "api", f"repos/{repository}/compare/{commit}...master", "--method", "GET"],
@@ -134,16 +140,16 @@ def _landed_evidence(
         )
         value = parse_json(text=result.stdout) if result.exit_code == 0 else None
         if not isinstance(value, dict):
-            return _refusal(code=_UNAVAILABLE, detail=f"commit {commit}: unreadable")
+            return _refusal(code=unavailable_code, detail=f"commit {commit}: unreadable")
         comparison = cast("dict[str, object]", value)
         behind = comparison.get("behind_by")
         if not isinstance(behind, int) or behind < 0:
-            return _refusal(code=_UNAVAILABLE, detail=f"commit {commit}: incomplete")
+            return _refusal(code=unavailable_code, detail=f"commit {commit}: incomplete")
         # In `commit...master`, no commits behind means master already contains
         # the recorded commit (or is that exact commit).  A divergent master is
         # allowed only when it still lacks at least this recorded commit.
         if behind == 0:
-            return _refusal(code=_NOT_A_DRILL, detail=f"{kind} commit {commit}")
+            return _refusal(code=landed_code, detail=f"{kind} commit {commit}")
     return None
 
 
@@ -167,4 +173,29 @@ def recorded_drill_evidence(
         runner=runner,
         repo=repo,
         repository=repository,
+    )
+
+
+def master_reachable_evidence(  # noqa: PLR0913 — kw-only; the chain, the forge and the two named codes.
+    *,
+    client: BeadsClient,
+    item_id: str,
+    history: tuple[IncidentAttempt, ...],
+    runner: CommandRunner,
+    repo: Path,
+    repository: str,
+    landed_code: str,
+    unavailable_code: str,
+) -> AuthorityRefusal | None:
+    """Name the first retained landed or revert commit master already contains, by `landed_code`.
+
+    A forge comparison that fails or is incomplete is `unavailable_code`, never a pass.
+    """
+    return _landed_evidence(
+        commits=_recorded_commits(client=client, item_id=item_id, history=history),
+        runner=runner,
+        repo=repo,
+        repository=repository,
+        landed_code=landed_code,
+        unavailable_code=unavailable_code,
     )

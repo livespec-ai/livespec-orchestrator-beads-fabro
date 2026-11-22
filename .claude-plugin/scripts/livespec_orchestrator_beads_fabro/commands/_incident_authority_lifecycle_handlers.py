@@ -63,6 +63,11 @@ from livespec_orchestrator_beads_fabro.incident_regression_recovery import (
 from livespec_orchestrator_beads_fabro.incident_repayment_recovery import (
     recover_repayment_phases,
 )
+from livespec_orchestrator_beads_fabro.incident_retire import (
+    IncidentRetired,
+    Retirement,
+    retire_incident,
+)
 
 if TYPE_CHECKING:
     from livespec_orchestrator_beads_fabro._beads_client import BeadsClient
@@ -90,10 +95,18 @@ LIFECYCLE_PAYLOADS: dict[str, tuple[str, ...]] = {
     "correct-unmerged-attempt": ("correction_json", "target_ref", "failed_run"),
     "complete-incident": ("master_run", "completion_json"),
     "drill-close": (),
+    "retire": ("retire_json",),
 }
 _PR_NUMBER = re.compile(r"[1-9][0-9]*")
 
-LifecycleReply = RepaymentEntry | RecoveryEntry | IncidentCompletion | DrillClose | AuthorityRefusal
+LifecycleReply = (
+    RepaymentEntry
+    | RecoveryEntry
+    | IncidentCompletion
+    | DrillClose
+    | IncidentRetired
+    | AuthorityRefusal
+)
 _Handler = Callable[..., LifecycleReply]
 
 
@@ -237,6 +250,26 @@ def _correct(
     )
 
 
+def _retire(
+    *,
+    args: argparse.Namespace,
+    client: BeadsClient,
+    reading: IncidentReading,
+    runner: CommandRunner,
+) -> LifecycleReply:
+    retirement = decode_record(text=args.retire_json, shape=Retirement, flag="--retire-json")
+    if isinstance(retirement, AuthorityRefusal):
+        return retirement
+    return retire_incident(
+        client=client,
+        reading=reading,
+        runner=runner,
+        repo=args.repo,
+        repository=args.repository,
+        retirement=retirement,
+    )
+
+
 LIFECYCLE_HANDLERS: dict[str, _Handler] = {
     "record-merge": _record_merge,
     "enter-repayment": _enter,
@@ -252,4 +285,5 @@ LIFECYCLE_HANDLERS: dict[str, _Handler] = {
     "correct-unmerged-attempt": correct_unmerged_action,
     "complete-incident": complete_action,
     "drill-close": run_drill_close,
+    "retire": _retire,
 }

@@ -146,8 +146,9 @@ def _validated_successor(
     successor: IncidentAttempt,
     allow_drill_close: bool,
     attested: bool,
+    allow_retire: bool,
 ) -> IncidentAttempt | AuthorityRefusal:
-    """Decode the canonical successor and reserve `drill-closed` for its action."""
+    """Decode the canonical successor and reserve `drill-closed` and `retired` for their actions."""
     decoded = decode_attempt(value=parse_json(text=json.dumps(attempt_record(attempt=successor))))
     if decoded is None or not _valid_successor(
         before=observed.attempt, after=decoded, attested=attested
@@ -159,6 +160,10 @@ def _validated_successor(
         return AuthorityRefusal(
             code="incident-drill-close-requires-action", detail=observed.attempt.item_id
         )
+    if decoded.phase == "retired" and not allow_retire:
+        return AuthorityRefusal(
+            code="incident-retire-requires-action", detail=observed.attempt.item_id
+        )
     return decoded
 
 
@@ -169,12 +174,14 @@ def _commit(
     successor: IncidentAttempt,
     allow_drill_close: bool,
     attested: bool,
+    allow_retire: bool,
 ) -> IncidentReading | AuthorityRefusal:
     decoded = _validated_successor(
         observed=observed,
         successor=successor,
         allow_drill_close=allow_drill_close,
         attested=attested,
+        allow_retire=allow_retire,
     )
     if isinstance(decoded, AuthorityRefusal):
         return decoded
@@ -211,6 +218,7 @@ def commit_transition(
     successor: IncidentAttempt,
     allow_drill_close: bool = False,
     attested_workflow_paths: bool = False,
+    allow_retire: bool = False,
 ) -> IncidentReading | AuthorityRefusal:
     """Commit one next generation, or recover a retry without another effect."""
     try:
@@ -220,6 +228,7 @@ def commit_transition(
             successor=successor,
             allow_drill_close=allow_drill_close,
             attested=attested_workflow_paths,
+            allow_retire=allow_retire,
         )
     except _LEDGER_ERRORS as exc:
         # Keep an unknown candidate: deleting it could sever our own successful

@@ -40,6 +40,7 @@ PHASE_LIFECYCLE_STATES: dict[str, str] = {
     "repayment-acceptance": "acceptance",
     "closed": "done",
     "drill-closed": "done",
+    "retired": "done",
 }
 # The normal repayment phases, in the order one same-item operation walks them.
 REPAYMENT_PHASES: tuple[str, ...] = (
@@ -50,8 +51,9 @@ REPAYMENT_PHASES: tuple[str, ...] = (
 )
 # A snapshot with `pr_number: 0` and no landed pair is legal only while its
 # carrier has not been bound: the host repair before its PR, and the fresh
-# repayment carrier between its reservation and the factory run's own PR.
-PRE_PR_PHASES: frozenset[str] = frozenset(("repair", *REPAYMENT_PHASES[:3]))
+# repayment carrier between its reservation and the factory run's own PR. A
+# chain retired before its carrier was ever bound keeps that unbound snapshot.
+PRE_PR_PHASES: frozenset[str] = frozenset(("repair", *REPAYMENT_PHASES[:3], "retired"))
 MERGED_PHASE = "master-observation"
 _REPAYMENT_ENTRY_FROM = MERGED_PHASE
 # A current incident failure moves a merged attempt, a live repayment or a closed
