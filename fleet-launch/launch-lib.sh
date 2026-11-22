@@ -285,6 +285,29 @@ canary_hold_text() { head -c 300 "$CANARY_HOLD_FILE" 2>/dev/null | tr '\n' ' ' |
 # Every launcher's ticket lives in one directory; a mi-homelab or arm64 launcher writes
 # `server=hl` into its ticket and orders only among such tickets, while a gmktec launcher
 # ignores them (the shared mutex and the fleet cap are unchanged).
+# publish_ticket <ticket-file> [overwrite]: write the complete initial record beside the
+# queue and rename it into place. Queue readers must never observe a published ticket
+# before its owner, pid, item, and FIFO class are all present. An ordinary ticket keeps
+# noclobber semantics; a restart is the sole overwrite caller.
+publish_ticket() {
+  local target="$1" overwrite=${2:-0} directory staged
+  directory=${target%/*}
+  staged=$(mktemp "$directory/.ticket.${target##*/}.XXXXXX") || return 1
+  if ! {
+    printf 'owner=%s pid=%s item=%s\n' "$SEAT" "$$" "$ITEM"
+    [ "${FIFO_CLASS:-gmk}" != hl ] || printf 'server=hl\n'
+  } > "$staged"; then
+    rm -f "$staged"
+    return 1
+  fi
+  if [ "$overwrite" = 1 ]; then
+    mv -fT "$staged" "$target" || { rm -f "$staged"; return 1; }
+  else
+    # GNU mv leaves the source in place when -n finds an existing target.
+    mv -nT "$staged" "$target" || { rm -f "$staged"; return 1; }
+    [ ! -e "$staged" ] || { rm -f "$staged"; return 1; }
+  fi
+}
 # ticket_fields <file>: TK_PID, TK_ITEM, TK_HL (server=hl), TK_YIELD (held= or wip-wait=1).
 ticket_fields() {
   local -a lines; local l
@@ -296,6 +319,19 @@ ticket_fields() {
     case "$l" in server=hl*) TK_HL=1 ;; held=*|wip-wait=1*) TK_YIELD=1 ;; esac
   done
   return 0
+}
+# ticket_without_pid_is_fresh <ticket-file>: a reader can meet a malformed or
+# incomplete ticket only while a launcher is publishing it. Leave that file
+# alone for the configured bound; afterwards the ordinary stalled-ticket path
+# reports and removes it. A future timestamp is also young, rather than a
+# reason to delete a possibly live launcher on a clock adjustment.
+ticket_without_pid_is_fresh() {
+  local modified now age
+  modified=$(stat -c %Y -- "$1" 2>/dev/null) || return 1
+  case $modified in ''|*[!0-9]*) return 1 ;; esac
+  now=$(date +%s)
+  age=$(( now - modified ))
+  [ "$age" -lt "${FLEET_LAUNCH_EMPTY_TICKET_GRACE_S:-0}" ]
 }
 # report_stall <ticket-file> <pid>: a queue reader met a ticket whose launcher is no longer alive.
 # Written to stderr, because the reader runs in a command substitution, and before the ticket is removed.
@@ -319,6 +355,10 @@ scan_queue() {
   for f in "$q"/*; do
     [ -e "$f" ] || continue
     ticket_fields "$f" || continue
+    # A redirect creates an empty name before it fills it. Current launchers
+    # publish by rename, but tolerate a just-created unreadable ticket from an
+    # older or interrupted launcher instead of deleting its FIFO place.
+    [ -n "$TK_PID" ] || { ticket_without_pid_is_fresh "$f" && continue; }
     if [ -n "$TK_PID" ] && kill -0 "$TK_PID" 2>/dev/null; then
       if [ "${FIFO_CLASS:-gmk}" = hl ]; then [ "$TK_HL" = 1 ] || continue; else [ "$TK_HL" = 1 ] && continue; fi
       [ "$TK_YIELD" = 1 ] && continue
