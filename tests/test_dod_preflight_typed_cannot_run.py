@@ -35,3 +35,11 @@ def test_an_input_bound_cannot_run_is_recorded_without_turning_into_a_refusal() 
     assert "append_work_item_comment" in text
     assert "cause=chain.cause" in text
     assert "raise SystemExit(2)" in text
+
+
+def test_an_unavailable_governing_heading_verdict_stops_the_preflight_as_did_not_run() -> None:
+    """An unobserved governing verdict cannot fall through to a PASS candidate chain."""
+    text = _SCRIPT.read_text(encoding="utf-8")
+
+    assert "if governing is None:" in text
+    assert text.index("if governing is None:") < text.index("subject = judgement_subject")
