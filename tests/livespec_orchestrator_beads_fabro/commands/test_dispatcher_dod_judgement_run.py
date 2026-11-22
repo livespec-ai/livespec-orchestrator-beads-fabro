@@ -285,6 +285,18 @@ def test_the_prompt_is_the_rubric_bytes_then_the_ending_contract_then_the_subjec
     assert prompt.endswith(f"{subject}\n")
 
 
+def test_a_host_judgement_appends_only_its_ending_contract_and_subject_to_the_unchanged_rubric() -> (
+    None
+):
+    """Scenario 239: check 4 is graded from the node's own rubric bytes."""
+    rubric = dod_gate_prompt_path().read_text(encoding="utf-8")
+    subject = "work-item: bd-ib-a4gjc5"
+
+    assert judgement_prompt(gate_prompt=rubric, subject=subject) == (
+        f"{rubric}{_ending_contract()}{subject}\n"
+    )
+
+
 def test_the_ending_contract_states_the_verdict_form_and_grades_nothing() -> None:
     contract = _ending_contract()
 
