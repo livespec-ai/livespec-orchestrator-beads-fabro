@@ -322,6 +322,70 @@ def test_the_third_failed_fix_commit_run_routes_to_needs_human_with_its_preserve
         assert all(run in cause for run in failed_runs)
 
 
+def test_a_passed_fix_commit_run_clears_prior_failed_fix_commit_runs(tmp_path: Path) -> None:
+    """Only consecutive failed fix commit runs may exhaust the fix loop."""
+    repo = _repo(tmp_path)
+    plugins = _plugins(tmp_path)
+
+    for _ in range(2):
+        _integrate(repo, "merge")
+        _hook(repo, status=1)
+        _, report = _run_commit(repo, plugins)
+        assert report["state"] == "failed"
+
+        result = _settle(repo, plugins, node="fix_commit_settle")
+
+        assert result.returncode != 0, result.stderr
+        assert "LIVESPEC_FIX_COMMIT_RUN_FAILED_EXHAUSTED" not in result.stderr
+
+    _integrate(repo, "merge")
+    _hook(repo, status=0)
+    _, report = _run_commit(repo, plugins)
+    assert report["state"] == "passed"
+
+    result = _settle(repo, plugins, node="fix_commit_settle")
+
+    assert result.returncode == 0, result.stderr
+    assert not (repo / ".git" / "livespec-fix-failed-commit-runs").exists()
+
+
+def _journal(repo: Path) -> Path:
+    return repo / ".git" / "livespec-fix-failed-commit-runs"
+
+
+def test_a_settle_with_no_passed_run_keeps_the_failed_fix_commit_runs(tmp_path: Path) -> None:
+    """A visit that settled no passing run must not restart the failed count."""
+    repo = _repo(tmp_path)
+    plugins = _plugins(tmp_path)
+
+    for _ in range(2):
+        _integrate(repo, "merge")
+        _hook(repo, status=1)
+        _, report = _run_commit(repo, plugins)
+        assert report["state"] == "failed"
+        assert _settle(repo, plugins, node="fix_commit_settle").returncode != 0
+    journaled = _journal(repo).read_text(encoding="utf-8")
+    assert len(journaled.split()) == 2
+
+    again = _settle(repo, plugins, node="fix_commit_settle")
+
+    assert again.returncode == 0, again.stderr
+    assert _journal(repo).read_text(encoding="utf-8") == journaled
+
+
+def test_a_settle_without_the_runner_keeps_the_failed_fix_commit_runs(tmp_path: Path) -> None:
+    """An absent runner settled no run, so it is not a passed fix commit run."""
+    repo = _repo(tmp_path)
+    plugins = _plugins(tmp_path)
+    _ = _journal(repo).write_text("run-one\nrun-two\n", encoding="utf-8")
+    (plugins / COMMIT_RUNNER_PROGRAM_FILENAME).unlink()
+
+    result = _settle(repo, plugins, node="fix_commit_settle")
+
+    assert result.returncode == 0, result.stderr
+    assert _journal(repo).read_text(encoding="utf-8") == "run-one\nrun-two\n"
+
+
 def test_fix_settle_records_the_runner_settled_run_not_a_prior_commit_token_in_its_brief(
     tmp_path: Path,
 ) -> None:
