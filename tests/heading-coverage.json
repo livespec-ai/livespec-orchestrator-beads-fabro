@@ -2968,9 +2968,9 @@
     "heading": "## Scenario 326 — A resumed or seeded tree older than a harness guard passes its own commit hook, and an agent stage's own publication stays refused",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: bd-ib-xwwn23 owes it, replacing the closed owner bd-ib-s754le, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
-    "work_item": "bd-ib-xwwn23"
+    "test": "tests.integration.test_commit_hook_scenario326.test_scenario326_commit_hooks_and_publication_boundary",
+    "reason": "Integration-tier execution materializes the real detached commit runner and projected push_origin helper in two fixture repositories. It proves a seeded tree and an unchanged repository each pass their own hooks without inheriting the guard, while explicit and turn-owned publication attempts remain refused with their stage and action.",
+    "work_item": "bd-ib-gvbiia"
   },
   {
     "heading": "## Scenario 327 — A fresh ruling routes a released item fresh past its preserved trees",
@@ -3000,9 +3000,9 @@
     "heading": "## Scenario 330 — A hold set while a launched drive waits before admission stops the drive",
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "test": "TODO",
-    "reason": "An integration-tier test is owed for this heading: bd-ib-xwwn23 owes it, replacing the closed owner bd-ib-j6rbdx, which landed the behaviour but never bound the exercising test. Filed in the 2026-11-11 TODO-owner sweep.",
-    "work_item": "bd-ib-xwwn23"
+    "test": "tests.integration.test_fleet_launch_scenario330.test_scenario330_re_reads_holds_until_admission",
+    "reason": "Integration-tier execution of the real fleet-launch Scenario 330 harness verifies that a pre-admission hold stops the drive and retains its ticket, while post-admission and absent holds let it list, and an admission-time stop exits without re-taking its ticket and records one comment.",
+    "work_item": "bd-ib-gvbiia"
   },
   {
     "heading": "## Scenario 331 — The release branch advances only on an operator dispatch that starts a canary",
