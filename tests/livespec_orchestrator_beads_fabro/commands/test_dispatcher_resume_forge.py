@@ -217,6 +217,118 @@ def test_a_failed_hand_redo_listing_is_unobserved() -> None:
     )
 
 
+@dataclass(kw_only=True)
+class _ForgeRunner:
+    """A CommandRunner answering the merged listing and the default-branch reads apart."""
+
+    listing: str
+    default_branch: str | None = "master"
+    argvs: list[list[str]] = field(default_factory=list)
+
+    def run(
+        self,
+        *,
+        argv: list[str],
+        cwd: Path,
+        timeout_seconds: float,
+        env: dict[str, str] | None = None,
+        stdin: int | None = None,
+    ) -> CommandResult:
+        _ = (cwd, timeout_seconds, env, stdin)
+        self.argvs.append(argv)
+        if argv[:3] == ["gh", "pr", "list"]:
+            return CommandResult(exit_code=0, stdout=self.listing, stderr="")
+        if self.default_branch is None:
+            return CommandResult(exit_code=1, stdout="", stderr="")
+        return CommandResult(exit_code=0, stdout=f"origin/{self.default_branch}\n", stderr="")
+
+
+def _merged_row(
+    *, number: int, title: str, body: str = "", base: str = "master"
+) -> dict[str, object]:
+    return {
+        "number": number,
+        "state": "MERGED",
+        "headRefOid": f"{number:040x}",
+        "title": title,
+        "body": body,
+        "baseRefName": base,
+    }
+
+
+def test_the_hand_redo_is_the_merge_whose_title_names_the_item_on_the_default_branch() -> None:
+    """A later merge that merely mentions the item, or landed elsewhere, is not the redo."""
+    assert _MODULE_PATH.is_file()
+    module = importlib.import_module(_MODULE)
+    runner = _ForgeRunner(
+        listing=_listing(
+            rows=[
+                _merged_row(number=6000, title="chore: unrelated", body="follows bd-ib-n5v53o"),
+                _merged_row(number=5600, title="fix: recover bd-ib-n5v53o", base="release"),
+                _merged_row(number=5487, title="fix: recover bd-ib-n5v53o"),
+                _merged_row(number=5400, title="fix: recover bd-ib-n5v53o2"),
+            ]
+        )
+    )
+    read = module.merged_item_pull_request(
+        repo=Path("/repo"), work_item_id="bd-ib-n5v53o", runner=runner
+    )
+    assert read.observed is True
+    assert read.pull_request is not None
+    assert read.pull_request.number == 5487
+    assert read.pull_request.head == f"{5487:040x}"
+
+
+def test_a_merge_that_only_mentions_the_item_in_its_body_is_no_hand_redo() -> None:
+    """With no title naming the item there is no redo to anchor on, and that is an answer."""
+    assert _MODULE_PATH.is_file()
+    module = importlib.import_module(_MODULE)
+    runner = _ForgeRunner(
+        listing=_listing(
+            rows=[_merged_row(number=6000, title="chore: unrelated", body="follows bd-ib-n5v53o")]
+        )
+    )
+    read = module.merged_item_pull_request(
+        repo=Path("/repo"), work_item_id="bd-ib-n5v53o", runner=runner
+    )
+    assert read.observed is True
+    assert read.pull_request is None
+
+
+def test_two_merges_naming_the_item_are_an_ambiguous_answer_not_the_newest() -> None:
+    """Ambiguity is refused rather than resolved by number, so no head is fetched blind."""
+    assert _MODULE_PATH.is_file()
+    module = importlib.import_module(_MODULE)
+    runner = _ForgeRunner(
+        listing=_listing(
+            rows=[
+                _merged_row(number=5487, title="fix: recover bd-ib-n5v53o"),
+                _merged_row(number=6000, title="fix: again bd-ib-n5v53o"),
+            ]
+        )
+    )
+    read = module.merged_item_pull_request(
+        repo=Path("/repo"), work_item_id="bd-ib-n5v53o", runner=runner
+    )
+    assert read.observed is False
+    assert read.pull_request is None
+
+
+def test_an_unresolvable_default_branch_leaves_the_hand_redo_unobserved() -> None:
+    """Without the base the merge landed on, no merge can be told from a side-branch one."""
+    assert _MODULE_PATH.is_file()
+    module = importlib.import_module(_MODULE)
+    runner = _ForgeRunner(
+        listing=_listing(rows=[_merged_row(number=5487, title="fix: recover bd-ib-n5v53o")]),
+        default_branch=None,
+    )
+    read = module.merged_item_pull_request(
+        repo=Path("/repo"), work_item_id="bd-ib-n5v53o", runner=runner
+    )
+    assert read.observed is False
+    assert read.pull_request is None
+
+
 def test_the_read_runs_the_listing_it_declares() -> None:
     """One argv builder, one caller: a second spelling is how the two would drift."""
     assert _MODULE_PATH.is_file()
