@@ -216,6 +216,27 @@ def test_local_fallback_records_evidence_only_for_a_passing_same_tree_aggregate(
         )
 
 
+def test_local_fallback_runs_the_staged_precheck_before_its_aggregate(*, tmp_path: Path) -> None:
+    """A staged Python change is screened before the local aggregate starts."""
+    repo, env, log = _local_fallback_repository(tmp_path=tmp_path / "precheck")
+
+    completed = subprocess.run(
+        ["bash", str(_PRE_COMMIT_SCRIPT)],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    calls = log.read_text(encoding="utf-8").splitlines()
+    assert "check-staged-precheck" in calls
+    assert calls.index("check-staged-precheck") < next(
+        index for index, call in enumerate(calls) if call.startswith("check-skipping ")
+    )
+
+
 def _git(*, repo: Path, arguments: list[str]) -> str:
     """Run git in a throwaway repository and return its standard output."""
     completed = subprocess.run(
