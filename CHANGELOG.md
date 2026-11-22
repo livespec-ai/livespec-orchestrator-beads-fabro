@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.345.2](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.345.1...v0.345.2) (2026-11-22)
+
+
+### Bug Fixes
+
+* a resume refusal names the journal row it lacks for the run that has none ([33b4cb2](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/33b4cb2a6351373fdd85b4ec120e445b6e45404d))
+* let a repair turn repeat its commit wait until the verdict (bd-ib-fj3rjo) ([85cf6a4](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/85cf6a478877566912933e4b6d2670cc6d65155e))
+* only engine checkpoints classify a runner commit as overtaken (bd-ib-fj3rjo) ([430fced](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/430fced6179c1a91d2f6ecbbf123ad92f95ae33f))
+* record an empty output tail when a failing preview hook wrote nothing ([710ba20](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/710ba2025095e7a79f157baf65951f3df73c767a))
+* redact credential-shaped values from the gate preview's recorded output tail (bd-ib-p66ucz) ([bb178fc](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/bb178fcafe282f70e5768912ae48dede5475ad23))
+* run the publication broker as its own executable process (bd-ib-yr2rlx) ([cec8489](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/cec8489ac675e16ecccaf882cee6a4a9dacfd55b))
+* the fleet-launch gate samples scenario 23's signal stability loops fewer times by default, so a loaded CI runner stays inside the 900s scenario bound (bd-ib-ftfjda) ([79eff7b](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/79eff7b0277a444d3d527ac575d564953e35a08d))
+
 ## [0.345.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.345.0...v0.345.1) (2026-11-21)
 
 
