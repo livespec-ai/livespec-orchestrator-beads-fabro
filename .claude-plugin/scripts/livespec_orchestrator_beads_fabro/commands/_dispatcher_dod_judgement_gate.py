@@ -39,11 +39,13 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_governing_reuse 
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement import (
     JUDGEMENT_HELD,
-    JUDGEMENT_UNAVAILABLE,
     first_remedy,
     judgement_subject,
     judgement_subject_digest,
     rubric_digest,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement import (
+    JUDGEMENT_UNAVAILABLE as UNAVAILABLE,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_comments import (
     judgement_comment_bodies,
@@ -231,7 +233,7 @@ def judge_definition_of_done(  # noqa: PLR0913 - each argument is an independent
         ),
         governing=governing,
     )
-    if verdict.outcome == JUDGEMENT_UNAVAILABLE:
+    if verdict.outcome == UNAVAILABLE:
         return _unavailable(
             item=item,
             stage=stage,
@@ -300,7 +302,7 @@ def judge_item_definition_of_done(  # noqa: PLR0913 - each argument is an indepe
 
     bodies = judgement_comment_bodies(path=path, work_item_id=item.id, repo=repo)
     if bodies is None:
-        return DodJudgementDecision(work_item_id=item.id, outcome=JUDGEMENT_UNAVAILABLE)
+        return DodJudgementDecision(work_item_id=item.id, outcome=UNAVAILABLE)
     decision = judge_definition_of_done(
         item=item,
         repo=repo,
@@ -360,6 +362,4 @@ def _unavailable(  # noqa: PLR0913 - each argument is one field of the record it
                 attempts=attempts,
             )
         )
-    return DodJudgementDecision(
-        work_item_id=item.id, outcome=JUDGEMENT_UNAVAILABLE, unavailable_cause=cause
-    )
+    return DodJudgementDecision(work_item_id=item.id, outcome=UNAVAILABLE, unavailable_cause=cause)
