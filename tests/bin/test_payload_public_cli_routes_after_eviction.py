@@ -120,6 +120,12 @@ def _run_evicting(*, install_root: Path, repo: Path, argv: list[str], tmp_path: 
         if key not in scrubbed and not key.startswith("COV_CORE_")
     }
     _ = env.pop("BEADS_DOLT_PASSWORD", None)
+    # The org App identity is ambient host state: a host whose wrapper exports
+    # GITHUB_APP_ID_ORG makes the bootstrap refuse "target repository App identity
+    # mismatch", so drop it next to the secret. GITHUB_APP_ID and GITHUB_PRIVATE_KEY
+    # stay: this wrapper double injects only the ledger secret, so the self-heal
+    # needs those two from the environment (bd-ib-c6jqar).
+    _ = env.pop("GITHUB_APP_ID_ORG", None)
     _ = env.pop("LIVESPEC_CREDENTIAL_REEXEC", None)
     env["CLAUDE_PLUGIN_ROOT"] = str(install_root)
     env["LIVESPEC_BEADS_FAKE"] = "1"
