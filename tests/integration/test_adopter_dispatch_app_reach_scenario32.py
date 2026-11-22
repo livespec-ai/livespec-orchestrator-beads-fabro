@@ -371,3 +371,98 @@ def test_scenario32_a_dispatcher_holding_no_app_identity_evaluates_nothing(
     assert refusal is None
     assert runner.calls == []
     assert _records(module=module, journal_path=journal_path) == []
+
+
+# The installation-coverage read, pinned by value on purpose: it is the one
+# question a plain repository read cannot answer for a PUBLIC target, where any
+# token reads the repository whether or not the serving App may push to it.
+_INSTALLATION_ARGV = (
+    "gh",
+    "api",
+    "--paginate",
+    "installation/repositories",
+    "--jq",
+    ".repositories[].full_name",
+)
+
+
+def _runner_with_installation(*, module: object, covered: str) -> _Runner:
+    """The `gh` seam for a target the plain read CAN see, plus the installation list."""
+    identity_argv = tuple(module.TARGET_IDENTITY_ARGV)  # pyright: ignore[reportAttributeAccessIssue]
+    probe_argv = tuple(module.target_reach_argv(target=_TARGET))  # pyright: ignore[reportAttributeAccessIssue]
+    return _Runner(
+        results={
+            identity_argv: CommandResult(exit_code=0, stdout=f"{_TARGET}\n", stderr=""),
+            probe_argv: CommandResult(exit_code=0, stdout="", stderr=""),
+            _INSTALLATION_ARGV: CommandResult(exit_code=0, stdout=covered, stderr=""),
+        }
+    )
+
+
+def test_scenario32_a_readable_target_outside_the_serving_apps_installation_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """bd-ib-bt73a7: a public target is READABLE by any token, so the plain read passes.
+
+    Measured 2026-11-22: a candidate dispatch launched under the bare credential
+    wrapper carried the fleet's old App, whose installation does not cover the
+    livespec-ai target. The plain repository read still succeeded, the dispatch
+    was admitted, and the run did two hours of work before its publish push was
+    refused with a 403. The installation-coverage read is the definite negative
+    that catches it BEFORE the claim: the serving App's installation lists the
+    repositories it covers, and the target is not among them.
+    """
+    assert _MODULE_PATH.is_file()
+    module = importlib.import_module(_MODULE_NAME)
+    repo = _repo(tmp_path=tmp_path)
+    runner = _runner_with_installation(
+        module=module, covered="the-old-org/one-repo\nthe-old-org/another-repo\n"
+    )
+    _install(module=module, monkeypatch=monkeypatch, runner=runner)
+    journal_path = tmp_path / "journal.jsonl"
+
+    exit_code = _wall_exit(repo=repo, journal_path=journal_path)
+
+    assert exit_code == EXIT_PRECONDITION_ERROR
+    refusal = capsys.readouterr().err
+    assert _SERVING_APP_ID in refusal
+    assert _TARGET in refusal
+    assert "not installed" in refusal
+    # The operator's remedy for THIS fault: launch through the target's declared
+    # credential wrapper so GITHUB_APP_ID names the App the target publishes as.
+    assert "credential_wrapper" in refusal
+    assert runner.calls == [
+        tuple(module.TARGET_IDENTITY_ARGV),  # pyright: ignore[reportAttributeAccessIssue]
+        tuple(module.target_reach_argv(target=_TARGET)),  # pyright: ignore[reportAttributeAccessIssue]
+        _INSTALLATION_ARGV,
+    ]
+    records = _records(module=module, journal_path=journal_path)
+    assert [record["reaches"] for record in records] == [False]
+
+
+def test_scenario32_a_readable_target_inside_the_serving_apps_installation_is_admitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The positive control for the installation-coverage read.
+
+    Without it the refusal above is equally consistent with a preflight that
+    refuses every readable target. The repository name is compared without
+    regard to case, because the forge spells a repository the way its owner
+    first typed it while a checkout's remote may spell it any way.
+    """
+    assert _MODULE_PATH.is_file()
+    module = importlib.import_module(_MODULE_NAME)
+    repo = _repo(tmp_path=tmp_path)
+    runner = _runner_with_installation(
+        module=module, covered=f"the-old-org/one-repo\n{_TARGET.upper()}\n"
+    )
+    _install(module=module, monkeypatch=monkeypatch, runner=runner)
+    journal_path = tmp_path / "journal.jsonl"
+
+    refusal = module.app_reach_refusal(
+        repo=repo, items=[_item()], journal=JournalFile(path=journal_path)
+    )  # pyright: ignore[reportAttributeAccessIssue]
+
+    assert refusal is None
+    records = _records(module=module, journal_path=journal_path)
+    assert [record["reaches"] for record in records] == [True]

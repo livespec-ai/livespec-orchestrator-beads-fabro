@@ -106,6 +106,14 @@ TARGET_IDENTITY_ARGV: tuple[str, ...] = (
 # the mint used.
 _APP_ID_ENV = "GITHUB_APP_ID"
 _PROBE_TIMEOUT_SECONDS = 30.0
+_INSTALLATION_LISTING_ARGV: tuple[str, ...] = (
+    "gh",
+    "api",
+    "--paginate",
+    "installation/repositories",
+    "--jq",
+    ".repositories[].full_name",
+)
 # `gh` prints its HTTP status into stderr rather than setting a distinct exit
 # code, so the definite negative is recognised on the status text. Both spellings
 # the CLI uses are matched, because a status-only match would also claim a `404`
@@ -172,7 +180,9 @@ def app_reach_refusal_detail(*, reading: AppReachReading) -> str:
         "instance carrying the target tenant's own GitHub App identity -- its own "
         "app_id, its own private key in the server process environment, and its own "
         "port and authentication -- rather than through a shared server whose App is "
-        "not installed for this target. Note also that the App `workflows` read-write "
+        "not installed for this target. If the target declares a credential_wrapper, "
+        "launch the dispatch through it so GITHUB_APP_ID names the App the target "
+        "publishes as. Note also that the App `workflows` read-write "
         "grant is deliberately withheld from the dispatch credential and is NOT a gap "
         "to close by granting it: work whose scope requires that capability is routed "
         "to the attended host session, which already holds it legitimately and where "
@@ -307,11 +317,12 @@ def _probed(
         env={"GH_TOKEN": token, "GITHUB_TOKEN": token},
     )
     if probe.exit_code == 0:
-        return AppReachReading(
+        return _installation_coverage(
+            repo=repo,
+            runner=runner,
             app_identity=app_identity,
             target=target,
-            reaches=True,
-            detail="the serving App's installation token reads the target repository",
+            token=token,
         )
     stderr = probe.stderr.strip()
     if any(signature in stderr for signature in _NOT_FOUND_SIGNATURES):
@@ -329,6 +340,55 @@ def _probed(
         target=target,
         reaches=None,
         detail=f"the installation-scoped read of the target could not be taken: {stderr}",
+    )
+
+
+def _installation_coverage(
+    *,
+    repo: Path,
+    runner: CommandRunner,
+    app_identity: str,
+    target: str,
+    token: str,
+) -> AppReachReading:
+    """Whether the serving App's INSTALLATION lists `target`, past a plain read.
+
+    A plain read of a PUBLIC target succeeds for any token, so a read-reach of
+    `repos/<target>` cannot tell an App that is installed on the target from one
+    that is not. The installation's own repository listing can, and a target
+    absent from a readable listing is the definite negative. A listing that
+    cannot be read keeps the read-reach answer rather than refusing on a
+    reading nobody took.
+    """
+    listing = runner.run(
+        argv=list(_INSTALLATION_LISTING_ARGV),
+        cwd=repo,
+        timeout_seconds=_PROBE_TIMEOUT_SECONDS,
+        env={"GH_TOKEN": token, "GITHUB_TOKEN": token},
+    )
+    if listing.exit_code != 0:
+        return AppReachReading(
+            app_identity=app_identity,
+            target=target,
+            reaches=True,
+            detail="the serving App's installation token reads the target repository",
+        )
+    covered = {line.strip().casefold() for line in listing.stdout.splitlines()}
+    if target.casefold() in covered:
+        return AppReachReading(
+            app_identity=app_identity,
+            target=target,
+            reaches=True,
+            detail="the serving App's installation covers the target repository",
+        )
+    return AppReachReading(
+        app_identity=app_identity,
+        target=target,
+        reaches=False,
+        detail=(
+            "the target is readable but not installed for the serving App: its "
+            "installation repository listing does not name the target"
+        ),
     )
 
 
