@@ -77,8 +77,12 @@ _SUPPORT_ARCHIVE_RELPATHS = (
 _MINT_HELPER_SOURCE = """#!/usr/bin/env python3
 from __future__ import annotations
 
+import dataclasses
+import json
 import os
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 bundle_root = Path(__file__).resolve().parents[1]
@@ -86,8 +90,46 @@ sys.path.insert(0, str(bundle_root / "_vendor"))
 
 from livespec_runtime.github_auth.config import load_github_app_config
 from livespec_runtime.github_auth.errors import GithubAppAuthError
+from livespec_runtime.github_auth.mint import DEFAULT_MINT_SEAMS
 from livespec_runtime.github_auth.provider import InstallationTokenProvider
+from returns.io import IOFailure, IOSuccess
 from returns.pipeline import is_successful
+
+# An agent stage's token is read-only: the wrapper sets this scope when the dispatcher-recorded
+# node is an agent stage, and the installation token is then requested with read permissions
+# only, so it cannot publish whatever a call does. The set is what the factory App is granted
+# (issues and actions are refused with HTTP 422). A permission the App lacks fails the mint
+# loudly (exit 3 below); the token is never silently widened.
+_READ_ONLY_PERMISSIONS = {
+    "checks": "read",
+    "contents": "read",
+    "metadata": "read",
+    "pull_requests": "read",
+    "statuses": "read",
+}
+
+
+def read_only_post(*, url, jwt):
+    if not url.startswith("https://"):
+        return IOFailure(GithubAppAuthError(detail=f"refusing non-https GitHub API URL {url!r}"))
+    request = urllib.request.Request(
+        url,
+        data=json.dumps({"permissions": _READ_ONLY_PERMISSIONS}).encode(),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {jwt}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+            "User-Agent": "livespec-runtime-github-auth",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30.0) as response:
+            return IOSuccess(json.load(response))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        return IOFailure(GithubAppAuthError(detail=f"GitHub App API call to {url} failed: {exc}"))
+
 
 if len(sys.argv) != 1:
     sys.stderr.write("usage: mint_app_token.py\\n")
@@ -98,8 +140,12 @@ if not is_successful(config):
     sys.stderr.write(f"ERROR: {config.failure().detail}\\n")
     raise SystemExit(3)
 
+seams = DEFAULT_MINT_SEAMS
+if os.environ.get("LIVESPEC_GH_TOKEN_SCOPE") == "read":
+    seams = dataclasses.replace(seams, http_post=read_only_post)
+
 try:
-    token = InstallationTokenProvider(config=config.unwrap()).token()
+    token = InstallationTokenProvider(config=config.unwrap(), seams=seams).token()
 except GithubAppAuthError as exc:
     sys.stderr.write(f"ERROR: {exc.detail}\\n")
     raise SystemExit(3) from exc
@@ -274,6 +320,14 @@ case "$agent_stage" in
         fi
         ;;
 esac
+
+# An agent stage mints a read-only token: the wrapper decides the scope from the recorded stage
+# and the mint command clears any value the agent exported.
+mint_scope=''
+case "$agent_stage" in
+    ''|publish_draft|pr_refresh|pr) ;;
+    *) mint_scope=read ;;
+esac
 """
 
 
@@ -290,7 +344,9 @@ _COVERAGE_HOOK_VARIABLES = (
     "COV_CORE_CONTEXT",
 )
 _MINT_COMMAND = (
-    "env " + " ".join(f"-u {name}" for name in _COVERAGE_HOOK_VARIABLES) + ' python3 "$mint"'
+    "env "
+    + " ".join(f"-u {name}" for name in (*_COVERAGE_HOOK_VARIABLES, "LIVESPEC_GH_TOKEN_SCOPE"))
+    + ' ${mint_scope:+LIVESPEC_GH_TOKEN_SCOPE=$mint_scope} python3 "$mint"'
 )
 
 _WRAPPER_TAIL = (

@@ -797,6 +797,7 @@ subprocess_spawn_allowlist = [
     "tests/integration/test_gate_preview_progress_and_record_42erfz.py",
     "tests/integration/test_gate_preview_running_step_42erfz.py",
     "tests/livespec_orchestrator_beads_fabro/commands/test_publication_broker.py",
+    "tests/livespec_orchestrator_beads_fabro/commands/test_dispatcher_agent_stage_read_only_token.py",
 ]
 
 [[tool.livespec_dev_tooling.mirror_pairings]]
