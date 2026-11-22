@@ -35,6 +35,16 @@ exists to prevent — while an agent that read the seeded tree as a reviewed
 baseline would build on work nobody graded. So the section names the commit, says
 whose work it is, says what it is not, and states the inspection the clause
 requires before continuing.
+
+WHY THE SECTION SAYS PUBLICATION IS NOT THE AGENT'S. Every agent stage reads this
+goal, including `red`. The earlier wording called the commit an attempt
+"interrupted before it could publish" and told the agent to "continue from
+there", and on a seed that already held the complete change a Codex red turn read
+that as its task. Measured on run 01M819HFTKXG (livespec-driver-claude-4dtbuz,
+bd-ib-orez2i): red@1 and red@2 pushed the publish branch, and red@3 opened and
+auto-merged the pull request through the agent-settable stage variable, with no
+green, commit_green or publish_draft. So the section names the stages that
+publish and forbids the agent's own publication outright (Scenario 202).
 """
 
 from __future__ import annotations
@@ -104,12 +114,20 @@ def interrupted_attempt_section(*, attempt: InterruptedAttempt | None) -> str:
         "\nInterrupted prior attempt:\n"
         f"Your sandbox has already been placed on commit {attempt.commit_sha},"
         f" fetched from {attempt.fetch_ref}. That commit is the UNFINISHED work of"
-        " an earlier attempt at this same work-item which was interrupted before it"
-        " could publish. It is NOT a reviewed baseline, NOT merged, and NOT work"
-        " anyone has graded — parts of it may be half-done or wrong.\n"
+        " an earlier attempt at this same work-item, which never reached"
+        " publication. It is NOT a reviewed baseline, NOT merged, and NOT work"
+        " anyone has graded — parts of it may be half-done or wrong, and parts may"
+        " already be complete.\n"
         "INSPECT ITS CURRENT STATE BEFORE CONTINUING: read what that commit"
         " changed, run the repository's own checks against it, and establish which"
         " of this work-item's requirements it already satisfies and which it does"
-        " not. Then continue from there rather than starting over, and correct what"
-        " it got wrong rather than assuming it is right.\n"
+        " not. Then continue from there within your own stage's instructions rather"
+        " than starting over, and correct what it got wrong rather than assuming it"
+        " is right.\n"
+        "PUBLICATION IS NOT YOURS, EVEN WHEN THE CARRIED WORK LOOKS COMPLETE: only"
+        " this run's publish_draft, pr_refresh and pr stages push a ref or open,"
+        " change, ready or merge a pull request, and they publish the carried work"
+        " themselves once your stage hands it on. Never run git push, gh pr create,"
+        " gh pr merge or any other publication action, and never set"
+        " LIVESPEC_AGENT_STAGE yourself.\n"
     )

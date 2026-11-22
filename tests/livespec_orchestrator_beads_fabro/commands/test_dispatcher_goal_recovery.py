@@ -152,7 +152,40 @@ def test_a_seeded_placement_is_named_in_the_brief_as_an_interrupted_prior_attemp
     # The item's own brief is still whole: the section is an addition, not a
     # replacement for the fields every dispatch is briefed with.
     assert f"Work-item: {_ITEM_ID}" in brief
-    assert f"Publish branch (push HEAD to this exact ref at the PR stage): {_BRANCH}" in brief
+    assert _BRANCH in brief
+    assert "Publish branch (only this run's publish_draft, pr_refresh and pr stages push" in brief
+
+
+def test_a_seeded_brief_tells_every_agent_stage_that_publication_is_not_its_own() -> None:
+    """The seed section names the publishing stages and forbids the agent's own publication.
+
+    Every agent stage reads this goal, `red` included. Measured on run
+    01M819HFTKXG (livespec-driver-claude-4dtbuz, bd-ib-orez2i), a Codex red turn
+    read the earlier "interrupted before it could publish ... continue from there"
+    as its task: it pushed the publish branch, opened the pull request through an
+    agent-set stage variable and armed its auto-merge, so the change merged with no
+    green, commit_green or publish_draft. Scenario 202 says an agent stage never
+    pushes or publishes, and that publication happens only in publish_draft,
+    pr_refresh or pr.
+    """
+    brief = _brief(args=_seeded_args())
+    lowered = brief.lower()
+
+    assert "publication is not yours" in lowered
+    assert "only this run's publish_draft, pr_refresh and pr stages" in lowered
+    assert "never run git push, gh pr create, gh pr merge" in lowered
+    assert "never set livespec_agent_stage yourself" in lowered
+    assert "before it could publish" not in lowered
+    assert "push head to this exact ref" not in lowered
+
+
+def test_a_plain_brief_names_the_publish_branch_without_telling_the_agent_to_push_it() -> None:
+    """The publish-branch line names who pushes the branch, and it is never the agent stage."""
+    brief = _brief(args=None)
+
+    assert f"{_BRANCH}\n" in brief
+    assert "push HEAD to this exact ref" not in brief
+    assert "an agent stage never pushes it or opens, changes or merges its pull request" in brief
 
 
 def test_a_resume_placement_leaves_the_brief_byte_identical_to_a_plain_dispatch() -> None:
