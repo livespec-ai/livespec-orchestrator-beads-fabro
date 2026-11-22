@@ -68,7 +68,7 @@ PY
 # (bd-ib-tka3wb). The verdict and any check 6 findings go to a side file, because
 # stdout here is the prompt.
 judgement_input=$(mktemp)
-trap 'rm -f "$judgement_input" "$judgement_input.last" "$judgement_input.judge" "$judgement_input.stderr" "$judgement_input.governing" "$judgement_input.findings" "$judgement_input.section_findings" "$judgement_input.record"' EXIT
+trap 'rm -f "$judgement_input" "$judgement_input.last" "$judgement_input.judge" "$judgement_input.stderr" "$judgement_input.governing" "$judgement_input.findings" "$judgement_input.section_findings" "$judgement_input.record" "$judgement_input.description"' EXIT
 python3 - "$install_root" "$repo_root" "$item" "$override" "$judgement_input" > "$judgement_input" <<'PROMPT_PY'
 import json
 import sys
@@ -183,6 +183,9 @@ if section_findings:
     )
     raise SystemExit(0)
 Path(f"{side}.section_findings").write_text("", encoding="utf-8")
+# The description the judgement is taken over, candidate edit included, so the
+# refusal can name its assertions and references verbatim after the judge answers.
+Path(f"{side}.description").write_text(item.description, encoding="utf-8")
 comments = tuple(
     comment.text for comment in read_work_item_comments(path=config, work_item_id=item_id)
 )
@@ -340,6 +343,13 @@ if chain.reply is None:
     raise SystemExit(2)
 print(chain.reply)
 judgement = parse_judgement_reply(reply=chain.reply)
+# A build that predates the refusal seam keeps the exit it always took.
+try:
+    from livespec_orchestrator_beads_fabro.commands._dod_preflight_refusal import (
+        preflight_refusal,
+    )
+except ImportError:
+    preflight_refusal = None
 # Only a build that carries the shared identity rule gets a record to reuse.
 if record["records_verdict"]:
     append_work_item_comment(
@@ -356,8 +366,18 @@ if record["records_verdict"]:
             ),
         ),
     )
-outcome = judgement.outcome
-raise SystemExit(0 if outcome == "admitted" else 1)
+if preflight_refusal is None:
+    raise SystemExit(0 if judgement.outcome == "admitted" else 1)
+# Every finding of every check refuses; a check 4 finding that names neither the
+# offending assertion nor the referenced heading verbatim gains exactly those.
+refusal = preflight_refusal(
+    description=Path(f"{sys.argv[3]}.description").read_text(encoding="utf-8"),
+    judgement=judgement,
+)
+for line in refusal.lines:
+    if line.startswith("check 4 refusal: "):
+        print(line)
+raise SystemExit(refusal.exit_code)
 JUDGE_PY
 status=$?
 set -e
