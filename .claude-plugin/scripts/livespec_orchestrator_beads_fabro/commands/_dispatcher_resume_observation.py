@@ -107,6 +107,8 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_factory_readi
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_forge import (
     branch_pull_request,
+    merged_item_pull_request,
+    replacement_for_closed_publication,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_journal import (
     resumes_anchored_on,
@@ -173,6 +175,9 @@ def gather_resume(
     """Measure the ledger, the forge and the factory for one candidate resume."""
     branch = publish_branch_for(work_item_id=item.id)
     forge = branch_pull_request(repo=repo, branch=branch, runner=runner)
+    if forge.pull_request is not None and forge.pull_request.state == "CLOSED":
+        hand_redo = merged_item_pull_request(repo=repo, work_item_id=item.id, runner=runner)
+        forge = replacement_for_closed_publication(published=forge, hand_redo=hand_redo)
     pull_request = forge.pull_request
     pull_request_state = None if pull_request is None else pull_request.state
     parking_record = proof_only_admission(
