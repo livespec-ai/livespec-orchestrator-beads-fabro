@@ -40,6 +40,7 @@ __all__: list[str] = [
     "StageJournalOptions",
     "failed_outcome",
     "journal_publish_draft_refresh",
+    "journal_red_test_restored",
     "journal_run_output_markers",
     "journal_stage",
     "run_stage",
@@ -88,6 +89,18 @@ _PUBLISH_DRAFT_REFRESH_PATTERN = re.compile(
 )
 
 
+_RED_TEST_RESTORED_PATTERN = re.compile(
+    "".join(
+        (
+            r"LIVESPEC_RED_TEST_RESTORED: ",
+            r"path=(?P<path>\S+) ",
+            r"red_commit=(?P<red_commit>[0-9a-f]{40,64}) ",
+            r"restored_blob=(?P<restored_blob>[0-9a-f]{40,64})",
+        )
+    )
+)
+
+
 def journal_publish_draft_refresh(
     *,
     journal: JournalWriter,
@@ -109,6 +122,31 @@ def journal_publish_draft_refresh(
     )
 
 
+def journal_red_test_restored(
+    *,
+    journal: JournalWriter,
+    work_item_id: str,
+    text: str,
+) -> None:
+    """Project every Red-test restoration marker into its own `red-test-restored` row.
+
+    The green node's closing command restores a Red test file the green turn
+    changed, and says so only on the node's stderr. One row per marker keeps the
+    rate of those restorations measurable from the journal, so a restoration is
+    never silent: the row names the path, the Red commit and the restored blob.
+    """
+    for match in _RED_TEST_RESTORED_PATTERN.finditer(text):
+        journal.append(
+            record={
+                "work_item_id": work_item_id,
+                "stage": "red-test-restored",
+                "path": match.group("path"),
+                "red_commit": match.group("red_commit"),
+                "restored_blob": match.group("restored_blob"),
+            }
+        )
+
+
 def journal_run_output_markers(
     *,
     journal: JournalWriter,
@@ -117,7 +155,7 @@ def journal_run_output_markers(
 ) -> HookOverLimit | None:
     """Project every publication marker one run's output carries into rows.
 
-    ONE pass over ONE text, which is the point: both markers are printed by the
+    ONE pass over ONE text, which is the point: the markers are printed by the
     same `publish_draft` script into the same stream, and two call sites reading
     the run output separately would be two readings nothing proves agree about
     the run they describe.
@@ -130,6 +168,7 @@ def journal_run_output_markers(
     the cause writer is what keeps the row and the cause describing one reading.
     """
     journal_publish_draft_refresh(journal=journal, work_item_id=work_item_id, text=text)
+    journal_red_test_restored(journal=journal, work_item_id=work_item_id, text=text)
     event = hook_over_limit_from_text(text=text)
     journal_hook_over_limit(journal=journal, work_item_id=work_item_id, event=event)
     return event
