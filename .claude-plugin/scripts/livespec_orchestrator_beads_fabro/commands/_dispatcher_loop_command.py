@@ -107,6 +107,7 @@ def _loop_in_pass(*, args: argparse.Namespace) -> int:
     started = _start_loop(args=args, repo=repo, profile=profile)
     if isinstance(started, int):
         return started
+    reconciliation = getattr(started, "reconciliation", None)
     try:
         janitor = started.janitor
         items = started.items
@@ -176,7 +177,8 @@ def _loop_in_pass(*, args: argparse.Namespace) -> int:
         emit_outcomes(outcomes=outcomes, as_json=args.as_json)
         return _post_verdict_stages(args=args, repo=repo, outcomes=outcomes, journal=journal)
     finally:
-        _ = started.reconciliation.wait()
+        if reconciliation is not None:
+            _ = reconciliation.wait()
 
 
 def _post_verdict_stages(
