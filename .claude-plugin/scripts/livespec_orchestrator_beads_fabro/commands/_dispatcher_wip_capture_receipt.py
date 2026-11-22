@@ -16,6 +16,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
 from livespec_orchestrator_beads_fabro.commands._dispatcher_goal import (
     minijinja_openers_in_text,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_integration_defaults import (
+    ORIGIN_DEFAULT_REVISION,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import ShellCommandRunner
 from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import store_config
 from livespec_orchestrator_beads_fabro.commands._dispatcher_preserved_tree_record import (
@@ -66,6 +69,17 @@ class WipCaptureUnobservable:
     """Origin declined the capture listing, so absence cannot be claimed."""
 
     detail: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class NeedsHumanCapture:
+    """The terminal needs-human ref and its diff against the default branch."""
+
+    ref: str
+    commit: str
+    files: int | None
+    insertions: int | None
+    deletions: int | None
 
 
 def latest_wip_capture(
@@ -123,6 +137,9 @@ def _record_wip_capture_receipt(
         run_id=run_id,
         factory=factory,
         observed=observed,
+        needs_human=_needs_human_capture(runner=active_runner, repo=repo, run_id=run_id)
+        if observed is None
+        else None,
     )
     if _already_recorded(repo=repo, work_item_id=work_item_id, body=body):
         return
@@ -151,12 +168,70 @@ def _read_capture(
     return latest_wip_capture(work_item_id=work_item_id, run_id=run_id, refs=refs)
 
 
+def _needs_human_capture(
+    *, runner: CommandRunner, repo: Path, run_id: str
+) -> NeedsHumanCapture | None:
+    """Read a no-WIP ending's needs-human ref and its measurable work, if any.
+
+    This is deliberately a best-effort receipt: a failed read is rendered as an
+    unobservable diff, never as an empty one.  The receipt is written after an
+    ending, so no failure here may alter that ending's disposition.
+    """
+    ref = f"refs/heads/needs-human/{run_id}"
+    listed = runner.run(
+        argv=["git", "ls-remote", _REMOTE, ref], cwd=repo, timeout_seconds=_GIT_TIMEOUT_SECONDS
+    )
+    if listed.exit_code != 0:
+        return None
+    lines = [line.split() for line in listed.stdout.splitlines()]
+    match = next(
+        (fields for fields in lines if len(fields) == _LS_REMOTE_FIELDS and fields[1] == ref),
+        None,
+    )
+    if match is None:
+        return None
+    commit = match[0]
+    base = runner.run(
+        argv=["git", "merge-base", ORIGIN_DEFAULT_REVISION, commit],
+        cwd=repo,
+        timeout_seconds=_GIT_TIMEOUT_SECONDS,
+    )
+    if base.exit_code != 0 or not (base_commit := base.stdout.strip()):
+        return _unmeasurable_needs_human(ref=ref, commit=commit)
+    diff = runner.run(
+        argv=["git", "diff", "--numstat", base_commit, commit, "--", ".", ":(exclude).fabro"],
+        cwd=repo,
+        timeout_seconds=_GIT_TIMEOUT_SECONDS,
+    )
+    if diff.exit_code != 0:
+        return _unmeasurable_needs_human(ref=ref, commit=commit)
+    stats = [line.split() for line in diff.stdout.splitlines() if line.strip()]
+    if any(
+        len(fields) < _LS_REMOTE_FIELDS or not fields[0].isdigit() or not fields[1].isdigit()
+        for fields in stats
+    ):
+        return _unmeasurable_needs_human(ref=ref, commit=commit)
+    return NeedsHumanCapture(
+        ref=ref,
+        commit=commit,
+        files=len(stats),
+        insertions=sum(int(fields[0]) for fields in stats),
+        deletions=sum(int(fields[1]) for fields in stats),
+    )
+
+
+def _unmeasurable_needs_human(*, ref: str, commit: str) -> NeedsHumanCapture:
+    """Represent a readable ref whose change measurement could not be read."""
+    return NeedsHumanCapture(ref=ref, commit=commit, files=None, insertions=None, deletions=None)
+
+
 def _receipt_body(
     *,
     work_item_id: str,
     run_id: str,
     factory: str,
     observed: WipCapture | WipCaptureUnobservable | None,
+    needs_human: NeedsHumanCapture | None,
 ) -> str:
     lines = [
         PRESERVED_TREE_MARKER,
@@ -174,6 +249,23 @@ def _receipt_body(
         )
     elif isinstance(observed, WipCaptureUnobservable):
         lines.append("work-in-progress preservation could not be determined")
+    elif needs_human is not None:
+        lines.extend(
+            [
+                "the run has no work-in-progress ref",
+                f"needs-human ref: {needs_human.ref}",
+                f"commit id: {needs_human.commit}",
+            ]
+        )
+        if needs_human.files is None:
+            lines.append("needs-human diff could not be determined")
+        else:
+            files = needs_human.files
+            adds = needs_human.insertions
+            deletes = needs_human.deletions
+            prefix = "needs-human diff:"
+            diff_summary = f"{prefix} {files} files changed, {adds} insertions, {deletes} deletions"
+            lines.append(diff_summary)
     else:
         lines.append("the run has no work-in-progress ref")
     return "\n".join(lines)
