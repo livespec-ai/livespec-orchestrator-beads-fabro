@@ -88,6 +88,35 @@ def test_repository_and_changed_file_evidence_fail_soft() -> None:
         assert module._has_only_non_python_implementation(stdout=payload) is False
 
 
+def _files_payload(*filenames: str) -> str:
+    return json.dumps({"files": [{"filename": name} for name in filenames]})
+
+
+def test_only_the_hooks_non_python_implementation_shapes_are_green_exempt() -> None:
+    module = _module()
+
+    for exempt in (
+        ("ansible/tasks/main.yml", "tests/test_role.py"),
+        ("config/settings.yaml",),
+        ("scripts/run.sh",),
+        ("tasks.just",),
+        ("justfile",),
+        ("sub/Justfile",),
+        (".claude-plugin/.fabro/workflows/x/workflow.fabro",),
+        ("README.md", "ansible/tasks/main.yml"),
+    ):
+        assert module._has_only_non_python_implementation(stdout=_files_payload(*exempt)) is True
+
+    for refused in (
+        ("README.md",),
+        ("docs/guide.md", "tests/test_role.py"),
+        ("data/fixture.json",),
+        ("notes.txt", "data/table.csv"),
+        ("ansible/tasks/main.yml", "src/module.py"),
+    ):
+        assert module._has_only_non_python_implementation(stdout=_files_payload(*refused)) is False
+
+
 def test_green_exempt_lookup_requires_a_red_only_commit_and_usable_file_evidence() -> None:
     module = _module()
     red_only = module._Commit(message="fix: x\n\nTDD-Red-Captured-At: now", oid="abc123")
