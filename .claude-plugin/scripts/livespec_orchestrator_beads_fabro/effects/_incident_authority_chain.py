@@ -11,6 +11,7 @@ unreadable one reads the whole chain from the root.
 # EXPEDITED_INCIDENT_RESPONSE flag: bd-ib-dzbwaq
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, cast
 
 from livespec_orchestrator_beads_fabro._incident_authority_payload import (
@@ -59,11 +60,18 @@ def read_genesis(
     *, client: BeadsClient, repository: str, item_id: str
 ) -> tuple[str, str | None] | AuthorityRefusal:
     """The published root token, and the item's head hint when it names one."""
-    item = client.show_issue(issue_id=item_id)
+    # These are independent public-ledger reads.  Start them together so the
+    # authority check does not spend a full provider round-trip on each before
+    # it can begin walking the retained-token chain.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        item_future = executor.submit(client.show_issue, issue_id=item_id)
+        comments_future = executor.submit(lambda: client.list_comments(issue_id=item_id))
+        item = item_future.result()
+        comments = comments_future.result()
     if item.get("id") != item_id:
         return _refuse(code="incident-authority-item-mismatch", detail=item_id)
     roots: set[str] = set()
-    for comment in client.list_comments(issue_id=item_id):
+    for comment in comments:
         text = comment.get("text")
         if not isinstance(text, str) or not text.startswith(GENESIS_MARKER):
             continue
