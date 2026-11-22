@@ -13,11 +13,13 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, replace
+from typing import cast
 
 from livespec_orchestrator_beads_fabro._incident_authority_types import (
     AuthorityRefusal,
     IncidentAttempt,
     IncidentReading,
+    RepaymentMasterCiEvidence,
 )
 from livespec_orchestrator_beads_fabro._incident_carrier import BranchReserved
 from livespec_orchestrator_beads_fabro._incident_phases import REPAYMENT_PHASES, lifecycle_state_for
@@ -49,6 +51,9 @@ class MasterCiRun:
     head: str
     conclusion: str
     complete: bool
+    # These are populated only after the forge verifier proves exceptional descendant admission.
+    landed_commit: str | None = None
+    evidence: RepaymentMasterCiEvidence | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -87,11 +92,19 @@ def _eligible(*, attempt: IncidentAttempt) -> bool:
     )
 
 
+def _landed_commit(*, attempt: IncidentAttempt, master_ci: MasterCiRun) -> str | None:
+    """The landed tree this admission may carry, never the descendant's tree."""
+    if master_ci.head in attempt.landed_commits:
+        return master_ci.head
+    landed = getattr(master_ci, "landed_commit", None)
+    return landed if isinstance(landed, str) and landed in attempt.landed_commits else None
+
+
 def _master_ci_complete(*, attempt: IncidentAttempt, master_ci: MasterCiRun) -> bool:
     return (
         master_ci.complete
         and master_ci.conclusion == _SUCCESS
-        and master_ci.head in attempt.landed_commits
+        and _landed_commit(attempt=attempt, master_ci=master_ci) is not None
     )
 
 
@@ -117,7 +130,8 @@ def plan_repayment(
             ),
         )
     operation_id = repayment_operation_id(attempt=attempt, master_ci=master_ci)
-    staged_tree = attempt.landed_trees[attempt.landed_commits.index(master_ci.head)]
+    landed_commit = cast(str, _landed_commit(attempt=attempt, master_ci=master_ci))
+    staged_tree = attempt.landed_trees[attempt.landed_commits.index(landed_commit)]
     successor = replace(
         attempt,
         attempt_id=operation_id,
@@ -125,14 +139,15 @@ def plan_repayment(
         operation_id=f"{operation_id}#{REPAYMENT_ENTRY_PHASE}",
         generation=attempt.generation + 1,
         owner=REPAYMENT_OWNER,
-        base=master_ci.head,
-        head=master_ci.head,
+        base=landed_commit,
+        head=landed_commit,
         pr_number=0,
         landed_commits=(),
         landed_trees=(),
         carrier=BranchReserved(
-            target_ref=target_ref, input_parent=master_ci.head, staged_tree=staged_tree
+            target_ref=target_ref, input_parent=landed_commit, staged_tree=staged_tree
         ),
+        repayment_master_ci_evidence=master_ci.evidence,
     )
     return RepaymentPlan(
         operation_id=operation_id, attempt=successor, lifecycle_state=REPAYMENT_ENTRY_STATE
