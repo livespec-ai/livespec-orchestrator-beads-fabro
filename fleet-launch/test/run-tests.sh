@@ -4322,8 +4322,11 @@ scenario "45a. the slot-narrowing wrapper stamps its forced judge slot as an OTe
 # values must therefore never appear in either capture.
 slot_otel_probe='printf "%s" "${OTEL_RESOURCE_ATTRIBUTES:-}"'
 narrow_otel_in() {
-    local tenant=$1 attributes=$2 judge_slot=$3
-    (cd "$tenant" && OTEL_RESOURCE_ATTRIBUTES="$attributes" FLEET_LAUNCH_DEFAULT_WRAPPER="$CASE_DIR/family-wrapper" FLEET_LAUNCH_SLOTNARROW_EXCLUDED_SLOTS="ANTHROPIC_1 ANTHROPIC_3" FLEET_LAUNCH_SLOTNARROW_JUDGE_SLOT="$judge_slot" \
+    # An empty judge_slot leaves FLEET_LAUNCH_SLOTNARROW_JUDGE_SLOT unset so config.sh's default applies.
+    local tenant=$1 attributes=$2 judge_slot=${3:-}
+    (cd "$tenant" && unset FLEET_LAUNCH_SLOTNARROW_JUDGE_SLOT \
+        && if [ -n "$judge_slot" ]; then export FLEET_LAUNCH_SLOTNARROW_JUDGE_SLOT="$judge_slot"; fi \
+        && OTEL_RESOURCE_ATTRIBUTES="$attributes" FLEET_LAUNCH_DEFAULT_WRAPPER="$CASE_DIR/family-wrapper" FLEET_LAUNCH_SLOTNARROW_EXCLUDED_SLOTS="ANTHROPIC_1 ANTHROPIC_3" \
         WRAPPER="$LAUNCH_DIR/wrappers/with-livespec-env-slotnarrow.sh" "$LAUNCH_DIR/wrappers/with-livespec-env-slotnarrow.sh" -- sh -c "$slot_otel_probe")
 }
 has_exactly_one_attribute() {
@@ -4337,7 +4340,7 @@ has_no_credential_value() {
     esac
 }
 otel_input='service.namespace=livespec-family,spend.slot=interactive,telemetry.sdk.name=codex'
-default_otel=$(narrow_otel_in "$CASE_DIR/route-c-tenant" "$otel_input" ANTHROPIC_4)
+default_otel=$(narrow_otel_in "$CASE_DIR/route-c-tenant" "$otel_input")
 override_otel=$(narrow_otel_in "$CASE_DIR/route-c-tenant" "$otel_input" ANTHROPIC_7)
 if has_exactly_one_attribute "$default_otel" 'service.namespace=livespec-family' \
     && has_exactly_one_attribute "$default_otel" 'telemetry.sdk.name=codex' \
