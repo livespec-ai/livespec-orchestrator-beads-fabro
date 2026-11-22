@@ -190,12 +190,11 @@ def judge_definition_of_done(  # noqa: PLR0913 - each argument is an independent
         )
     governing = reusable_governing_heading_verdict(item=item, repo=repo, comments=comments)
     if governing is None:
-        reader = (
-            host_governing_heading_reader(runner=ShellCommandRunner() if runner is None else runner)
-            if governing_heading is None
-            else governing_heading
-        )
-        governing = reader(item=item, repo=repo)
+        if governing_heading is None:
+            governing_heading = host_governing_heading_reader(
+                runner=ShellCommandRunner() if runner is None else runner
+            )
+        governing = governing_heading(item=item, repo=repo)
     identity = identity_for_dod_taking(
         item=item,
         cwd=repo,
