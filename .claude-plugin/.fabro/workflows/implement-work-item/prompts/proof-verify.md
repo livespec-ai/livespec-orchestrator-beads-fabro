@@ -127,6 +127,76 @@ acceptance pass indexes your record against that order.
 If the pull request carries NO captured record at all, do not improvise one:
 that is the blocked case in the last section.
 
+## Brokered forge writes
+
+The broker, rather than this turn's ambient `gh` client, performs the two
+forge writes this stage requires: a new record comment and proof-asset
+uploads. Forge reads above and below remain ordinary `gh` reads. Once Step 1
+has resolved the pull-request `<number>`, initialise this stage's broker
+request directory. The directory is scratch space, never a repository path;
+do not print the credential file or its contents.
+
+    broker="$(pwd)/.claude-plugin/scripts/bin/publication_broker.py"
+    broker_dir="$(mktemp -d \"${TMPDIR:-/tmp}/proof-verify/broker.XXXXXX\")"
+    broker_launch="$broker_dir/launch.json"
+    broker_credential="$broker_dir/credential"
+    broker_request="$broker_dir/request.json"
+    chmod 700 "$broker_dir"
+    printf %s "$GITHUB_TOKEN" > "$broker_credential"
+    chmod 600 "$broker_credential"
+    python3 - "$broker_launch" "<number>" "$LIVESPEC_PROOF_ASSETS_RELEASE_TAG" "$broker_dir" <<'PY'
+    import json
+    import sys
+
+    path, number, store, request_directory = sys.argv[1:]
+    with open(path, "w", encoding="utf-8") as stream:
+        json.dump(
+            {
+                "stage": "proof_verify",
+                "pull_request_number": int(number),
+                "proof_asset_store": store,
+                "request_directory": request_directory,
+            },
+            stream,
+        )
+    PY
+    chmod 600 "$broker_launch"
+
+For every broker operation, first copy the body or asset into `$broker_dir`,
+then write exactly one JSON request to `$broker_request` and invoke the
+executable in the foreground. The operation is `comment` with `comment_body`
+for a record, or `proof_asset` with `proof_asset`, `proof_asset_name`, and
+`proof_asset_store` for an upload. Every request also carries
+`claimed_stage: "proof_verify"` and `pull_request_number: <number>`. For
+example, this is the complete request-and-reply shape for a staged file:
+
+    python3 - "$broker_request" <<'PY'
+    import json
+    import sys
+
+    json.dump(
+        {
+            "operation": "<comment or proof_asset>",
+            "claimed_stage": "proof_verify",
+            "pull_request_number": <number>,
+            "comment_body": "<staged body path or null>",
+            "proof_asset": "<staged asset path or null>",
+            "proof_asset_name": "<asset name or null>",
+            "proof_asset_store": "<proof-assets tag or null>",
+        },
+        sys.stdout,
+    )
+    print()
+    PY
+    "$broker" --launch-file "$broker_launch" --credential-file "$broker_credential" \
+      < "$broker_request"
+
+The reply is one JSON object. Treat a non-null `refusal` or a non-zero
+`exit_code` as a blocked broker request; otherwise its `stdout` is the forge
+output. Keep the upload URL from that output for the record. Do not launch
+the broker in the background, do not call it as a Python module, and do not
+substitute a direct write with `gh`.
+
 ## Step 2 — replay every step verbatim
 
 For each `factory_captured` assertion, execute its numbered steps
@@ -181,11 +251,12 @@ use the first that answers: `$FABRO_RUN_ID`, else `git config --get
 livespec.factoryRunId`. If neither answers, STOP and end with the
 needs-human protocol rather than inventing one.
 
-Upload each image to the repository's standing proof-assets prerelease and
-keep the URL it returns:
-
-    gh release upload "$LIVESPEC_PROOF_ASSETS_RELEASE_TAG" \
-      "${TMPDIR:-/tmp}/proof-verify/<asset-name>" --clobber
+Upload each image to the repository's standing proof-assets prerelease through
+the broker and keep the URL from the broker reply. Copy the image to
+`$broker_dir/<asset-name>` first, then send the `proof_asset` request described
+in **Brokered forge writes**, with that staged path, `<asset-name>`, and
+`$LIVESPEC_PROOF_ASSETS_RELEASE_TAG`. The broker adds the required clobber
+behaviour; do not invoke the release upload yourself.
 
 Proof binaries **MUST NOT be committed** to the repository tree; the release
 asset store is the only place they live.
@@ -426,8 +497,10 @@ rest an item the fix loop could have closed.
 
 ## Step 5 — publish the record
 
-Post exactly **one NEW comment** on this item's pull request, with
-`gh pr comment <number> --body-file <file>`.
+Post exactly **one NEW comment** on this item's pull request through the
+broker. Copy `<file>` to `$broker_dir/record.md`, then send the `comment`
+request described in **Brokered forge writes** with that staged file as
+`comment_body`.
 
 A record comment **MUST NOT be edited after posting**; if you get it wrong,
 post a new record rather than editing the old one. Do not delete or edit any
@@ -449,7 +522,7 @@ within minutes of it:
     printf 'Proof of Done — %s — run %s — %s\n' "<verified or not_reproduced>" "<run-id>" "$stamp" > <file>
 
 Write the rest of the body to that file before or after this command, but if
-more than a minute passes between this command and the `gh pr comment` that
+more than a minute passes between this command and the broker request that
 posts the file, run it again to refresh the time before posting.
 
 The SECOND line must declare, exactly once, the publish-branch head YOUR
