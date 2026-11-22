@@ -174,6 +174,41 @@ def test_gate_preview_records_the_hook_output_tail_when_no_failed_target_summary
     assert report.get("output_tail", "").endswith("type pre-check rejected created.py\n")
 
 
+def test_gate_preview_redacts_credential_shaped_values_from_the_recorded_output_tail(
+    tmp_path: Path,
+) -> None:
+    """A tokenized URL in the hook's output never reaches the durable preview record."""
+    preview = importlib.import_module(_MODULE)
+    repo, runner, env = _preview_repository(tmp_path=tmp_path, preview=preview)
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' 'fatal: unable to access https://x-access-token:s3cr3tvalue@github.com/o/r.git'\n"
+        "printf '%s\\n' 'GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789'\n"
+        "printf '%s\\n' 'type pre-check rejected created.py' >&2\n"
+        "exit 23\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+
+    completed = _run(
+        repo=repo,
+        env=env,
+        argv=[sys.executable, str(runner), "green"],
+        check=False,
+    )
+
+    record = (repo / ".git" / "livespec-implement-gate-preview-green-result.json").read_text(
+        encoding="utf-8"
+    )
+    report = cast("dict[str, Any]", json.loads(record))
+    assert completed.returncode == 23
+    assert "s3cr3tvalue" not in record
+    assert "ghp_abcdefghijklmnopqrstuvwxyz0123456789" not in record
+    assert "[redacted]" in report["output_tail"]
+    assert report["output_tail"].endswith("type pre-check rejected created.py\n")
+
+
 def test_green_preview_uses_the_implement_turns_affected_tests_gate(tmp_path: Path) -> None:
     """A one-module Green preview takes the hook's scoped route, not its full-suite route."""
     preview = importlib.import_module(_MODULE)
