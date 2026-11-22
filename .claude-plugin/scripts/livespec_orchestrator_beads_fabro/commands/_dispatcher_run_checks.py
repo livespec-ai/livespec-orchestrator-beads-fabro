@@ -6,7 +6,8 @@ import argparse
 import json
 import os
 import shutil
-from dataclasses import asdict
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import cast
 
@@ -53,6 +54,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_readiness_diagnostic
     not_ready_requested_items_error,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_runs_pass import (
+    ReconcilePassSummary,
     reconcile_runs_pass,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_record_files import (
@@ -78,11 +80,42 @@ __all__: list[str] = [
     "run_janitor_check",
     "run_ledger_check",
     "run_spec_check",
+    "start_reconcile_runs_pass",
 ]
 
 _EXIT_FAILURE = 1
 _EXIT_USAGE_ERROR = 2
 _EXIT_PRECONDITION_ERROR = 3
+
+
+@dataclass
+class _StartedReconcilePass:
+    """A reconciliation pass started by a loop and joined before it returns."""
+
+    executor: ThreadPoolExecutor
+    future: Future[ReconcilePassSummary]
+
+    def wait(self) -> ReconcilePassSummary:
+        """Propagate the pass result or error, then release its worker."""
+        try:
+            return self.future.result()
+        finally:
+            self.executor.shutdown(wait=True)
+
+
+def start_reconcile_runs_pass(
+    *, args: argparse.Namespace, repo: Path
+) -> _StartedReconcilePass:
+    """Start the fail-open reconcile pass without making a loop launch wait for it.
+
+    A loop joins this handle before it returns, so the pass still reaches its
+    journaled verdict even when the launch wave itself completed first.
+    """
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="reconcile-runs")
+    return _StartedReconcilePass(
+        executor=executor,
+        future=executor.submit(reconcile_runs_pass, args=args, repo=repo),
+    )
 
 # The active platform's path separators (os.altsep is None on POSIX). Built as
 # a tuple of the truthy separators so the "does this string carry a directory
@@ -186,7 +219,7 @@ def _fabro_preflight_error(*, fabro_bin: str) -> str | None:
 
 
 def dispatch_preamble(
-    *, args: argparse.Namespace, repo: Path
+    *, args: argparse.Namespace, repo: Path, reconcile: bool = True
 ) -> tuple[tuple[str, ...] | None, int | None]:
     """Shared dispatch/loop entry validation: janitor spec, declaration, engine binary.
 
@@ -222,11 +255,11 @@ def dispatch_preamble(
     the refusal cannot itself leave a half-performed act or an unattributed
     record behind (the journal invoker attribution contract in contracts.md).
 
-    Because this is the head of every `dispatch` AND of every `loop` iteration
-    (`_start_loop` calls it before the loop selects any candidate), the single
-    reconciliation pass at the end of it is BOTH "once per loop tick before
-    selection" and "once before admission". A second call in the loop command
-    would survey the same inventory twice for one answer.
+    A single-item dispatch performs its reconciliation at the end of this
+    preamble.  A loop asks this preamble to skip that synchronous call, then
+    starts the same pass in its own worker before candidate selection.  The
+    loop joins that worker before it returns, which preserves the recorded
+    verdict without making a later launch wait on a post-merge janitor gate.
 
     The closed step set's whole pre-dispatch discipline -- both preflights,
     their committed waivers, and the cross-dispatch persistence of a degraded
@@ -303,7 +336,8 @@ def dispatch_preamble(
     # itself and cannot become one: `reconcile_runs_pass` absorbs its own
     # failures into a journal record and returns, because an unsurveyable
     # factory says nothing about whether this item may be dispatched.
-    _ = reconcile_runs_pass(args=args, repo=repo)
+    if reconcile:
+        _ = reconcile_runs_pass(args=args, repo=repo)
     return janitor, None
 
 

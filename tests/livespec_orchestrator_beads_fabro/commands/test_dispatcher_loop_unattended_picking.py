@@ -29,6 +29,7 @@ import argparse
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from livespec_orchestrator_beads_fabro.commands import (
@@ -134,6 +135,11 @@ def _stub_loop_around_selection(
     journal = JournalFile(path=Path(args.journal), identity=invoker_from_args(args=args))
     module = _dispatcher_loop_command
     monkeypatch.setattr(module, "dispatch_preamble", lambda **_kwargs: (None, None))
+    monkeypatch.setattr(
+        module,
+        "start_reconcile_runs_pass",
+        lambda **_kwargs: SimpleNamespace(wait=lambda: None),
+    )
     monkeypatch.setattr(module, "arm_otel_egress", lambda **_kwargs: None)
     monkeypatch.setattr(module, "prepare", lambda **_kwargs: ([], journal))
     monkeypatch.setattr(module, "journal_path", lambda **_kwargs: journal.path)

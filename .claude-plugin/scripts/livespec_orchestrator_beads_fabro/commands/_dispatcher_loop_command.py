@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_command_common import (
     EXIT_PRECONDITION_ERROR,
@@ -56,6 +57,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_rework_admission imp
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_checks import (
     dispatch_preamble,
     requested_items_preflight_error,
+    start_reconcile_runs_pass,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_turn_guard import (
     append_run_turn_checks,
@@ -78,6 +80,13 @@ class _LoopStart:
     janitor: tuple[str, ...] | None
     items: list[WorkItem]
     journal: JournalFile
+    reconciliation: _Reconciliation
+
+
+class _Reconciliation(Protocol):
+    """The loop-owned asynchronous reconcile pass that must be joined."""
+
+    def wait(self) -> object: ...
 
 
 def run_loop_command(*, args: argparse.Namespace) -> int:
@@ -98,73 +107,76 @@ def _loop_in_pass(*, args: argparse.Namespace) -> int:
     started = _start_loop(args=args, repo=repo, profile=profile)
     if isinstance(started, int):
         return started
-    janitor = started.janitor
-    items = started.items
-    journal = started.journal
-    with profile.during(name="factory-size-check"):
-        size_exit = factory_size_loop_exit(
+    try:
+        janitor = started.janitor
+        items = started.items
+        journal = started.journal
+        with profile.during(name="factory-size-check"):
+            size_exit = factory_size_loop_exit(
+                args=args,
+                repo=repo,
+                items=items,
+                journal=journal,
+            )
+        if size_exit is not None:
+            return size_exit
+        with profile.during(name="candidate-selection"):
+            selected_candidates = candidates(args=args, items=items, repo=repo)[: args.budget]
+        # `--item` narrows BOTH legs to the named ids, and `--budget` bounds the
+        # pass as a whole rather than each leg separately.
+        rework = ReworkPass(
+            scope_ids=frozenset(args.items) if args.items else None,
+            budget=args.budget,
+        )
+        if args.dry_run:
+            picked = dry_run_outcomes(
+                repo=repo,
+                items=items,
+                journal=journal,
+                selected_candidates=selected_candidates,
+                rework=rework,
+            )
+            # The journal record and the reported outcome list are projected from
+            # the SAME `picked` value, so the audit record and the "what would this
+            # drain do?" surface can never disagree.
+            journal.append(
+                record={
+                    "stage": "loop-pick",
+                    "dry_run": True,
+                    "budget": args.budget,
+                    "picked": [outcome.work_item_id for outcome in picked],
+                }
+            )
+            emit_outcomes(outcomes=picked, as_json=args.as_json)
+            return 0
+        # Every refusal that must land after selection and before the claim, as one
+        # decision. The SAME wall the single dispatch runs, handed the whole wave.
+        wall_exit = pre_dispatch_wall_exit(
+            args=args,
+            repo=repo,
+            items=selected_candidates,
+            journal=journal,
+            prelaunch_checkpoint=profile.checkpoint,
+        )
+        if wall_exit is not None:
+            return wall_exit
+        outcomes = dispatch_loop_wave(
             args=args,
             repo=repo,
             items=items,
-            journal=journal,
-        )
-    if size_exit is not None:
-        return size_exit
-    with profile.during(name="candidate-selection"):
-        selected_candidates = candidates(args=args, items=items, repo=repo)[: args.budget]
-    # `--item` narrows BOTH legs to the named ids, and `--budget` bounds the
-    # pass as a whole rather than each leg separately.
-    rework = ReworkPass(
-        scope_ids=frozenset(args.items) if args.items else None,
-        budget=args.budget,
-    )
-    if args.dry_run:
-        picked = dry_run_outcomes(
-            repo=repo,
-            items=items,
-            journal=journal,
             selected_candidates=selected_candidates,
+            journal=journal,
+            janitor=janitor,
             rework=rework,
+            profile=profile,
         )
-        # The journal record and the reported outcome list are projected from
-        # the SAME `picked` value, so the audit record and the "what would this
-        # drain do?" surface can never disagree.
-        journal.append(
-            record={
-                "stage": "loop-pick",
-                "dry_run": True,
-                "budget": args.budget,
-                "picked": [outcome.work_item_id for outcome in picked],
-            }
-        )
-        emit_outcomes(outcomes=picked, as_json=args.as_json)
-        return 0
-    # Every refusal that must land after selection and before the claim, as one
-    # decision. The SAME wall the single dispatch runs, handed the whole wave.
-    wall_exit = pre_dispatch_wall_exit(
-        args=args,
-        repo=repo,
-        items=selected_candidates,
-        journal=journal,
-        prelaunch_checkpoint=profile.checkpoint,
-    )
-    if wall_exit is not None:
-        return wall_exit
-    outcomes = dispatch_loop_wave(
-        args=args,
-        repo=repo,
-        items=items,
-        selected_candidates=selected_candidates,
-        journal=journal,
-        janitor=janitor,
-        rework=rework,
-        profile=profile,
-    )
-    if not outcomes:
-        emit_outcomes(outcomes=[], as_json=args.as_json)
-        return 0
-    emit_outcomes(outcomes=outcomes, as_json=args.as_json)
-    return _post_verdict_stages(args=args, repo=repo, outcomes=outcomes, journal=journal)
+        if not outcomes:
+            emit_outcomes(outcomes=[], as_json=args.as_json)
+            return 0
+        emit_outcomes(outcomes=outcomes, as_json=args.as_json)
+        return _post_verdict_stages(args=args, repo=repo, outcomes=outcomes, journal=journal)
+    finally:
+        _ = started.reconciliation.wait()
 
 
 def _post_verdict_stages(
@@ -219,7 +231,7 @@ def _start_loop(
     *, args: argparse.Namespace, repo: Path, profile: PrelaunchCpuProfile
 ) -> _LoopStart | int:
     with profile.during(name="dispatch-preamble"):
-        janitor, preamble_exit = dispatch_preamble(args=args, repo=repo)
+        janitor, preamble_exit = dispatch_preamble(args=args, repo=repo, reconcile=False)
     if preamble_exit is not None:
         return preamble_exit
     with profile.during(name="otel-egress"):
@@ -254,4 +266,9 @@ def _start_loop(
     # retirement is not a relaxation: that fact was raised by reading an event
     # stream the current engine cannot emit, so every reading failed, and the
     # gate stopped a drain for a surface nobody could ever have read.
-    return _LoopStart(janitor=janitor, items=items, journal=journal)
+    return _LoopStart(
+        janitor=janitor,
+        items=items,
+        journal=journal,
+        reconciliation=start_reconcile_runs_pass(args=args, repo=repo),
+    )
