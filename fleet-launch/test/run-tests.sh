@@ -1362,7 +1362,11 @@ p2_pid=$!
 if ! wait_for_line "$CASE_DIR/p2.log" 'gmktec FIFO ticket taken at start' "$OBSERVE_WAIT_S"; then
     fail "the priority-two launcher did not create a queue ticket"
 fi
-if wait_for_line "$CASE_DIR/p11.log" 'queued behind an older gmktec ticket:' 2 \
+# The priority-eleven launcher sees the new ticket only at the top of its next hold-loop
+# pass, and one pass takes about 2 s on a contended host, so this wait observes under
+# OBSERVE_WAIT_S. A fixed 2 s bound failed the case with the FIFO order correct
+# (PR #5672 CI run 45011880549 attempt 1; 8/100 loaded local runs, bd-ib-zkuosa).
+if wait_for_line "$CASE_DIR/p11.log" 'queued behind an older gmktec ticket:' "$OBSERVE_WAIT_S" \
     && grep -qE 'queued behind an older gmktec ticket: .*item=bd-ib-priority-two-ticket$' "$CASE_DIR/p11.log" \
     && grep -qxF bd-ib-priority-two-ticket "$parent_chain_log" \
     && grep -qxF bd-ib-priority-two-child "$parent_chain_log"; then
