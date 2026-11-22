@@ -59,16 +59,39 @@ def preserved_descendant(
     committed after the published head from being silently abandoned.
     """
     tip = preservation.preservation_tip_sha or preservation.commit_sha
+    if head_is_later is None:
+        # A missing run attribution cannot tell whether this preservation is
+        # newer than the published head, but commit ancestry can.  In
+        # particular, a published head containing the preservation cannot lose
+        # preserved work by being resumed, whatever the incomplete journal says.
+        published_contains_tip = runner.run(
+            argv=["git", "merge-base", "--is-ancestor", tip, published_head],
+            cwd=repo,
+            timeout_seconds=120.0,
+        )
+        return {
+            0: None,
+            1: PreservedDescendantUnobservable(
+                detail=(
+                    "publishing-run-unobservable: no journal row with a run_id attributes"
+                    f" published head {published_head} to its publishing run; the dispatcher"
+                    " records that row through `dispatcher.py dispatch`, so the preserved-"
+                    " descendant comparison could not be ordered by run"
+                )
+            ),
+        }.get(
+            published_contains_tip.exit_code,
+            PreservedDescendantUnobservable(
+                detail=(
+                    "preserved-ancestry-unobservable: git merge-base could not establish"
+                    f" whether published head {published_head} descends from preserved ref"
+                    f" {preservation.preservation_ref} at {tip}, so the preserved-descendant"
+                    " comparison could not be ordered"
+                )
+            ),
+        )
     if head_is_later is True:
         return None
-    if head_is_later is None:
-        return PreservedDescendantUnobservable(
-            detail=(
-                "publishing-run-unobservable: the published head and preserved ref could"
-                " not be ordered by run, so the preserved-descendant comparison could not"
-                " be taken"
-            )
-        )
     ancestry = runner.run(
         argv=["git", "merge-base", "--is-ancestor", published_head, tip],
         cwd=repo,
