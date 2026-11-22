@@ -274,6 +274,111 @@ def test_transition_takeover_applies_after_wait_when_the_original_write_never_la
     assert client.show_issue(issue_id=_ITEM_ID)["status"] == "ready"
 
 
+def test_reconciliation_settles_a_won_transition_whose_item_write_never_landed() -> None:
+    """A later cleanup pass names the successor without making a new claim."""
+    client, old_token = _client_with_current_token()
+    successor = create_claim_token(client=client)
+    client.update_issue(
+        issue_id=_ITEM_ID,
+        metadata={CLAIM_TOKEN_METADATA_KEY: old_token, "other": "preserved"},
+        names_claim_token=True,
+    )
+    client.close_issue(issue_id=old_token, reason=_transition_reason(successor=successor))
+
+    assert claim_tokens.settle_unapplied_transition(client=client, work_item_id=_ITEM_ID) is True
+
+    item = client.show_issue(issue_id=_ITEM_ID)
+    assert item["status"] == "active"
+    assert item["metadata"] == {CLAIM_TOKEN_METADATA_KEY: successor, "other": "preserved"}
+    assert client.show_issue(issue_id=successor)["status"] != "closed"
+
+
+def test_reconciliation_leaves_non_settleable_claim_token_states_untouched() -> None:
+    """Only an observable closed-token → open-successor transition is repaired."""
+    client, token = _client_with_current_token()
+
+    assert claim_tokens.settle_unapplied_transition(client=client, work_item_id=_ITEM_ID) is False
+
+    client.close_issue(issue_id=token, reason="not a protocol transition")
+    assert claim_tokens.settle_unapplied_transition(client=client, work_item_id=_ITEM_ID) is False
+    assert client.show_issue(issue_id=_ITEM_ID)["metadata"][CLAIM_TOKEN_METADATA_KEY] == token
+
+
+def test_reconciliation_leaves_missing_or_closed_successor_tokens_untouched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Neither a missing current token nor a closed successor can be settled."""
+    missing, _ = _client_with_current_token()
+    original_show = missing.show_issue
+
+    def _read_without_current_token(*, issue_id: str) -> dict[str, object]:
+        record = original_show(issue_id=issue_id)
+        return {**record, "metadata": {}} if issue_id == _ITEM_ID else record
+
+    monkeypatch.setattr(missing, "show_issue", _read_without_current_token)
+
+    assert claim_tokens.settle_unapplied_transition(client=missing, work_item_id=_ITEM_ID) is False
+
+    client, token = _client_with_current_token()
+    successor = create_claim_token(client=client)
+    client.close_issue(issue_id=token, reason=_transition_reason(successor=successor))
+    client.close_issue(issue_id=successor, reason="already used")
+
+    assert claim_tokens.settle_unapplied_transition(client=client, work_item_id=_ITEM_ID) is False
+    assert client.show_issue(issue_id=_ITEM_ID)["metadata"][CLAIM_TOKEN_METADATA_KEY] == token
+
+
+def test_reconciliation_stands_down_when_the_item_changes_during_its_final_readback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cleanup write is abandoned if another writer changes the item first."""
+    client, old_token = _client_with_current_token()
+    successor = create_claim_token(client=client)
+    competing_successor = create_claim_token(client=client)
+    client.close_issue(issue_id=old_token, reason=_transition_reason(successor=successor))
+    original_show = client.show_issue
+    item_reads = 0
+
+    def _change_item_before_token_readback(*, issue_id: str) -> dict[str, object]:
+        nonlocal item_reads
+        if issue_id == _ITEM_ID:
+            item_reads += 1
+            if item_reads == 2:
+                client.update_issue(
+                    issue_id=_ITEM_ID,
+                    metadata={CLAIM_TOKEN_METADATA_KEY: competing_successor},
+                    names_claim_token=True,
+                )
+        return original_show(issue_id=issue_id)
+
+    monkeypatch.setattr(client, "show_issue", _change_item_before_token_readback)
+
+    assert claim_tokens.settle_unapplied_transition(client=client, work_item_id=_ITEM_ID) is False
+    assert (
+        original_show(issue_id=_ITEM_ID)["metadata"][CLAIM_TOKEN_METADATA_KEY]
+        == competing_successor
+    )
+
+
+def test_reconciliation_reports_a_lost_metadata_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cleanup outcome is false until its successor naming is observable."""
+    client, old_token = _client_with_current_token()
+    successor = create_claim_token(client=client)
+    client.close_issue(issue_id=old_token, reason=_transition_reason(successor=successor))
+    original_update = client.update_issue
+
+    def _drop_item_write(**fields: object) -> None:
+        if fields["issue_id"] != _ITEM_ID:
+            original_update(**fields)
+
+    monkeypatch.setattr(client, "update_issue", _drop_item_write)
+
+    assert claim_tokens.settle_unapplied_transition(client=client, work_item_id=_ITEM_ID) is False
+    assert client.show_issue(issue_id=_ITEM_ID)["metadata"][CLAIM_TOKEN_METADATA_KEY] == old_token
+
+
 def test_transition_takeover_stands_down_when_the_item_names_the_stranded_successor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -132,9 +132,8 @@ _WAITING = (
 # that the one-shot writer already waited, and what gets the item written.
 _WAITED = ", after this {attempt} waited out the takeover wait and tried once more"
 _PENDING_REMEDY = (
-    " Remedy: wait for or trigger a Dispatcher pass on {wid}. A Dispatcher loop keeps "
-    "its first sighting of an unapplied transition from one pass to the next, and takes the "
-    "transition over on a pass made after the takeover wait."
+    " Remedy: run `dispatcher.py reconcile-runs --repo <repository>` to finish the "
+    "closed-token transition for {wid}. This cleanup command never launches a factory run."
 )
 
 
