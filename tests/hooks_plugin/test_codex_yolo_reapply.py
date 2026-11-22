@@ -28,6 +28,12 @@ _GATE_PATH = _REPO_ROOT / ".claude-plugin" / "hooks" / "codex_yolo_gate.py"
 _MODULE_NAME = "codex_yolo_reapply_under_test"
 
 
+def test_hook_source_contains_no_repaid_expedited_incident_marker() -> None:
+    source = _HOOK_PATH.read_text(encoding="utf-8")
+
+    assert "EXPEDITED_INCIDENT_RESPONSE flag: bd-ib-r4xzme" not in source
+
+
 def test_manifest_skips_claude_only_hook_before_codex_expands_plugin_root() -> None:
     manifest = json.loads((_HOOKS_DIR / "hooks.json").read_text())
     command = manifest["hooks"]["SessionStart"][0]["hooks"][0]["command"]
