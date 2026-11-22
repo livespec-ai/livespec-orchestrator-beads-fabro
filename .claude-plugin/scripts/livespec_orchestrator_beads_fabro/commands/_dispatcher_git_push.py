@@ -20,11 +20,23 @@ __all__: list[str] = ["PUSH_ORIGIN_SOURCE"]
 PUSH_ORIGIN_SOURCE = r"""#!/usr/bin/env bash
 set +x
 set -eu
-case "${LIVESPEC_AGENT_STAGE:-}" in
+# The stage is the dispatcher's record for the running agent node (`<launcher pid> <stage>`, in
+# the bundle root above this helper's bin/), never LIVESPEC_AGENT_STAGE, which the agent sets.
+agent_stage=''
+record="$(dirname "$0")/../agent-stage"
+if test -e "$record"; then
+    pid=''
+    read -r pid agent_stage <"$record" 2>/dev/null || true
+    case "$pid" in
+        ''|*[!0-9]*) agent_stage=unrecorded ;;
+        *) kill -0 "$pid" 2>/dev/null || agent_stage='' ;;
+    esac
+fi
+case "$agent_stage" in
     ''|publish_draft|pr_refresh|pr) ;;
     *)
         printf 'LIVESPEC_AGENT_PUBLICATION_DENIED: stage=%s action=push_origin\n' \
-            "$LIVESPEC_AGENT_STAGE" >&2
+            "$agent_stage" >&2
         exit 1
         ;;
 esac
