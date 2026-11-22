@@ -265,6 +265,15 @@ Current checks:
   `_affected_tests_scan.py`, split out so each stays under the file-size ceiling:
   it owns which modules reach a module, while this one owns what a change selects
   and the coverage verdict.
+  When the committed `dev-tooling/coverage-execution-map.json` is a record at a
+  commit that is an ancestor of HEAD and lists a changed module, the selection is
+  the tests the map recorded as executing it (plus the mirror tests) instead of
+  the import-graph closure, which a hub module's imports widen to about 93% of the
+  test modules (work-item bd-ib-uvx5l7); a missing, malformed or empty record
+  falls back to the closure, and a coverage refusal still retries the whole suite.
+  `_coverage_execution_map.py` is the map's producer: `just coverage-execution-map`
+  runs the suite once under `--cov-context=test` and writes one module per line.
+  Re-run and commit it when the suite's shape drifts.
 - `acp_preflight_config.py` — moves the Dispatcher's ACP preflight refusal
   (Scenario 129, "Mixed, unknown or unresolvable entries refuse before claim")
   from dispatch admission to commit time. It evaluates the committed

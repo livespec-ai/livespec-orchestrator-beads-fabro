@@ -1187,6 +1187,15 @@ coverage-shard shard_index shard_count:
 coverage-shard-durations:
     dev-tooling/just-coverage-shard-durations.sh
 
+# bd-ib-uvx5l7: regenerate dev-tooling/coverage-execution-map.json, the committed
+# record of which test modules executed each product module, from one full-suite
+# run under `--cov-context=test`. The affected-tests gate (`check-changed`)
+# selects a changed module's tests from it instead of from every test module
+# that reaches the module through a hub's imports. Commit the result. Not a
+# `check-` slug and not in the `check` aggregate: it is a maintainer action.
+coverage-execution-map:
+    dev-tooling/just-coverage-execution-map.sh
+
 # Shared baseline Verifier: validates this repo's harness-conformance
 # declaration against the plugin-resolution invariant. Shipped by
 # livespec-dev-tooling (>=v0.21.0); with `harnesses` declared in
