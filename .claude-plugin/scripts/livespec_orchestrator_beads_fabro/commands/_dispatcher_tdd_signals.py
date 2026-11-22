@@ -14,8 +14,10 @@ to "what does this number mean" for each:
   `TDD-Red-Captured-At`. A Green-amended commit retains both trailer sets and
   counts once here and once as a Green, so a completed cycle reads 1/1, not
   2/1. Source: `_dispatcher_tdd_commits`.
-- `tdd.green_commit_count` — commits carrying `TDD-Green-Verified-At`. Red
-  minus Green is the count of Reds left open at the end of the run.
+- `tdd.green_commit_count` — commits carrying `TDD-Green-Verified-At`, plus
+  Red-trailered non-Python implementation amends which the replay hook accepts
+  without writing that Green trailer. Red minus Green is the count of Reds left
+  open at the end of the run.
 - `tdd.suite_green_count` — commits carrying `TDD-Suite-Green-Captured-At`,
   the `red_green_replay` leg-5 shape: product code with NO Red at all. Counted
   separately from Green so a no-Red commit is never reported as a completed
