@@ -48,6 +48,24 @@ for slot in $FLEET_LAUNCH_SLOTNARROW_EXCLUDED_SLOTS; do
   unset_args+=(-u "CLAUDE_CODE_OAUTH_TOKEN__$slot")
 done
 exec "${WRAP_CHAIN[@]}" bash -c '
-  judge_var="CLAUDE_CODE_OAUTH_TOKEN__$1"; shift
+  judge_slot=$1
+  judge_var="CLAUDE_CODE_OAUTH_TOKEN__$judge_slot"
+  judge_slot=${judge_slot,,}
+  judge_slot=${judge_slot//_/-}
+  shift
   export CLAUDE_CODE_OAUTH_TOKEN="${!judge_var:-${CLAUDE_CODE_OAUTH_TOKEN:-}}"
+  resource_attributes=()
+  IFS=, read -r -a inherited_resource_attributes <<< "${OTEL_RESOURCE_ATTRIBUTES:-}"
+  for resource_attribute in "${inherited_resource_attributes[@]}"; do
+    case $resource_attribute in
+      spend.slot=*) ;;
+      *) resource_attributes+=("$resource_attribute") ;;
+    esac
+  done
+  if [ "${#resource_attributes[@]}" -gt 0 ]; then
+    IFS=,
+    export OTEL_RESOURCE_ATTRIBUTES="${resource_attributes[*]},spend.slot=$judge_slot"
+  else
+    export OTEL_RESOURCE_ATTRIBUTES="spend.slot=$judge_slot"
+  fi
   exec env "$@"' slotnarrow "$FLEET_LAUNCH_SLOTNARROW_JUDGE_SLOT" "${unset_args[@]}" "$@"
