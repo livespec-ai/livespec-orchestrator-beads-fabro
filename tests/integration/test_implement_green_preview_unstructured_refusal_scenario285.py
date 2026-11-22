@@ -98,3 +98,36 @@ def test_a_structured_failed_preview_refusal_does_not_render_an_unneeded_output_
     assert completed.returncode == 0, completed.stderr
     assert "recorded failed targets: check-types" in completed.stderr
     assert "recorded output tail:" not in completed.stderr
+
+
+def test_a_silent_failed_preview_refusal_says_the_hook_produced_no_output(
+    tmp_path: Path,
+) -> None:
+    """An empty recorded tail is reported as silence, not as 'failed targets: none' alone."""
+    graph = parse_dot_graph(text=_GRAPH.read_text(encoding="utf-8"))
+    assert not isinstance(graph, str), graph
+    repo = tmp_path / "clone"
+    repo.mkdir()
+    _ = subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+    git_dir = repo / ".git"
+    _ = (git_dir / _PREVIEW_RECORD).write_text(
+        json.dumps({"failed_targets": [], "output_tail": "", "preview_ran": True, "status": 23})
+        + "\n",
+        encoding="utf-8",
+    )
+    _ = (git_dir / _HANDOFF).write_text(
+        "## green\npreview exit status: 23; failed targets: none\n", encoding="utf-8"
+    )
+
+    completed = subprocess.run(
+        ["sh", "-c", graph.nodes["implement_completion"]["script"]],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        input=_COMPLETION,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "recorded output tail:" in completed.stderr
+    assert "the hook produced no output" in completed.stderr

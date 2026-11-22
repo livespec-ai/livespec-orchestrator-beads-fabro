@@ -208,7 +208,7 @@ def preview(stage, test_file, hook_log):
     base = dispatch_base(root)
     paths = selected_paths(stage, root, test_file, base)
     if not paths:
-        return 2, [], [], False, ""
+        return 2, [], [], False, None
     preview_root = Path(tempfile.mkdtemp(prefix="livespec-gate-preview-", dir=preview_parent()))
     unset = []
     try:
@@ -221,7 +221,7 @@ def preview(stage, test_file, hook_log):
         ).stdout.strip()
         hook = Path(hook_path)
         if not hook.is_file():
-            return 0, [], unset, True, ""
+            return 0, [], unset, True, None
         environment, unset = skipped_environment()
         # The hook selects the scoped affected-tests gate for commits made by an
         # implement turn.  This disposable index is the prospective implement
@@ -237,10 +237,10 @@ def preview(stage, test_file, hook_log):
         trust_output = trust.stdout + trust.stderr
         if trust.returncode:
             sys.stderr.write(trust_output)
-            return trust.returncode, [], unset, False, ""
+            return trust.returncode, [], unset, False, None
         exports, exports_status = just_exports(cwd=preview_root, environment=environment)
         if exports_status:
-            return exports_status, [], unset, False, ""
+            return exports_status, [], unset, False, None
         environment.update(exports)
         # The hook's output streams into the log the caller follows (bd-ib-42erfz):
         # captured in memory, nothing reached a caller until the whole aggregate
@@ -262,7 +262,7 @@ def preview(stage, test_file, hook_log):
         return returncode, failed_targets(output), unset, preview_ran, output
     except (OSError, RuntimeError) as error:
         print(error, file=sys.stderr)
-        return 2, [], unset, False, ""
+        return 2, [], unset, False, None
     finally:
         command("git", "worktree", "remove", "--force", str(preview_root), cwd=root, check=False)
         shutil.rmtree(preview_root, ignore_errors=True)
@@ -477,7 +477,7 @@ def work(stage, test_file):
         "preview_ran": preview_ran,
         "unset_variables": unset,
     }
-    if status != 0 and not targets and output:
+    if status != 0 and not targets and output is not None:
         report["output_tail"] = output_tail(output)
     sys.stdout.flush()
     sys.stderr.flush()
