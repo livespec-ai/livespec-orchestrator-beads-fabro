@@ -253,10 +253,13 @@ def attested_decision(*, heading: str) -> SpecChangeTierDecision:
     """The tier of a feature whose behaviour a human attested an existing clause states.
 
     The attestation is a human override of the governing-heading verdict, so the
-    decision carries a `stated` verdict naming the cited heading and NO
-    generalization target: nothing needs generalizing when the ratified text
-    already states the behaviour. The tier is `none` because a stated feature is
-    an implementation follow-up, whatever the model's own verdict was.
+    decision carries a `stated` verdict naming the cited heading, and that same
+    heading as its generalization target: the dod_gate's check 4 internal-ruling
+    exception reads a `tier: none` record whose generalization target is the
+    referenced heading, and a press that left the field `(none)` named the
+    heading only in the attestation comment, which the node does not read. The
+    tier is `none` because a stated feature is an implementation follow-up,
+    whatever the model's own verdict was.
     """
     return SpecChangeTierDecision(
         tier=NO_TIER,
@@ -264,7 +267,7 @@ def attested_decision(*, heading: str) -> SpecChangeTierDecision:
         verdict=SpecStatedVerdict(
             kind="stated",
             stated_by=(heading,),
-            generalization_target=None,
+            generalization_target=heading,
             rationale=f"a human attested that {heading} states the asked-for behaviour",
         ),
         linked_proposal_topic=None,
