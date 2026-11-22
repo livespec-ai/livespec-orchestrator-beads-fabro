@@ -14,6 +14,24 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done i
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "orchestrator-image" / "acceptance-live-golden-master.sh"
+_BUILD_AND_VERIFY = _REPO_ROOT / "orchestrator-image" / "build-and-verify.sh"
+
+
+def test_live_golden_master_stages_the_same_default_fabro_binary_as_image_build() -> None:
+    """The live proof must stage the binary pinned by the image Dockerfile.
+
+    The workflow leaves ``HOST_FABRO_BIN`` unset, so this default—not a host
+    shell profile—selects the bytes copied into the Docker build context. Keep
+    it aligned with the ordinary image builder, whose default points at the
+    versioned carrier that matches ``FABRO_BINARY_SHA256``.
+    """
+    expected_default = (
+        'HOST_FABRO_BIN="${HOST_FABRO_BIN:-'
+        '$HOME/.local/state/fabro-web-prod/v0408-d22808f8e/fabro}"'
+    )
+
+    assert expected_default in _BUILD_AND_VERIFY.read_text(encoding="utf-8")
+    assert expected_default in _SCRIPT.read_text(encoding="utf-8")
 
 
 def test_live_golden_master_projects_codex_auth_before_dispatch() -> None:
