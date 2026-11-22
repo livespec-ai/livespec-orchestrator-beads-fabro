@@ -21,8 +21,15 @@ def _run_guard(*, tmp_path: Path, stage: str | None) -> str:
     script.write_text(guard_script_text(), encoding="utf-8")
     root = tmp_path / "bundle"
     root.mkdir()
+    # A Codex-projected factory sandbox exports LIVESPEC_CREDENTIAL_USE_DEADLINE_EPOCH
+    # container-wide, and the guard refuses an unprotected declaration beside a
+    # deadline, so an inherited LIVESPEC_CREDENTIAL_USE_* name is dropped here.
     env = {
-        **{k: v for k, v in os.environ.items() if k != "LIVESPEC_AGENT_STAGE"},
+        **{
+            k: v
+            for k, v in os.environ.items()
+            if k != "LIVESPEC_AGENT_STAGE" and not k.startswith("LIVESPEC_CREDENTIAL_USE_")
+        },
         "LIVESPEC_CREDENTIAL_USE_UNPROTECTED": "1",
         "LIVESPEC_SANDBOX_GH_REFRESH_ROOT": str(root),
     }
