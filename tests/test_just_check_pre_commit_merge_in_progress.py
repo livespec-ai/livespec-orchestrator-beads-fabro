@@ -118,7 +118,7 @@ def test_a_merge_staging_product_python_runs_the_evidence_writing_aggregate(
 
     assert "just check-skipping check-codex-skill-picker check-fleet-launch" in calls
     assert not any("check-red-green-replay" in call for call in calls)
-    assert not any("check-staged-precheck" in call for call in calls)
+    assert "just check-staged-precheck" in calls
     assert any("green_token write-pre-commit pre-commit-aggregate:" in call for call in calls)
 
 

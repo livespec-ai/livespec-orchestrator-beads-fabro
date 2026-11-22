@@ -310,6 +310,7 @@ def test_sandbox_exempt_full_arm_skips_the_master_ci_green_gate(*, tmp_path: Pat
     invocation = _invoke_pre_commit(repo=repo, env=env)
 
     assert invocation.split() == [
+        "check-staged-precheck",
         "check-skipping",
         "check-codex-skill-picker",
         _MASTER_CI_GATE,
@@ -325,6 +326,7 @@ def test_checkout_without_the_marker_still_runs_the_master_ci_green_gate(*, tmp_
     invocation = _invoke_pre_commit(repo=repo, env=env)
 
     assert invocation.split() == [
+        "check-staged-precheck",
         "check-skipping",
         "check-codex-skill-picker",
         _FLEET_LAUNCH_GATE,
@@ -342,6 +344,7 @@ def test_the_delegated_gate_skip_targets_reach_every_check_skipping_call(*, tmp_
     invocation = _invoke_pre_commit(repo=repo, env={**env, "SKIP_TARGETS": skip})
 
     assert invocation.split() == [
+        "check-staged-precheck",
         "check-skipping",
         "check-codex-skill-picker",
         "check-branch-protection-alignment",

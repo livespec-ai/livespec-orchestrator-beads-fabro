@@ -145,7 +145,7 @@ def test_a_commit_outside_an_authoring_turn_keeps_the_full_aggregate(
     done, calls = _hook(tmp_path=tmp_path, staged={_WIDGET: "VALUE = 1\n"}, extra=extra)
 
     assert done.returncode == 0, done.stderr
-    assert calls == [_AGGREGATE]
+    assert calls == ["check-staged-precheck", _AGGREGATE]
 
 
 @pytest.mark.parametrize("stage", ["implement", "fix", "review_fix"])

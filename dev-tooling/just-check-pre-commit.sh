@@ -133,6 +133,7 @@ pre_commit_hook_staged=$(echo "$staged" | grep -E '^dev-tooling/just-check-pre-c
 green_amend_staged=$(printf '%s\n%s\n%s\n' "$green_amend_staged" "$workflow_fabro_staged" "$pre_commit_hook_staged" | sed '/^$/d')
 test_count=0
 impl_count=0
+staged_precheck_ran=false
 [[ -n "$test_staged" ]] && test_count=$(echo "$test_staged" | wc -l)
 [[ -n "$impl_staged" ]] && impl_count=$(echo "$impl_staged" | wc -l)
 # A repair turn may finish a Red test that this item already introduced, but it
@@ -218,6 +219,8 @@ if [[ "$merge_in_progress" == false ]] \
     elif ! just check-staged-precheck; then
         echo ":: staged pre-check phase refused the commit" >&2
         exit 1
+    else
+        staged_precheck_ran=true
     fi
     if [[ -n "$fleet_launch_input_staged" ]] && ! just check-fleet-launch; then
         echo ":: fleet-launch gate refused the commit" >&2
@@ -319,8 +322,12 @@ if [[ "$merge_in_progress" == false ]] \
     exit $?
 fi
 echo ":: pre-push: skipping same-repo live TUI picker gate; run just check-codex-skill-picker explicitly for live Codex picker acceptance"
-aggregate_log=$(mktemp "$(git rev-parse --git-path livespec-pre-commit-aggregate.XXXXXX)")
 staged_tree=$(git write-tree)
+if [[ "$staged_precheck_ran" == false ]] && ! just check-staged-precheck; then
+    echo ":: staged pre-check phase refused the commit" >&2
+    exit 1
+fi
+aggregate_log=$(mktemp "$(git rev-parse --git-path livespec-pre-commit-aggregate.XXXXXX)")
 set +e
 just check-skipping check-codex-skill-picker "${sandbox_skips[@]}" "${delegated_skip_targets[@]}" "${fleet_launch_skips[@]}" 2>&1 | tee "$aggregate_log"
 aggregate_status=${PIPESTATUS[0]}
