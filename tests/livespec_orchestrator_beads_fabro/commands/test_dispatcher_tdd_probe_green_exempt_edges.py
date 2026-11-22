@@ -122,7 +122,7 @@ def test_green_exempt_lookup_requires_a_red_only_commit_and_usable_file_evidence
     red_only = module._Commit(message="fix: x\n\nTDD-Red-Captured-At: now", oid="abc123")
 
     assert (
-        module._green_exempt_messages(
+        module._green_exempt_oids(
             repo=Path("/repo"),
             commits=(module._Commit(message="chore: no red", oid="abc123"),),
             runner=_Runner(),
@@ -130,7 +130,7 @@ def test_green_exempt_lookup_requires_a_red_only_commit_and_usable_file_evidence
         == frozenset()
     )
     assert (
-        module._green_exempt_messages(
+        module._green_exempt_oids(
             repo=Path("/repo"),
             commits=(red_only,),
             runner=_Runner([_result(exit_code=1)]),
@@ -138,7 +138,7 @@ def test_green_exempt_lookup_requires_a_red_only_commit_and_usable_file_evidence
         == frozenset()
     )
     assert (
-        module._green_exempt_messages(
+        module._green_exempt_oids(
             repo=Path("/repo"),
             commits=(red_only,),
             runner=_Runner(

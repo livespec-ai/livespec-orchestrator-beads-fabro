@@ -105,26 +105,29 @@ class TddCommitSignals:
 def tdd_commit_signals(
     *,
     messages: tuple[str, ...],
-    green_exempt_messages: frozenset[str] = frozenset(),
+    green_exempt_positions: frozenset[int] = frozenset(),
 ) -> TddCommitSignals:
     """Derive the four commit signals from one dispatch's commit messages.
 
     Counts commits, NOT trailer occurrences: a Green-amended commit carries
     both trailer sets and contributes one Red, one Green and one gap sample.
-    A Red-trailered message in `green_exempt_messages` is also one completed
+    The commit at a position in `green_exempt_positions` is also one completed
     cycle: its changed-file evidence establishes that the replay hook accepted
     a non-Python implementation amend for which it writes no Green trailer.
+    The completion is keyed by position in `messages`, never by message text,
+    because two commits can carry identical bodies and the evidence is about
+    one commit's files.
     """
     red = 0
     green = 0
     suite_green = 0
     gaps: list[float] = []
-    for message in messages:
+    for position, message in enumerate(messages):
         trailers = commit_trailers(message=message)
         red_at = trailers.get(RED_TRAILER_KEY)
         green_at = trailers.get(GREEN_TRAILER_KEY)
         red += 1 if red_at is not None else 0
-        green += 1 if green_at is not None or message in green_exempt_messages else 0
+        green += 1 if green_at is not None or position in green_exempt_positions else 0
         suite_green += 1 if SUITE_GREEN_TRAILER_KEY in trailers else 0
         gap = _gap_seconds(red_at=red_at, green_at=green_at)
         if gap is not None:

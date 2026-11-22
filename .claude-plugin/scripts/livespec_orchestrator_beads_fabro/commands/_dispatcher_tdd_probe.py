@@ -229,10 +229,12 @@ def commit_signals_for_dispatch(
     )
     if not mine:
         return None
-    messages = tuple(commit.message for commit in mine)
+    exempt_oids = _green_exempt_oids(repo=repo, commits=mine, runner=runner)
     return tdd_commit_signals(
-        messages=messages,
-        green_exempt_messages=_green_exempt_messages(repo=repo, commits=mine, runner=runner),
+        messages=tuple(commit.message for commit in mine),
+        green_exempt_positions=frozenset(
+            position for position, commit in enumerate(mine) if commit.oid in exempt_oids
+        ),
     )
 
 
@@ -267,16 +269,18 @@ def _commits_from_payload(*, stdout: str) -> tuple[_Commit, ...] | None:
     return tuple(commits)
 
 
-def _green_exempt_messages(
+def _green_exempt_oids(
     *, repo: Path, commits: tuple[_Commit, ...], runner: CommandRunner
 ) -> frozenset[str]:
-    """Return Red-only commits whose non-Python amend was hook-green-exempt.
+    """Return the object ids of Red-only commits whose non-Python amend was hook-green-exempt.
 
     The Red-Green hook deliberately omits its Green trailer when an amend has
     implementation outside `tests/` but no Python implementation. A commit's
     message alone cannot distinguish that accepted amend from a genuine open
-    Red, so inspect changed-file evidence only for Red-only candidates. An
-    unavailable lookup contributes no synthetic Green.
+    Red, so inspect changed-file evidence only for Red-only candidates. The
+    answer is keyed by commit object id, never by message text, because two
+    commits can carry identical bodies. An unavailable lookup contributes no
+    synthetic Green.
     """
     candidates = tuple(
         commit
@@ -298,7 +302,7 @@ def _green_exempt_messages(
             timeout_seconds=_COMMITS_PROBE_TIMEOUT_SECONDS,
         )
         if result.exit_code == 0 and _has_only_non_python_implementation(stdout=result.stdout):
-            exempt.add(commit.message)
+            exempt.add(cast("str", commit.oid))
     return frozenset(exempt)
 
 
