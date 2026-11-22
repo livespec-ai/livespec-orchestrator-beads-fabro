@@ -285,6 +285,18 @@ def test_the_prompt_is_the_rubric_bytes_then_the_ending_contract_then_the_subjec
     assert prompt.endswith(f"{subject}\n")
 
 
+def test_a_host_judgement_appends_only_its_ending_contract_and_subject_to_the_unchanged_rubric() -> (
+    None
+):
+    """Scenario 239: check 4 is graded from the node's own rubric bytes."""
+    rubric = dod_gate_prompt_path().read_text(encoding="utf-8")
+    subject = "work-item: bd-ib-a4gjc5"
+
+    assert judgement_prompt(gate_prompt=rubric, subject=subject) == (
+        f"{rubric}{_ending_contract()}{subject}\n"
+    )
+
+
 def test_the_ending_contract_states_the_verdict_form_and_grades_nothing() -> None:
     contract = _ending_contract()
 
@@ -296,20 +308,19 @@ def test_the_ending_contract_states_the_verdict_form_and_grades_nothing() -> Non
     assert [word for word in _GRADING_WORDS if word in lowered] == []
 
 
-def test_the_host_prompt_names_its_inline_capabilities_and_never_directs_a_tool_call() -> None:
-    prompt = judgement_prompt(
-        gate_prompt=(
-            "Read /etc/livespec/sandbox-capabilities, then search SPECIFICATION/ "
-            "before deciding.\n"
-        ),
-        subject="work-item: bd-ib-ff5ohb",
+def test_the_host_prompt_keeps_the_rubric_bytes_and_states_no_tools_in_the_ending_contract() -> (
+    None
+):
+    rubric = (
+        "Read /etc/livespec/sandbox-capabilities, then search SPECIFICATION/ before deciding.\n"
     )
+    prompt = judgement_prompt(gate_prompt=rubric, subject="work-item: bd-ib-ff5ohb")
 
-    lowered = prompt.casefold()
-    assert "you have no tools" in lowered
-    assert "sandbox capabilities: terminal" in lowered
-    assert "/etc/livespec/sandbox-capabilities" not in lowered
-    assert "search specification/" not in lowered
+    assert prompt.startswith(rubric)
+    contract = _ending_contract().casefold()
+    assert "you have no tools" in contract
+    assert "do not attempt a tool call" in contract
+    assert _ending_contract() in prompt
 
 
 def test_the_judge_is_handed_the_executing_builds_rubric_followed_only_by_those_two(

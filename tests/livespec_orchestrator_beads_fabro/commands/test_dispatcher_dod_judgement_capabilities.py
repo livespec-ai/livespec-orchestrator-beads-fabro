@@ -1,12 +1,8 @@
-"""The host Definition-of-Done judgement states the governed repository's capability set.
+"""Configured capabilities cannot rewrite a host Definition-of-Done rubric.
 
-A host candidate has no tools, so it cannot resolve the sandbox capability set
-the rubric's capability section asks for. The set therefore travels inline,
-taken from the governed repository's committed `dispatcher.sandbox_capabilities`
-mirror. With no mirror the set is UNKNOWN, so the judge is told
-`sandbox-capabilities: unpublished` rather than a guessed baseline, because a
-guessed `terminal`-only set would grade every browser or tmux assertion as
-unprovable.
+Scenario 239 requires every taking to grade one subject by one rubric. The
+host's configured capability mirror therefore cannot add host-only guidance or
+remove the node rubric's own capability instructions.
 """
 
 from __future__ import annotations
@@ -104,23 +100,19 @@ def _prompt(*, tmp_path: Path, capabilities: str | None) -> str:
     return runner.stdin_text[0].casefold()
 
 
-def test_the_judge_is_told_the_repository_s_whole_configured_capability_set(
+def test_configured_capabilities_do_not_change_the_node_rubric(
     tmp_path: Path,
 ) -> None:
     prompt = _prompt(
         tmp_path=tmp_path, capabilities='["terminal", "headless_browser", "tmux", "herdr"]'
     )
 
-    assert "sandbox capabilities: terminal, headless_browser, tmux, herdr" in prompt
-    # The rubric's own capability section tells the judge to read the image's
-    # published file; a tool-less judge cannot, so that direction must be gone.
-    assert "/etc/livespec/sandbox-capabilities" not in prompt
+    assert prompt.startswith(dod_gate_prompt_path().read_text(encoding="utf-8").casefold())
 
 
-def test_with_no_configured_mirror_the_judge_is_told_the_set_is_unpublished(
+def test_an_unconfigured_capability_mirror_does_not_change_the_node_rubric(
     tmp_path: Path,
 ) -> None:
     prompt = _prompt(tmp_path=tmp_path, capabilities=None)
 
-    assert "sandbox-capabilities: unpublished" in prompt
-    assert "sandbox capabilities: terminal" not in prompt
+    assert prompt.startswith(dod_gate_prompt_path().read_text(encoding="utf-8").casefold())
