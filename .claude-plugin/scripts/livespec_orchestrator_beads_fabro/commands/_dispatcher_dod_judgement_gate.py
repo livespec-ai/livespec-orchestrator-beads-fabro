@@ -117,6 +117,7 @@ class DodJudgementDecision:
     findings: tuple[str, ...] = ()
     reused: bool = False
     spec_identity: SpecIdentity | None = None
+    unavailable_cause: str | None = None
 
     @property
     def holds(self) -> bool:
@@ -359,4 +360,8 @@ def _unavailable(  # noqa: PLR0913 - each argument is one field of the record it
                 attempts=attempts,
             )
         )
-    return DodJudgementDecision(work_item_id=item.id, outcome=JUDGEMENT_UNAVAILABLE)
+    return DodJudgementDecision(
+        work_item_id=item.id,
+        outcome=JUDGEMENT_UNAVAILABLE,
+        unavailable_cause=cause,
+    )

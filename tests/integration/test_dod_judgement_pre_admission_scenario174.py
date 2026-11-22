@@ -237,6 +237,23 @@ def test_scenario174_the_approve_valve_admits_an_item_the_judgement_passes(
     assert _stored(repo=repo).status == "ready"
 
 
+def test_scenario174_the_approve_summary_discloses_an_unrun_judgement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A green admission still tells the operator why its DoD judgement did not run."""
+    repo = _repo(tmp_path=tmp_path)
+    _install_absent_judge(tmp_path=tmp_path, monkeypatch=monkeypatch)
+    append_work_item(path=_config(repo=repo), item=_item(admission_policy="manual"))
+
+    result = run_action(repo=repo, action_id="approve:bd-ib-174")
+
+    assert result["status"] == "green"
+    assert "admitted" in result["summary"]
+    assert "did not run" in result["summary"]
+    assert "no-eligible-model" in result["summary"]
+    assert _stored(repo=repo).status == "ready"
+
+
 def test_scenario265_approve_keeps_an_auto_item_held_and_records_its_mechanical_finding(
     tmp_path: Path,
 ) -> None:

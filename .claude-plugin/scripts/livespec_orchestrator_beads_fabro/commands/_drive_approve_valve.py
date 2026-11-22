@@ -30,7 +30,11 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_acceptance_eligibili
 from livespec_orchestrator_beads_fabro.commands._dispatcher_definition_of_done_findings import (
     goal_template_opening_delimiter_findings,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement import (
+    JUDGEMENT_UNAVAILABLE,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_gate import (
+    DodJudgementDecision,
     judge_item_definition_of_done,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_record import (
@@ -76,7 +80,7 @@ _JUDGED = (
 
 def _definition_of_done_refusal(
     *, repo: Path, config: StoreConfig, item: WorkItem, action_id: str
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, DodJudgementDecision | None]:
     """Both halves of the entry-to-`ready` Definition-of-Done gate, as one answer.
 
     The MECHANICAL half consumes the SAME shared eligibility decision the
@@ -105,24 +109,30 @@ def _definition_of_done_refusal(
     template_findings = goal_template_opening_delimiter_findings(item=item)
     if template_findings:
         _record_mechanical_findings(config=config, item=item, findings=template_findings)
-        return valve_refusal(
-            aid=action_id,
-            wid=item.id,
-            err="ungradeable-acceptance-criteria",
-            msg=f"approve refused: {'; '.join(template_findings)}.",
+        return (
+            valve_refusal(
+                aid=action_id,
+                wid=item.id,
+                err="ungradeable-acceptance-criteria",
+                msg=f"approve refused: {'; '.join(template_findings)}.",
+            ),
+            None,
         )
     eligibility = acceptance_eligibility(item=item, cwd=repo)
     refusal = eligibility.refusal
     if refusal is not None:
         _record_mechanical_findings(config=config, item=item, findings=(refusal,))
-        return valve_refusal(
-            aid=action_id,
-            wid=item.id,
-            err="ungradeable-acceptance-criteria",
-            msg=f"approve refused: {refusal}.",
+        return (
+            valve_refusal(
+                aid=action_id,
+                wid=item.id,
+                err="ungradeable-acceptance-criteria",
+                msg=f"approve refused: {refusal}.",
+            ),
+            None,
         )
     if eligibility.variant.exempt:
-        return None
+        return None, None
     _record_unavailable_setting_checks(
         config=config,
         item=item,
@@ -133,13 +143,16 @@ def _definition_of_done_refusal(
         item=item, repo=repo, path=config, stage=STAGE_PRE_ADMISSION
     )
     if judgement.holds:
-        return valve_refusal(
-            aid=action_id,
-            wid=item.id,
-            err="definition-of-done-held",
-            msg=f"approve refused: {'; '.join(judgement.findings)}",
+        return (
+            valve_refusal(
+                aid=action_id,
+                wid=item.id,
+                err="definition-of-done-held",
+                msg=f"approve refused: {'; '.join(judgement.findings)}",
+            ),
+            judgement,
         )
-    return None
+    return None, judgement
 
 
 def _record_mechanical_findings(
@@ -251,7 +264,9 @@ def approve_item(
             action_id=action_id,
             reason=cast("str", size.reason),
         )
-    held = _definition_of_done_refusal(repo=repo, config=config, item=item, action_id=action_id)
+    held, judgement = _definition_of_done_refusal(
+        repo=repo, config=config, item=item, action_id=action_id
+    )
     if held is not None:
         return held
     lost = _approval(repo=repo, config=config, item=item, intent="approve").write_status(
@@ -264,11 +279,19 @@ def approve_item(
         return valve_claim_refusal(
             aid=action_id, wid=item.id, verb="approve", outcome=lost, already_done=_JUDGED
         )
+    did_not_run = (
+        ""
+        if judgement is None or getattr(judgement, "outcome", None) != JUDGEMENT_UNAVAILABLE
+        else (
+            " The item was admitted, but its pre-admission Definition-of-Done judgement "
+            f"did not run: {getattr(judgement, 'unavailable_cause', None)}."
+        )
+    )
     return valve_success(
         aid=action_id,
         wid=item.id,
         stage="human-valve-approve",
         status="ready",
         assignee=None,
-        msg=f"Approved {item.id}: pending-approval -> ready.",
+        msg=f"Approved {item.id}: pending-approval -> ready.{did_not_run}",
     )
