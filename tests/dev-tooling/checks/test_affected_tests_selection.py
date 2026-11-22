@@ -10,6 +10,7 @@ do, so the verdict is read from the arguments rather than from a nested run.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import stat
@@ -106,6 +107,46 @@ def test_a_module_selects_its_mirror_test_and_every_direct_or_transitive_importe
         "tests/pkg/test_a_edges.py",
         "tests/pkg/test_b.py",
         "tests/pkg/test_deep.py",
+        "tests/pkg/test_direct.py",
+    ]
+
+
+def test_a_coverage_execution_map_selects_its_recorded_tests_instead_of_hub_importers(
+    *, tmp_path: Path
+) -> None:
+    """A current, recorded map avoids the dispatcher-style import-hub fan-out."""
+    module = _load()
+    root = _repo(root=tmp_path / "repo")
+    _git(root=root, arguments=["add", "."])
+    _git(
+        root=root,
+        arguments=["-c", "user.name=t", "-c", "user.email=t@e.invalid", "commit", "-qm", "base"],
+    )
+    recorded_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    coverage_map = root / "dev-tooling" / "coverage-execution-map.json"
+    coverage_map.parent.mkdir(exist_ok=True)
+    _ = coverage_map.write_text(
+        json.dumps(
+            {
+                "default_branch_commit": recorded_commit,
+                "modules": {f"{_PKG}/a.py": ["tests/pkg/test_direct.py"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    _git(root=root, arguments=["add", coverage_map.relative_to(root).as_posix()])
+    _git(
+        root=root,
+        arguments=["-c", "user.name=t", "-c", "user.email=t@e.invalid", "commit", "-qm", "map"],
+    )
+
+    outcome = module.select(root=root, changed=[f"{_PKG}/a.py"])
+
+    assert list(outcome.tests) == [
+        "tests/pkg/test_a.py",
+        "tests/pkg/test_a_edges.py",
         "tests/pkg/test_direct.py",
     ]
 
