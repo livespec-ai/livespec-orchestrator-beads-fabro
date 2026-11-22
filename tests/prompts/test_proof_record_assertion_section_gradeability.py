@@ -49,9 +49,10 @@ _PROMPTS_DIR = (
 )
 
 # What makes a prompt a RECORD PUBLISHER — the same two marks the size-budget
-# module derives on, for the same reason: either alone is too loose.
+# module derives on, for the same reason: either alone is too loose. The replay
+# stage uses the broker executable while capture retains its direct forge call.
 _RECORD_TITLE = "Proof of Done —"
-_POST_CALL = "gh pr comment"
+_POST_CALL_MARKERS = ("gh pr comment", "publication_broker.py")
 
 _KNOWN_PUBLISHERS = ("proof-capture.md", "proof-verify.md")
 
@@ -65,7 +66,7 @@ def _publisher_prompts() -> tuple[str, ...]:
             one.name
             for one in _PROMPTS_DIR.glob("*.md")
             if _RECORD_TITLE in one.read_text(encoding="utf-8")
-            and _POST_CALL in one.read_text(encoding="utf-8")
+            and any(marker in one.read_text(encoding="utf-8") for marker in _POST_CALL_MARKERS)
         )
     )
 
