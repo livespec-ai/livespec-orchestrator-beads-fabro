@@ -39,6 +39,8 @@ class IncidentAttempt:
     repayment_required: bool
     # None is a schema-1 record written before the explicit carrier model.
     carrier: IncidentCarrier | None = None
+    # Exact workflow paths a maintainer-attested receipt authorized at THIS generation.
+    workflow_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -125,6 +125,7 @@ def test_current_attempt_binds_every_identity_and_the_complete_landed_set() -> N
     assert isinstance(result, IncidentReading)
     assert asdict(result.attempt) == _attempt() | {
         "carrier": None,
+        "workflow_paths": (),
         "landed_commits": ("b" * 40,),
         "landed_trees": ("c" * 40,),
         "original_paths": ("app.py",),

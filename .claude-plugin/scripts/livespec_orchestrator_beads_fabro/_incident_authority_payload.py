@@ -65,7 +65,15 @@ _TEXT_FIELDS = (
 )
 _QUERY_FIELDS = frozenset(("attempt_id", "phase", "operation_id", "generation", "owner"))
 _ATTEMPT_FIELDS = frozenset(f.name for f in fields(IncidentAttempt))
-_LEGACY_FIELDS = _ATTEMPT_FIELDS - {"carrier"}
+_OPTIONAL_FIELDS = frozenset(("carrier", "workflow_paths"))
+_DROPPED_KEYS: tuple[frozenset[str], ...] = (
+    frozenset(),
+    frozenset(("carrier",)),
+    frozenset(("workflow_paths",)),
+    _OPTIONAL_FIELDS,
+)
+_ACCEPTED_KEY_SETS = frozenset(_ATTEMPT_FIELDS - dropped for dropped in _DROPPED_KEYS)
+_WORKFLOW_PREFIX = ".github/workflows/"
 
 
 def decode_record(*, text: object, marker: str, keys: frozenset[str]) -> dict[str, Any] | None:
@@ -104,6 +112,20 @@ def _paths(*, values: tuple[str, ...]) -> bool:
         and str(PurePosixPath(v)) == v
         for v in values
     )
+
+
+def _workflow_paths(*, row: dict[str, Any], original: tuple[str, ...]) -> tuple[str, ...] | None:
+    """An absent list is empty; a present one is non-empty, scoped and inside the diff."""
+    if "workflow_paths" not in row:
+        return ()
+    listed = _texts(raw=row["workflow_paths"])
+    scoped = (
+        listed is not None
+        and _paths(values=listed)
+        and all(v.startswith(_WORKFLOW_PREFIX) and v != _WORKFLOW_PREFIX for v in listed)
+        and set(listed).issubset(original)
+    )
+    return listed if scoped else None
 
 
 def _valid_identity(*, row: dict[str, Any]) -> bool:
@@ -149,10 +171,10 @@ def unsupported_carrier(*, value: object) -> bool:
 
 def decode_attempt(*, value: object) -> IncidentAttempt | None:
     """Decode the complete snapshot without accepting bools as numeric ids."""
-    if not isinstance(value, dict) or frozenset(cast("dict[str, object]", value)) not in {
-        _ATTEMPT_FIELDS,
-        _LEGACY_FIELDS,
-    }:
+    if (
+        not isinstance(value, dict)
+        or frozenset(cast("dict[str, object]", value)) not in _ACCEPTED_KEY_SETS
+    ):
         return None
     row = cast("dict[str, Any]", value)
     raw_carrier = row.get("carrier")
@@ -167,10 +189,12 @@ def decode_attempt(*, value: object) -> IncidentAttempt | None:
     deferred = _texts(raw=row["deferred_work"])
     if commits is None or trees is None or paths is None or deferred is None:
         return None
+    workflow_paths = _workflow_paths(row=row, original=paths)
     if (
         len(commits) != len(trees)
         or not all(_sha(value=v) for v in commits + trees)
         or not _paths(values=paths)
+        or workflow_paths is None
     ):
         return None
     return IncidentAttempt(
@@ -190,14 +214,17 @@ def decode_attempt(*, value: object) -> IncidentAttempt | None:
         deferred_work=deferred,
         repayment_required=row["repayment_required"],
         carrier=carrier,
+        workflow_paths=workflow_paths,
     )
 
 
 def attempt_record(*, attempt: IncidentAttempt) -> dict[str, Any]:
-    """Serialize a snapshot; a schema-1 attempt without a carrier keeps its exact bytes."""
+    """Serialize a snapshot; a record without a carrier or workflow_paths keeps its exact bytes."""
     record = asdict(attempt)
     if attempt.carrier is None:
         del record["carrier"]
+    if not attempt.workflow_paths:
+        del record["workflow_paths"]
     return record
 
 

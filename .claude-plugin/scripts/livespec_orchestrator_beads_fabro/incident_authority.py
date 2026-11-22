@@ -63,6 +63,7 @@ __all__: list[str] = [
     "GenesisRequest",
     "IncidentAttempt",
     "IncidentReading",
+    "attest_incident_workflow_paths",
     "carrier_selection",
     "close_drill",
     "commit_incident_transition",
@@ -103,6 +104,23 @@ def commit_incident_transition(
 ) -> IncidentReading | AuthorityRefusal:
     """Serialize an existing chain; entry and factory fencing remain separate."""
     return commit_transition(client=client, observed=observed, successor=successor)
+
+
+def attest_incident_workflow_paths(
+    *, client: BeadsClient, observed: IncidentReading, successor: IncidentAttempt
+) -> IncidentReading | AuthorityRefusal:
+    """The maintainer-attested receipt operation: the only writer of `workflow_paths`.
+
+    The list lives on one generation only; the next transition must clear it, so a
+    reading is trusted for it only while that generation is current.
+    """
+    if not successor.workflow_paths:
+        return AuthorityRefusal(
+            code="incident-transition-invalid-successor", detail=observed.attempt.item_id
+        )
+    return commit_transition(
+        client=client, observed=observed, successor=successor, attested_workflow_paths=True
+    )
 
 
 def publish_incident_genesis(

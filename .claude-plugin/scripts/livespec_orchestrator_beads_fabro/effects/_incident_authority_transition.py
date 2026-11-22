@@ -78,9 +78,11 @@ def _read(
     )
 
 
-def _valid_successor(*, before: IncidentAttempt, after: IncidentAttempt) -> bool:
+def _valid_successor(*, before: IncidentAttempt, after: IncidentAttempt, attested: bool) -> bool:
     return (
-        before.repository == after.repository
+        # Only an attested receipt writes the list, and it never carries forward.
+        (attested or not after.workflow_paths)
+        and before.repository == after.repository
         and before.item_id == after.item_id
         and after.generation == before.generation + 1
         and before.operation_id != after.operation_id
@@ -139,11 +141,17 @@ def _close(
 
 
 def _validated_successor(
-    *, observed: IncidentReading, successor: IncidentAttempt, allow_drill_close: bool
+    *,
+    observed: IncidentReading,
+    successor: IncidentAttempt,
+    allow_drill_close: bool,
+    attested: bool,
 ) -> IncidentAttempt | AuthorityRefusal:
     """Decode the canonical successor and reserve `drill-closed` for its action."""
     decoded = decode_attempt(value=parse_json(text=json.dumps(attempt_record(attempt=successor))))
-    if decoded is None or not _valid_successor(before=observed.attempt, after=decoded):
+    if decoded is None or not _valid_successor(
+        before=observed.attempt, after=decoded, attested=attested
+    ):
         return AuthorityRefusal(
             code="incident-transition-invalid-successor", detail=observed.attempt.item_id
         )
@@ -160,9 +168,13 @@ def _commit(
     observed: IncidentReading,
     successor: IncidentAttempt,
     allow_drill_close: bool,
+    attested: bool,
 ) -> IncidentReading | AuthorityRefusal:
     decoded = _validated_successor(
-        observed=observed, successor=successor, allow_drill_close=allow_drill_close
+        observed=observed,
+        successor=successor,
+        allow_drill_close=allow_drill_close,
+        attested=attested,
     )
     if isinstance(decoded, AuthorityRefusal):
         return decoded
@@ -198,6 +210,7 @@ def commit_transition(
     observed: IncidentReading,
     successor: IncidentAttempt,
     allow_drill_close: bool = False,
+    attested_workflow_paths: bool = False,
 ) -> IncidentReading | AuthorityRefusal:
     """Commit one next generation, or recover a retry without another effect."""
     try:
@@ -206,6 +219,7 @@ def commit_transition(
             observed=observed,
             successor=successor,
             allow_drill_close=allow_drill_close,
+            attested=attested_workflow_paths,
         )
     except _LEDGER_ERRORS as exc:
         # Keep an unknown candidate: deleting it could sever our own successful
