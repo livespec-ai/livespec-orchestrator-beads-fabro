@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.345.3](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.345.2...v0.345.3) (2026-11-22)
+
+
+### Bug Fixes
+
+* a seeded launch of a complete preserved tree reaches publication only through the run's own stages (bd-ib-orez2i) ([ca38608](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/ca38608af88abe2fddf15cfd1f9b703113d09fc1))
+* **bd-ib-ssipvb:** the credential helper serves a real git fetch over http ([3616b43](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/3616b43d17170b4908b0da8bf3111391af380fe4))
+* only a seeded run's untouched carried seed takes the carried-seed route to commit_green (bd-ib-orez2i) ([6fb94f0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/6fb94f05f653bcbd022fd394bd46dea27dd04fd6))
+* the app-reach preflight journals an unreadable installation listing as unknown and pins the 3668528 incident (bd-ib-bt73a7) ([32cb42e](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/32cb42e3fd9ce60e550f1cac70ef64fda85bc864))
+* the app-reach preflight refuses a target the serving App's installation does not cover, even when the target is readable (bd-ib-bt73a7) ([f707d06](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/f707d068ead4051345d48063368b5dd6180d79a2))
+* the publication guard takes the stage from the dispatcher record, not LIVESPEC_AGENT_STAGE (bd-ib-ssipvb) ([f8e19b1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/f8e19b1f615b11a7bf450514a555993107e3762e))
+
 ## [0.345.2](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.345.1...v0.345.2) (2026-11-22)
 
 
