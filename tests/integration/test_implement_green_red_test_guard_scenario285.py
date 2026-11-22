@@ -61,6 +61,11 @@ def _repo_after_the_red_commit(*, tmp_path: Path) -> tuple[Path, str]:
         "TDD-Red-Test-File-Checksum: sha256:fixture\n"
     )
     _git(repo=repo, argv=["commit", "--quiet", "-m", message])
+    # A completed Green turn leaves a recorded preview result, and the gate
+    # refuses a handoff without one, so the fixture starts from a clean one.
+    _ = (repo / ".git" / "livespec-implement-gate-preview-green-result.json").write_text(
+        '{"failed_targets": [], "preview_ran": true, "status": 0}\n', encoding="utf-8"
+    )
     return repo, _git(repo=repo, argv=["rev-parse", "HEAD"])
 
 
