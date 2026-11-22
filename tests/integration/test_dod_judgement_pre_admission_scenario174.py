@@ -248,9 +248,10 @@ def test_scenario174_the_approve_summary_discloses_an_unrun_judgement(
     result = run_action(repo=repo, action_id="approve:bd-ib-174")
 
     assert result["status"] == "green"
-    assert "admitted" in result["summary"]
-    assert "did not run" in result["summary"]
-    assert "no-eligible-model" in result["summary"]
+    assert (
+        "The item was admitted, but its pre-admission Definition-of-Done judgement "
+        "did not run: no-eligible-model." in result["summary"]
+    )
     assert _stored(repo=repo).status == "ready"
 
 
