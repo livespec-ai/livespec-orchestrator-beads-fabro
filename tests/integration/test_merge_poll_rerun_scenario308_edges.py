@@ -17,6 +17,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
     PollPolicy,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_merge import await_merge
+from livespec_orchestrator_beads_fabro.commands._dispatcher_failed_jobs_classify import (
+    classify_failed_job,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import build_plan
 
 
@@ -115,7 +118,7 @@ def _plan(*, repo: Path):
 
 
 def _await(*, tmp_path: Path, queue: list[CommandResult], attempts: int = 2, remaining: int = 0):
-    (tmp_path / ".beads").mkdir(exist_ok=True)
+    (tmp_path / ".beads").mkdir(parents=True, exist_ok=True)
     runner = _Runner(queue=queue)
     journal = _Journal()
     outcome = await_merge(
@@ -165,83 +168,136 @@ def _blocked(outcome: object) -> DispatchOutcome:
     return outcome
 
 
-def test_scenario308_all_infrastructure_rerun_outcomes(tmp_path: Path) -> None:  # noqa: PLR0915
-    """Exercise all seven Scenario 308 sub-scenarios against merge polling."""
-    teardown = _infrastructure_queue(log="container implementation failed")
-    teardown.append(
-        _ok(stdout=json.dumps({"number": 7, "state": "MERGED", "mergeCommit": {"oid": "cafe"}}))
-    )
-    outcome, runner, journal = _await(tmp_path=tmp_path, queue=teardown)
+_MERGED = json.dumps({"number": 7, "state": "MERGED", "mergeCommit": {"oid": "cafe"}})
+_PYTEST_FAILURE_LOG = "FAILED tests/ordinary.py::test_failure - AssertionError"
+_TEARDOWN_LOG = "container implementation failed"
+
+
+def _bd_creates(runner: _Runner) -> list[list[str]]:
+    return [call for call in runner.calls if call[:2] == ["bd", "create"]]
+
+
+def _changed_file_reads(runner: _Runner) -> list[list[str]]:
+    return [call for call in runner.calls if call[:3] == ["gh", "pr", "diff"]]
+
+
+def _assert_teardown_rerun_files_flake(*, tmp_path: Path) -> None:
+    queue = [*_infrastructure_queue(log=_TEARDOWN_LOG), _ok(stdout=_MERGED)]
+    outcome, runner, journal = _await(tmp_path=tmp_path, queue=queue)
     assert not isinstance(outcome, DispatchOutcome)
     assert _rerun_calls(runner) == [["gh", "run", "rerun", "42", "--failed"]]
     assert _rerun_rows(journal)[0]["failed_jobs"] == [
-        {
-            "name": "ci",
-            "class": "runner-teardown",
-            "evidence": ("log: container implementation failed",),
-        }
+        {"name": "ci", "class": "runner-teardown", "evidence": (f"log: {_TEARDOWN_LOG}",)}
     ]
-    assert any(call[:2] == ["bd", "create"] for call in runner.calls)
+    assert [call[:6] for call in _bd_creates(runner)] == [
+        ["bd", "create", "--type", "bug", "--title", "Flake: failed jobs re-run 42"]
+    ]
+    assert _bd_creates(runner)[0][6:] == [
+        "--description",
+        "livespec-merge-poll-failed-jobs-rerun\nworkflow-run: 42\njob: ci\n"
+        f"class: runner-teardown\nevidence: log: {_TEARDOWN_LOG}",
+    ]
 
-    oom = _infrastructure_queue(log="pytest tests/untouched.py::test_memory\noom-kill")
-    oom.append(
-        _ok(stdout=json.dumps({"number": 7, "state": "MERGED", "mergeCommit": {"oid": "cafe"}}))
-    )
-    outcome, runner, journal = _await(tmp_path=tmp_path, queue=oom)
+
+def _assert_oom_kill_rerun(*, tmp_path: Path) -> None:
+    log = "pytest tests/untouched.py::test_memory\noom-kill"
+    queue = [*_infrastructure_queue(log=log), _ok(stdout=_MERGED)]
+    outcome, runner, journal = _await(tmp_path=tmp_path, queue=queue)
     assert not isinstance(outcome, DispatchOutcome)
     assert _rerun_calls(runner) == [["gh", "run", "rerun", "42", "--failed"]]
     assert _rerun_rows(journal)[0]["failed_jobs"] == [
         {"name": "ci", "class": "oom-kill", "evidence": ("oom-kill: oom-kill",)}
     ]
+    assert len(_bd_creates(runner)) == 1
 
-    rerun_fails = [
-        *_infrastructure_queue(log="container implementation failed"),
+
+def _assert_failed_rerun_attempt_ends_blocked(*, tmp_path: Path) -> None:
+    queue = [
+        *_infrastructure_queue(log=_TEARDOWN_LOG),
         _ok(stdout=_failure("ci")),
         _ok(stdout=_required("ci")),
         _ok(stdout=json.dumps({"attempt": 2})),
     ]
-    outcome, runner, journal = _await(tmp_path=tmp_path, queue=rerun_fails)
+    outcome, runner, journal = _await(tmp_path=tmp_path, queue=queue)
     _blocked(outcome)
     assert len(_rerun_calls(runner)) == 1
     assert _rerun_rows(journal)[-1]["outcome"] == "required-check-failed"
 
-    rejected = _infrastructure_queue(log="container implementation failed")
-    rejected[-2] = CommandResult(exit_code=1, stdout="", stderr="forge rejected rerun")
-    outcome, runner, journal = _await(tmp_path=tmp_path, queue=rejected, remaining=1)
+
+def _assert_rejected_rerun_request_ends_blocked(*, tmp_path: Path) -> None:
+    queue = _infrastructure_queue(log=_TEARDOWN_LOG)
+    queue[-2] = CommandResult(exit_code=1, stdout="", stderr="forge rejected rerun")
+    outcome, runner, journal = _await(tmp_path=tmp_path, queue=queue, remaining=1)
     _blocked(outcome)
     assert len(_rerun_calls(runner)) == 1
     assert _rerun_rows(journal)[-1]["outcome"] == "rejected"
     assert _rerun_rows(journal)[-1]["failure_reason"] == "forge rejected rerun"
+    assert not _bd_creates(runner)
 
-    touched_oom = [
+
+def _assert_oom_after_touched_failing_test_never_reruns(*, tmp_path: Path) -> None:
+    log = "FAILED tests/touched.py::test_memory\noom-kill"
+    queue = [
         _ok(stdout=_failure("ci")),
         _ok(stdout=_required("ci")),
         _ok(stdout=_jobs(_job(identifier=12))),
-        _ok(stdout="FAILED tests/touched.py::test_memory\noom-kill"),
+        _ok(stdout=log),
         _ok(stdout="tests/touched.py\n"),
     ]
-    outcome, runner, _ = _await(tmp_path=tmp_path, queue=touched_oom)
+    outcome, runner, _ = _await(tmp_path=tmp_path, queue=queue)
     _blocked(outcome)
+    assert classify_failed_job(job=_job(identifier=12), log=log).kind == "oom-kill"
+    assert len(_changed_file_reads(runner)) == 1
     assert not _rerun_calls(runner)
-    assert not any(call[:2] == ["bd", "create"] for call in runner.calls)
+    assert not _bd_creates(runner)
 
-    unattributed = [
+
+def _assert_any_unattributed_job_prevents_rerun(*, tmp_path: Path) -> None:
+    queue = [
         _ok(stdout=_failure("ci", "lint")),
         _ok(stdout=_required("ci", "lint")),
         _ok(stdout=_jobs(_job(identifier=12, name="ci"), _job(identifier=13, name="lint"))),
-        _ok(stdout="container implementation failed"),
-        _ok(stdout="FAILED tests/ordinary.py::test_failure - AssertionError"),
+        _ok(stdout=_TEARDOWN_LOG),
+        _ok(stdout=_PYTEST_FAILURE_LOG),
     ]
-    outcome, runner, _ = _await(tmp_path=tmp_path, queue=unattributed)
+    outcome, runner, _ = _await(tmp_path=tmp_path, queue=queue)
     _blocked(outcome)
+    assert classify_failed_job(job=_job(identifier=12), log=_TEARDOWN_LOG).kind == "runner-teardown"
+    assert (
+        classify_failed_job(job=_job(identifier=13, name="lint"), log=_PYTEST_FAILURE_LOG).kind
+        == "unattributed"
+    )
+    assert not _changed_file_reads(runner)
     assert not _rerun_calls(runner)
+    assert not _bd_creates(runner)
 
-    pytest_failure = [
+
+def _assert_pytest_failure_is_unattributed_and_never_reruns(*, tmp_path: Path) -> None:
+    queue = [
         _ok(stdout=_failure("ci")),
         _ok(stdout=_required("ci")),
         _ok(stdout=_jobs(_job(identifier=12))),
-        _ok(stdout="FAILED tests/ordinary.py::test_failure - AssertionError"),
+        _ok(stdout=_PYTEST_FAILURE_LOG),
     ]
-    outcome, runner, _ = _await(tmp_path=tmp_path, queue=pytest_failure)
+    outcome, runner, _ = _await(tmp_path=tmp_path, queue=queue)
     _blocked(outcome)
+    classification = classify_failed_job(job=_job(identifier=12), log=_PYTEST_FAILURE_LOG)
+    assert (classification.kind, classification.evidence) == ("unattributed", ())
+    assert not _changed_file_reads(runner)
     assert not _rerun_calls(runner)
+    assert not _bd_creates(runner)
+
+
+def test_scenario308_all_infrastructure_rerun_outcomes(tmp_path: Path) -> None:
+    """Exercise all seven Scenario 308 sub-scenarios against merge polling."""
+    cases = (
+        _assert_teardown_rerun_files_flake,
+        _assert_oom_kill_rerun,
+        _assert_failed_rerun_attempt_ends_blocked,
+        _assert_rejected_rerun_request_ends_blocked,
+        _assert_oom_after_touched_failing_test_never_reruns,
+        _assert_any_unattributed_job_prevents_rerun,
+        _assert_pytest_failure_is_unattributed_and_never_reruns,
+    )
+    for index, case in enumerate(cases):
+        case(tmp_path=tmp_path / f"case-{index}")
