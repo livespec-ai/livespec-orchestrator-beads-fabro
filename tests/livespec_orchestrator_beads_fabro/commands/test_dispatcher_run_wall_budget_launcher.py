@@ -30,7 +30,13 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import WatchedFabroLauncher
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import DispatchPlan, build_plan
+from livespec_orchestrator_beads_fabro.commands._dispatcher_preserved_tree_publish import (
+    PreservedTree,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget import RunWallBudget
+from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_publish import (
+    BudgetPublisher,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_records import (
     RUN_WALL_BUDGET_EXCEEDED_STAGE,
 )
@@ -60,10 +66,27 @@ _PS_ROW_TEMPLATE = (
 _INSPECT_TEMPLATE = '[{{"run_id": "{run}", "status": {{"kind": "{kind}"}}}}]'
 
 
+def _published_tree(
+    self: BudgetPublisher, *, plan: object, runner: object, journal: object, run_id: str
+) -> PreservedTree:
+    """A publication that always lands, so the launcher cases grade the loop alone."""
+    _ = (self, plan, runner, journal, run_id)
+    return PreservedTree(
+        ref=f"refs/livespec/preserved-publish/{_ITEM_ID}/{'c' * 40}",
+        commit="c" * 40,
+        file_count=1,
+        scope="committed",
+        source="run",
+    )
+
+
 @pytest.fixture(autouse=True)
 def _fresh_tenant(monkeypatch: pytest.MonkeyPatch) -> object:
     """The hermetic in-memory tenant, flipped on through its one env seam."""
     monkeypatch.setenv("LIVESPEC_BEADS_FAKE", "1")
+    # The launcher wires the production publisher; its publication is covered by
+    # `test_dispatcher_run_wall_budget_publish*`, so here it answers a tree.
+    monkeypatch.setattr(BudgetPublisher, "publish", _published_tree)
     reset_fake_singleton()
     yield
     reset_fake_singleton()
@@ -183,6 +206,9 @@ class _ScriptedFabroRunner:
                 stdout=_INSPECT_TEMPLATE.format(run=_RUN_ID, kind=self.status_kind),
                 stderr="",
             )
+        if verb == "ls-remote":
+            # An answered listing holding no ref: the publication, not origin, releases.
+            return CommandResult(exit_code=0, stdout="", stderr="")
         assert verb == "events", verb
         return CommandResult(exit_code=0, stdout=_FROZEN_EVENTS, stderr="")
 
@@ -267,7 +293,8 @@ def test_a_running_run_past_its_budget_is_cancelled_through_the_same_loop(
     assert exceeded[0]["dispatch_id"] == "dispatch-01"
     assert exceeded[0]["budget_seconds"] == 3600.0
     assert exceeded[0]["budget_layer"] == REPOSITORY_LAYER
-    assert isinstance(exceeded[0]["preserved_pointer"], str)
+    # The published tree, not the pointer, is what released the cancel.
+    assert str(exceeded[0]["preserved_ref"]).startswith("refs/livespec/preserved-publish/")
     # The budget arm acted, not the stall arm -- though the frozen event stream
     # means this run would also have satisfied the stall rule.
     assert all(record.get("stage") != STALL_CANCEL_STAGE for record in journal.records)
