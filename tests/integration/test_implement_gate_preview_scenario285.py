@@ -145,6 +145,35 @@ def test_gate_preview_runs_the_hook_against_a_disposable_staged_tree_and_unsets_
     )
 
 
+def test_gate_preview_records_the_hook_output_tail_when_no_failed_target_summary_exists(
+    tmp_path: Path,
+) -> None:
+    """An unstructured hook refusal retains its own diagnostic for Green's refusal."""
+    preview = importlib.import_module(_MODULE)
+    repo, runner, env = _preview_repository(tmp_path=tmp_path, preview=preview)
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' 'running staged-file pre-check'\n"
+        "printf '%s\\n' 'type pre-check rejected created.py' >&2\n"
+        "exit 23\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+
+    completed = _run(
+        repo=repo,
+        env=env,
+        argv=[sys.executable, str(runner), "green"],
+        check=False,
+    )
+
+    report = cast("dict[str, Any]", json.loads(completed.stdout.splitlines()[-1]))
+    assert completed.returncode == 23
+    assert report["failed_targets"] == []
+    assert report.get("output_tail", "").endswith("type pre-check rejected created.py\n")
+
+
 def test_green_preview_uses_the_implement_turns_affected_tests_gate(tmp_path: Path) -> None:
     """A one-module Green preview takes the hook's scoped route, not its full-suite route."""
     preview = importlib.import_module(_MODULE)
