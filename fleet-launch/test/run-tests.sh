@@ -4317,6 +4317,39 @@ else
     fail "an unreadable credential_wrapper did not make the slot-narrowing wrapper refuse (rc=$unreadable_rc): $unreadable_out"
 fi
 
+scenario "45a. the slot-narrowing wrapper stamps its forced judge slot as an OTel spend attribute"
+# The child only prints its OTel resource attributes.  The fixture's credential
+# values must therefore never appear in either capture.
+slot_otel_probe='printf "%s" "${OTEL_RESOURCE_ATTRIBUTES:-}"'
+narrow_otel_in() {
+    local tenant=$1 attributes=$2 judge_slot=$3
+    (cd "$tenant" && OTEL_RESOURCE_ATTRIBUTES="$attributes" FLEET_LAUNCH_DEFAULT_WRAPPER="$CASE_DIR/family-wrapper" FLEET_LAUNCH_SLOTNARROW_EXCLUDED_SLOTS="ANTHROPIC_1 ANTHROPIC_3" FLEET_LAUNCH_SLOTNARROW_JUDGE_SLOT="$judge_slot" \
+        WRAPPER="$LAUNCH_DIR/wrappers/with-livespec-env-slotnarrow.sh" "$LAUNCH_DIR/wrappers/with-livespec-env-slotnarrow.sh" -- sh -c "$slot_otel_probe")
+}
+has_exactly_one_attribute() {
+    local attributes=$1 expected=$2
+    [ "$(printf '%s' "$attributes" | tr ',' '\n' | grep -cxF "$expected")" = 1 ]
+}
+has_no_credential_value() {
+    case $1 in
+        *stub-one*|*stub-four*|*stub-seven*|*stub-plain*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+otel_input='service.namespace=livespec-family,spend.slot=interactive,telemetry.sdk.name=codex'
+default_otel=$(narrow_otel_in "$CASE_DIR/route-c-tenant" "$otel_input" ANTHROPIC_4)
+override_otel=$(narrow_otel_in "$CASE_DIR/route-c-tenant" "$otel_input" ANTHROPIC_7)
+if has_exactly_one_attribute "$default_otel" 'service.namespace=livespec-family' \
+    && has_exactly_one_attribute "$default_otel" 'telemetry.sdk.name=codex' \
+    && has_exactly_one_attribute "$default_otel" 'spend.slot=anthropic-4' \
+    && [ "$(printf '%s' "$default_otel" | tr ',' '\n' | grep -c '^spend\.slot=')" = 1 ] \
+    && has_exactly_one_attribute "$override_otel" 'spend.slot=anthropic-7' \
+    && [ "$(printf '%s' "$override_otel" | tr ',' '\n' | grep -c '^spend\.slot=')" = 1 ] \
+    && has_no_credential_value "$default_otel" && has_no_credential_value "$override_otel"; then
+    pass "the slot-narrowing wrapper stamps a replaced spend.slot for its default and overridden judge slots without exposing credentials"
+else
+    fail "the slot-narrowing wrapper did not stamp exactly one lower-case hyphenated spend.slot for both judge slots (default: $default_otel; override: $override_otel)"
+fi
 scenario "46. early exits are bounded per window, and a -refused stage is a permanent refusal"
 new_case reticket-bound
 open_boards
