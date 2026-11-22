@@ -357,8 +357,8 @@ def _installation_coverage(
     `repos/<target>` cannot tell an App that is installed on the target from one
     that is not. The installation's own repository listing can, and a target
     absent from a readable listing is the definite negative. A listing that
-    cannot be read keeps the read-reach answer rather than refusing on a
-    reading nobody took.
+    cannot be read is UNKNOWN (`reaches` None): it never refuses, because only a
+    definite negative does, and it is journaled so the fail-open stays visible.
     """
     listing = runner.run(
         argv=list(_INSTALLATION_LISTING_ARGV),
@@ -370,8 +370,12 @@ def _installation_coverage(
         return AppReachReading(
             app_identity=app_identity,
             target=target,
-            reaches=True,
-            detail="the serving App's installation token reads the target repository",
+            reaches=None,
+            detail=(
+                "the target is readable but the serving App's installation repository "
+                f"listing could not be read, so installation coverage is unknown: "
+                f"{listing.stderr.strip()}"
+            ),
         )
     covered = {line.strip().casefold() for line in listing.stdout.splitlines()}
     if target.casefold() in covered:
