@@ -283,7 +283,11 @@ def test_the_recapture_findings_reach_proof_capture_by_both_channels() -> None:
 
     review = _prompt(name="review.md")
     assert "Review findings — run " in review
-    assert "gh pr comment" in review
+    # The review record is posted through the publication broker (bd-ib-tux35w),
+    # not by the turn's own `gh pr comment`; the channel is the broker's comment.
+    assert "publication_broker.py" in review
+    assert '"operation": "comment"' in review
+    assert "gh pr comment" not in review
     assert "post **exactly one NEW comment** on the same draft pull request" in review
 
     capture_prompt = _prompt(name="proof-capture.md")
