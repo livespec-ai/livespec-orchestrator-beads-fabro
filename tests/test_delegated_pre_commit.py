@@ -116,6 +116,27 @@ def test_pre_commit_delegates_before_locally_falling_back(*, tmp_path: Path) -> 
     assert gated_calls == ["just check-pre-commit-doc-only"]
 
 
+def test_staged_precheck_runs_before_the_pre_commit_aggregate(*, tmp_path: Path) -> None:
+    """A staged Python file is linted and type-checked before delegation starts."""
+    repo, environment, log = _local_fallback_repository(tmp_path=tmp_path)
+
+    completed = subprocess.run(
+        ["bash", str(_PRE_COMMIT_SCRIPT)],
+        cwd=repo,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert log.read_text(encoding="utf-8").splitlines() == [
+        "run python -m livespec_dev_tooling.workflow_checks.staged_precheck",
+        "run python -m livespec_dev_tooling.pre_commit_delegate run",
+        "check-skipping check-codex-skill-picker check-fleet-launch",
+    ]
+
+
 def _local_fallback_repository(*, tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
     """Create a staged Python change and stand-ins for the local fallback."""
     repo = tmp_path / "repository"
