@@ -54,6 +54,17 @@ PROGRESS_SECONDS_VARIABLE = "LIVESPEC_GATE_PREVIEW_PROGRESS_SECONDS"
 DEFAULT_PROGRESS_SECONDS = 30
 NOT_FINISHED_EXIT = 75
 OUTPUT_TAIL_LINES = 40
+# A tail line carrying a credential-shaped value is replaced wholesale, as the
+# needs-human writer does: a tokenized URL, a well-known token prefix, or an
+# assignment to a credential-named variable.  The record is durable and the
+# completion node copies the tail into the handoff and stage cause.
+CREDENTIAL_LINE = re.compile(
+    r"[a-zA-Z0-9_-]+:[^@\s/]+@"
+    r"|\b(?:gh[pousr]_|github_pat_|glpat-|xox[abprs]-|sk-)[A-Za-z0-9_-]{8,}"
+    r"|(?:token|secret|password|passwd|api[_-]?key|authorization|bearer)\w*\s*[=:]\s*\S",
+    re.IGNORECASE,
+)
+REDACTION_MARKER = "[redacted]"
 
 
 def command(*argv, cwd, env=None, check=True):
@@ -132,7 +143,10 @@ def failed_targets(output):
 
 def output_tail(output):
     """Keep the final hook diagnostics available when no target summary exists."""
-    return "".join(output.splitlines(keepends=True)[-OUTPUT_TAIL_LINES:])
+    lines = output.splitlines(keepends=True)[-OUTPUT_TAIL_LINES:]
+    return "".join(
+        REDACTION_MARKER + "\n" if CREDENTIAL_LINE.search(line) else line for line in lines
+    )
 
 
 def skipped_environment():
