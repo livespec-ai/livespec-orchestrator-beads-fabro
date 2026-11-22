@@ -23,6 +23,7 @@ _VERBS = (
     "correct-unmerged-attempt",
     "complete-incident",
     "drill-close",
+    "retire",
 )
 
 

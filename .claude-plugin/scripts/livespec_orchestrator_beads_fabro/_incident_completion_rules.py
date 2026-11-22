@@ -33,6 +33,8 @@ __all__: list[str] = [
     "COMPLETION_PHASE",
     "DRILL_CLOSED_OBLIGATION",
     "DRILL_CLOSED_PHASE",
+    "RETIRED_OBLIGATION",
+    "RETIRED_PHASE",
     "IncidentAcceptanceScope",
     "IncidentCompletionEvidence",
     "acceptance_scope",
@@ -43,6 +45,9 @@ __all__: list[str] = [
 CLOSED_PHASE = "closed"
 DRILL_CLOSED_PHASE = "drill-closed"
 DRILL_CLOSED_OBLIGATION = "incident-drill-closed"
+# An abandoned chain the retire action ended: closed, never completed or repaid.
+RETIRED_PHASE = "retired"
+RETIRED_OBLIGATION = "incident-retired"
 # The one phase from which the incident may record `closed`: the current normal
 # repayment carrier merged and awaits final proof.
 COMPLETION_PHASE = REPAYMENT_PHASES[-1]
@@ -129,6 +134,8 @@ def completion_obligations(
         return ()
     if current.phase == DRILL_CLOSED_PHASE:
         return (DRILL_CLOSED_OBLIGATION,)
+    if current.phase == RETIRED_PHASE:
+        return (RETIRED_OBLIGATION,)
     outstanding = _carrier_obligations(current=current, evidence=evidence)
     outstanding += _master_ci_obligations(current=current, run=evidence.master_ci)
     if evidence.marker_paths is None:

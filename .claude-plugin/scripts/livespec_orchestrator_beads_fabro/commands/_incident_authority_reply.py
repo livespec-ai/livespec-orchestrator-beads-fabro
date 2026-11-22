@@ -32,6 +32,7 @@ from livespec_orchestrator_beads_fabro.incident_completion import IncidentComple
 from livespec_orchestrator_beads_fabro.incident_drill_close import DrillClose
 from livespec_orchestrator_beads_fabro.incident_normal_repayment import RepaymentEntry
 from livespec_orchestrator_beads_fabro.incident_regression_recovery import RecoveryEntry
+from livespec_orchestrator_beads_fabro.incident_retire import IncidentRetired
 from livespec_orchestrator_beads_fabro.io import write_stdout
 
 if TYPE_CHECKING:
@@ -50,6 +51,7 @@ _Reply = (
     | RecoveryEntry
     | IncidentCompletion
     | DrillClose
+    | IncidentRetired
 )
 _UNAVAILABLE = "incident-authority-unavailable"
 _OUTAGES = (

@@ -41,6 +41,7 @@ EXCEPTION_PHASES = frozenset({"repair", "master-observation", "reverting"})
 _REPAYMENT_PREFIX = "repayment"
 _CLOSED_PHASE = "closed"
 _DRILL_CLOSED_PHASE = "drill-closed"
+_RETIRED_PHASE = "retired"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -186,7 +187,11 @@ def _receipt(*, attempt: IncidentAttempt, repayment_outstanding: bool) -> Incide
 
 def receipts_from_history(*, history: tuple[IncidentAttempt, ...]) -> tuple[IncidentReceipt, ...]:
     """Every PR-bound attempt of one retained chain, owing repayment until the chain closes."""
-    outstanding = bool(history) and history[-1].phase not in (_CLOSED_PHASE, _DRILL_CLOSED_PHASE)
+    outstanding = bool(history) and history[-1].phase not in (
+        _CLOSED_PHASE,
+        _DRILL_CLOSED_PHASE,
+        _RETIRED_PHASE,
+    )
     receipts: list[IncidentReceipt] = []
     for attempt in history:
         receipt = _receipt(attempt=attempt, repayment_outstanding=outstanding)
