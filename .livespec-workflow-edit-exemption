@@ -1,8 +1,10 @@
 # Workflow-edit exemption — one exemption binds to one reviewed change.
 #
-# The change (maintainer ruling 2026-11-17, Honeycomb metrics must be fixed; reference fix
-# livespec-dev-tooling-pixkgb): the export-telemetry job's `if:` also admits merge_group runs.
-# MAINTAINER tier (approval:workflow-edit): the existing `if:` line is modified, so the
-# guard refuses a change=additive claim for it.
-work_item=bd-ib-ibnwha
-reason=The export-telemetry job also runs for merge_group runs so merge-queue runs emit ci.run spans to Honeycomb (maintainer ruling 2026-11-17; reference livespec-dev-tooling-pixkgb); one modified if: line, tier is maintainer.
+# The change: a new daily workflow, fleet-launch-full-proof.yml, that runs check-fleet-launch at
+# the full signal-race attempt counts (100 jittered, 200 resume-INT) so the per-PR gate can sample
+# fewer. ADDITIVE tier: a new file, no existing line modified. Authorized by the throughput
+# coordinator (legacy-coordinator-agent) with label approval:workflow-edit-additive on the item.
+work_item=bd-ib-ftfjda
+change=additive
+ci_runtime=no-significant-increase
+reason=Adds a scheduled full-count proof of fleet-launch scenario 23 so lowering the per-PR attempt defaults does not reduce what is proven; actionlint clean; no existing workflow line changes.

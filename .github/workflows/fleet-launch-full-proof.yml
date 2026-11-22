@@ -1,0 +1,54 @@
+# fleet-launch-full-proof.yml — the daily full-count signal-race proof for the fleet-launch harness.
+#
+# The per-PR check-fleet-launch gate samples scenario 23's statistical race probes a small
+# number of times (HARNESS_SIGNAL_SUBSTITUTION_ATTEMPTS default 40 jittered signals per case,
+# HARNESS_RESUME_INT_HOLD_ATTEMPTS default 10), because the full counts (100 and 200) ran
+# past the 900s scenario bound on a loaded runner and turned master red (run 44959373376,
+# bd-ib-ftfjda). This job runs the whole harness at the full counts once a day, with a
+# lifted scenario bound, and fails loudly (a red scheduled run) when a race reappears.
+
+name: Fleet-launch full-count proof
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  UV_HTTP_RETRIES: "5"
+  MISE_HTTP_RETRIES: "5"
+  # Lane-selected uv fetch bounds, as in ci.yml (self_hosted_uv_lane check).
+  UV_CONCURRENT_DOWNLOADS: ${{ contains(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]', 'ubuntu') && '50' || '4' }}
+  UV_HTTP_TIMEOUT: ${{ contains(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]', 'ubuntu') && '30' || '60' }}
+
+jobs:
+  full-proof:
+    name: check-fleet-launch at full attempt counts
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    timeout-minutes: 120
+    container:
+      image: ghcr.io/livespec-ai/livespec-fabro-sandbox:python-v1.233.0
+    env:
+      MISE_DATA_DIR: /root/.local/share/mise
+      MISE_NOT_FOUND_AUTO_INSTALL: "0"
+      HARNESS_SIGNAL_SUBSTITUTION_ATTEMPTS: "100"
+      HARNESS_RESUME_INT_HOLD_ATTEMPTS: "200"
+      HARNESS_SCENARIO_TIMEOUT_S: "3600"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prepare workspace (git trust, mise trust + install, uv sync)
+        run: |
+          git config --global --add safe.directory '*'
+          mise trust
+          mise install
+          uv sync --all-groups
+
+      - name: Run the fleet-launch harness at the full attempt counts
+        run: just check-fleet-launch
