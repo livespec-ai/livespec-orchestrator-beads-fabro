@@ -12,6 +12,9 @@ import subprocess
 from pathlib import Path
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_credential_use_guard import (
+    CREDENTIAL_EXPIRY_ENV_VAR,
+    CREDENTIAL_REQUIRED_REMAINING_ENV_VAR,
+    CREDENTIAL_USE_DEADLINE_ENV_VAR,
     guard_script_text,
 )
 
@@ -21,8 +24,14 @@ def _run_guard(*, tmp_path: Path, stage: str | None) -> str:
     script.write_text(guard_script_text(), encoding="utf-8")
     root = tmp_path / "bundle"
     root.mkdir()
+    isolated = {
+        "LIVESPEC_AGENT_STAGE",
+        CREDENTIAL_EXPIRY_ENV_VAR,
+        CREDENTIAL_REQUIRED_REMAINING_ENV_VAR,
+        CREDENTIAL_USE_DEADLINE_ENV_VAR,
+    }
     env = {
-        **{k: v for k, v in os.environ.items() if k != "LIVESPEC_AGENT_STAGE"},
+        **{k: v for k, v in os.environ.items() if k not in isolated},
         "LIVESPEC_CREDENTIAL_USE_UNPROTECTED": "1",
         "LIVESPEC_SANDBOX_GH_REFRESH_ROOT": str(root),
     }

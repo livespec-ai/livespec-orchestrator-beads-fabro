@@ -308,20 +308,13 @@ def test_the_ending_contract_states_the_verdict_form_and_grades_nothing() -> Non
     assert [word for word in _GRADING_WORDS if word in lowered] == []
 
 
-def test_the_host_prompt_names_its_inline_capabilities_and_never_directs_a_tool_call() -> None:
-    prompt = judgement_prompt(
-        gate_prompt=(
-            "Read /etc/livespec/sandbox-capabilities, then search SPECIFICATION/ "
-            "before deciding.\n"
-        ),
-        subject="work-item: bd-ib-ff5ohb",
+def test_the_host_prompt_preserves_capability_and_repository_directions_in_the_rubric() -> None:
+    rubric = (
+        "Read /etc/livespec/sandbox-capabilities, then search SPECIFICATION/ " "before deciding.\n"
     )
+    prompt = judgement_prompt(gate_prompt=rubric, subject="work-item: bd-ib-ff5ohb")
 
-    lowered = prompt.casefold()
-    assert "you have no tools" in lowered
-    assert "sandbox capabilities: terminal" in lowered
-    assert "/etc/livespec/sandbox-capabilities" not in lowered
-    assert "search specification/" not in lowered
+    assert prompt.startswith(rubric)
 
 
 def test_the_judge_is_handed_the_executing_builds_rubric_followed_only_by_those_two(
