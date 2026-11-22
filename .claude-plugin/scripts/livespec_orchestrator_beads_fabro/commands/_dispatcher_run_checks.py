@@ -17,6 +17,9 @@ from livespec_orchestrator_beads_fabro.commands._config import (
     resolve_fabro_factory,
 )
 from livespec_orchestrator_beads_fabro.commands._cross_repo import load_manifest
+from livespec_orchestrator_beads_fabro.commands._dispatcher_background_reconcile import (
+    run_reconcile,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_environment import (
     factory_declaration_refusal,
 )
@@ -303,7 +306,13 @@ def dispatch_preamble(
     # itself and cannot become one: `reconcile_runs_pass` absorbs its own
     # failures into a journal record and returns, because an unsurveyable
     # factory says nothing about whether this item may be dispatched.
-    _ = reconcile_runs_pass(args=args, repo=repo)
+    #
+    # Inside a `loop` tick the pass starts here and runs BESIDE the launch (the
+    # loop waits for it before it returns); anywhere else it runs inline. The
+    # arguments are copied so a later change to the launch's namespace cannot
+    # reach a pass already under way.
+    pass_args = argparse.Namespace(**vars(args))
+    run_reconcile(run=lambda: reconcile_runs_pass(args=pass_args, repo=repo))
     return janitor, None
 
 

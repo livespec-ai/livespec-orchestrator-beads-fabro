@@ -7,11 +7,13 @@ seam that runs it automatically, from ONE call site — `dispatch_preamble`.
 ONE call site, deliberately. The preamble is the head of every `dispatcher.py
 dispatch` AND of every `loop` iteration (`_dispatcher_loop_command._start_loop`
 calls it before `candidates(...)` selects anything), so a single call there is
-exactly "once per loop iteration, before selection" and "once before
-admission" at the same time. Adding a second call in the loop command would
-reconcile the same inventory twice per tick — two `fabro ps` round-trips per
-factory for one answer — so the wiring is a property of where the preamble
-sits, not of how many places call this.
+exactly "once per loop iteration" and "once per dispatch" at the same time. On a
+`loop` tick it starts there and runs BESIDE the launch rather than ahead of it
+(`_dispatcher_background_reconcile`, bd-ib-4ifdud), because a merged item's
+post-merge reconcile inside it can hold a gate Job for ten minutes. Adding a
+second call in the loop command would reconcile the same inventory twice per
+tick — two `fabro ps` round-trips per factory for one answer — so the wiring is a property of where
+the preamble sits, not of how many places call this.
 
 Reconciliation is NOT a precondition of dispatching. A factory that cannot be
 surveyed, a ledger that cannot be read, a config that will not parse — none of
