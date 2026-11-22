@@ -34,10 +34,14 @@ an ordering `gh pr list` does not promise.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_default_branch import (
+    resolve_default_branch,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandRunner
 from livespec_orchestrator_beads_fabro.effects import JsonParseFailure, parse_json
 
@@ -150,7 +154,7 @@ def merged_item_pull_request_argv(*, work_item_id: str) -> list[str]:
         "--search",
         work_item_id,
         "--json",
-        "number,state,headRefOid,mergedAt",
+        "number,state,headRefOid,mergedAt,title,baseRefName",
         "--limit",
         _LIST_LIMIT,
     ]
@@ -159,14 +163,19 @@ def merged_item_pull_request_argv(*, work_item_id: str) -> list[str]:
 def merged_item_pull_request(
     *, repo: Path, work_item_id: str, runner: CommandRunner
 ) -> BranchPullRequestRead:
-    """Ask the forge for the newest merged pull request that names this item.
+    """Ask the forge for the one merged hand redo whose title names this item.
 
     A factory publication can be closed unmerged while a hand redo lands the
     same item from another branch.  The proof-only arm belongs on that landed
-    pull request, not on the dead publication branch.  Its work-item search is
-    the same forge identity read used by stranded-claim recovery, so a hand
-    redo title such as ``fix: recover bd-ib-...`` remains discoverable after
-    its branch is deleted.
+    pull request, not on the dead publication branch.  The forge's work-item
+    search also matches bodies, so a later merge that merely MENTIONS the item
+    comes back beside the redo; a candidate therefore counts only when it merged
+    onto the repository's resolved default branch AND its title names the item,
+    the identity `reconcile-merged` grades a locally built item by (its body tier
+    is dropped for the same reason).  Exactly one candidate is the redo: none is
+    the forge's answer that no redo landed, and several are an ambiguity this
+    read refuses to settle by number, reported as unobserved so the closed
+    publication is retained rather than anchoring a proof on a guessed head.
     """
     result = runner.run(
         argv=merged_item_pull_request_argv(work_item_id=work_item_id),
@@ -175,7 +184,26 @@ def merged_item_pull_request(
     )
     if result.exit_code != 0:
         return BranchPullRequestRead(observed=False, pull_request=None)
-    return branch_pull_request_from_stdout(stdout=result.stdout)
+    parsed = parse_json(text=result.stdout)
+    if isinstance(parsed, JsonParseFailure) or not isinstance(parsed, list):
+        return BranchPullRequestRead(observed=False, pull_request=None)
+    title_names_item = re.compile(rf"(?<![\w-]){re.escape(work_item_id)}(?![\w-])")
+    named = [
+        (one, cast("dict[str, Any]", entry))
+        for entry in cast("list[object]", parsed)
+        if (one := _pull_request(entry_raw=entry)) is not None
+        and one.state == "MERGED"
+        and _title_names_item(entry_raw=entry, title_names_item=title_names_item)
+    ]
+    if not named:
+        return BranchPullRequestRead(observed=True, pull_request=None)
+    default_branch = resolve_default_branch(repo=repo, runner=runner)
+    if default_branch is None:
+        return BranchPullRequestRead(observed=False, pull_request=None)
+    candidates = [one for one, entry in named if entry.get("baseRefName") == default_branch]
+    if len(candidates) > 1:
+        return BranchPullRequestRead(observed=False, pull_request=None)
+    return BranchPullRequestRead(observed=True, pull_request=candidates[0] if candidates else None)
 
 
 def replacement_for_closed_publication(
@@ -187,6 +215,13 @@ def replacement_for_closed_publication(
     if hand_redo.observed and hand_redo.pull_request is not None:
         return hand_redo
     return published
+
+
+def _title_names_item(*, entry_raw: object, title_names_item: re.Pattern[str]) -> bool:
+    """Whether a listing entry's title names the item as a whole token."""
+    entry = cast("dict[str, Any]", entry_raw)
+    title_raw: object = entry.get("title")
+    return isinstance(title_raw, str) and title_names_item.search(title_raw) is not None
 
 
 def _pull_request(*, entry_raw: object) -> BranchPullRequest | None:

@@ -158,6 +158,7 @@ def _merged_item_listing() -> str:
                 "state": "MERGED",
                 "headRefOid": _HAND_REDO_HEAD,
                 "title": f"fix: recover {_ITEM_ID}",
+                "baseRefName": "master",
             }
         ]
     )
@@ -235,6 +236,7 @@ def _runner(
         "view": view if view is not None else _ok(stdout=_comments(body=_record_body())),
         "ps": ps if ps is not None else _ok(stdout=_held()),
         "inspect": inspect if inspect is not None else _ok(stdout=_inspect(node="pr")),
+        "symbolic-ref": _ok(stdout="origin/master\n"),
     }
     runner = _StubRunner(answers=answers)
     if merged_listing is not None:
