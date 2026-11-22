@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, MutableMapping
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -18,6 +19,7 @@ from livespec_orchestrator_beads_fabro.commands._plan_epoch_tokens import (
     attempt_close,
     token_reading,
 )
+from livespec_orchestrator_beads_fabro.errors import BeadsConnectionError
 
 if TYPE_CHECKING:
     from livespec_orchestrator_beads_fabro._beads_client import BeadsClient, BeadsRecord
@@ -32,6 +34,11 @@ __all__: list[str] = [
 
 _CLAIM_TOKEN_LABEL = "claim-token"  # noqa: S105 - record label
 _LEASE_SECONDS = 120.0
+# A terminal claim write gets its first attempt plus these bounded retries.  A
+# retry is only useful when it confirms its own successor on the item, and it
+# must not turn a ledger outage into an unbounded writer holding a closed token.
+_ITEM_WRITE_RETRY_LIMIT = 2
+_ITEM_WRITE_RETRY_BACKOFF_SECONDS = 1.0
 # Public because a one-shot writer waits this long itself before its one retry.
 TRANSITION_WAIT_SECONDS = 180.0
 
@@ -153,8 +160,66 @@ def change_claim(  # noqa: PLR0911, PLR0913
             return ClaimChangeResult(outcome="claim-changed")
 
     update["metadata"] = _with_successor(record=record, metadata=metadata, successor=successor)
-    client.update_issue(**update, names_claim_token=True)
-    return ClaimChangeResult(outcome="applied", successor_token_id=successor)
+    if _write_successor_until_read_back(
+        client=client,
+        work_item_id=work_item_id,
+        successor=successor,
+        update=update,
+        started=started,
+        clock=clock,
+    ):
+        return ClaimChangeResult(outcome="applied", successor_token_id=successor)
+    return ClaimChangeResult(
+        outcome=_unlanded_transition_refusal(
+            work_item_id=work_item_id,
+            closed_token_id=takeover.token_id,
+            successor=successor,
+        ),
+        successor_token_id=successor,
+    )
+
+
+def _write_successor_until_read_back(
+    *,
+    client: BeadsClient,
+    work_item_id: str,
+    successor: str,
+    update: dict[str, Any],
+    started: float,
+    clock: Callable[[], float],
+) -> bool:
+    """Retry a won item write only while its lease can still authorize it.
+
+    A command error does not prove that the server did not apply its write, and
+    an acknowledgement does not prove that it did.  The item read-back is the
+    sole success condition.  Leaving the successor open on exhaustion lets the
+    normal stranded-transition recovery take over later.
+    """
+    for attempt in range(_ITEM_WRITE_RETRY_LIMIT + 1):
+        if clock() - started >= _LEASE_SECONDS:
+            return False
+        with suppress(BeadsConnectionError):
+            client.update_issue(**update, names_claim_token=True)
+        try:
+            landed = _current_token(record=client.show_issue(issue_id=work_item_id)) == successor
+        except BeadsConnectionError:
+            landed = False
+        if landed:
+            return True
+        if attempt == _ITEM_WRITE_RETRY_LIMIT or clock() - started >= _LEASE_SECONDS:
+            return False
+        time.sleep(_ITEM_WRITE_RETRY_BACKOFF_SECONDS * (attempt + 1))
+    return False
+
+
+def _unlanded_transition_refusal(
+    *, work_item_id: str, closed_token_id: str, successor: str
+) -> str:
+    """Name the stranded transition in the outcome every caller surfaces."""
+    return (
+        "claim-transition-unlanded: "
+        f"item={work_item_id}; closed-token={closed_token_id}; successor={successor}"
+    )
 
 
 def _takeover_token(
