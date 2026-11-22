@@ -18,6 +18,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_policy_settings impo
 )
 from livespec_orchestrator_beads_fabro.commands._drive_config_schema import config_key_by_name
 from livespec_orchestrator_beads_fabro.commands._plan_epoch_tokens import TokenReading
+from livespec_orchestrator_beads_fabro.errors import BeadsConnectionError
 from returns.unsafe import unsafe_perform_io
 
 _ITEM_ID = "bd-ib-claim-token"
@@ -86,6 +87,51 @@ def test_enabled_winner_names_a_fresh_successor_in_the_same_item_write() -> None
     assert "claim-token" in successor["labels"]
     assert all(record["id"] != outcome.successor_token_id for record in client.list_issues())
     assert client.children(parent_id=_ITEM_ID) == []
+
+
+def test_terminal_writer_retries_an_unlanded_item_write_until_its_successor_reads_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A terminal winner cannot report success until its item names its successor."""
+    client, token = _client_with_current_token()
+    update = client.update_issue
+    attempts = [0]
+    backoffs: list[float] = []
+
+    def _fault_then_drop(**fields: object) -> None:
+        if fields["issue_id"] == _ITEM_ID:
+            attempts[0] += 1
+            if attempts[0] == 1:
+                raise BeadsConnectionError(detail="transient item-write fault")
+            if attempts[0] == 2:
+                return
+        update(**fields)
+
+    monkeypatch.setattr(client, "update_issue", _fault_then_drop)
+    monkeypatch.setattr(claim_tokens.time, "sleep", lambda seconds: backoffs.append(seconds))
+
+    try:
+        outcome = change_claim(
+            client=client,
+            work_item_id=_ITEM_ID,
+            writer="dispatcher-terminal",
+            intent="complete",
+            claim_tokens=True,
+            status="acceptance",
+            clock=lambda: 0.0,
+        )
+    except BeadsConnectionError:
+        outcome = None
+
+    assert outcome is not None
+    assert outcome.outcome == "applied"
+    assert outcome.successor_token_id is not None
+    assert attempts == [3]
+    assert backoffs
+    assert client.show_issue(issue_id=_ITEM_ID)["metadata"][CLAIM_TOKEN_METADATA_KEY] == (
+        outcome.successor_token_id
+    )
+    assert client.show_issue(issue_id=token)["status"] == "closed"
 
 
 def test_loser_and_unobservable_writer_leave_the_item_untouched_and_discard_successors(
