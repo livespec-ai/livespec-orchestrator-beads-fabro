@@ -90,9 +90,6 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_merged_reconcile imp
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import (
     DispatchPlan,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_post_run_terminal import (
-    post_run_terminal,
-)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_pr_open_diff import (
     pr_open_diff_record,
 )
@@ -215,6 +212,12 @@ def run_dispatch(
     launcher_terminal = _launcher_terminal(plan=plan, launched=launched)
     if launcher_terminal is not None:
         return launcher_terminal
+    # Deferred: the post-run terminal imports the reattach module, which reaches this
+    # engine through the run-watch decision, so a top-level import closes a cycle.
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_post_run_terminal import (
+        post_run_terminal,
+    )
+
     post_run = post_run_terminal(
         plan=plan, runner=runner, journal=journal, launched=launched, sleep=sleep
     )
