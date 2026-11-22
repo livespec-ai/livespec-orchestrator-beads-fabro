@@ -66,6 +66,9 @@ from livespec_orchestrator_beads_fabro.commands._dod_governing_heading import (
     GoverningHeadingVerdict,
     governing_heading_block,
 )
+from livespec_orchestrator_beads_fabro.commands._spec_change_tier_current import (
+    current_spec_change_tier,
+)
 from livespec_orchestrator_beads_fabro.effects import (
     AttemptFailure,
     JsonParseFailure,
@@ -113,6 +116,8 @@ _LESSONS_LABEL = (
 # difference between a brief that is complete and one that was truncated.
 _RIDERS_HEADING = "## Ledger comments (operator riders; part of the brief)"
 _ABSENT_RIDERS_BODY = "(this item carries no operator rider)"
+_TIER_RECORD_HEADING = "## Current spec-change-tier record"
+_ABSENT_TIER_RECORD = "(no current spec-change-tier record)"
 # The governed spec tree, named where `_heading_body` names it, and the two
 # halves of the identity the reuse digest folds in.
 _SPEC_DIRNAME = "SPECIFICATION"
@@ -192,6 +197,8 @@ def judgement_subject(
         _RIDERS_HEADING,
         _riders_body(comments=comments),
         "",
+        _current_tier_record_body(item=item, cwd=cwd, comments=comments),
+        "",
         governing_heading_block(verdict=governing),
     ]
     blocks.extend(
@@ -223,6 +230,21 @@ def _goal_fields(*, item: WorkItem, lessons: str) -> list[str]:
     if lessons:
         fields.extend(("", _LESSONS_LABEL, lessons))
     return fields
+
+
+def _current_tier_record_body(*, item: WorkItem, cwd: Path, comments: Sequence[str]) -> str:
+    """Render the reusable tier fields check 4 needs without carrying its receipt."""
+    current = current_spec_change_tier(item=item, repo=cwd, comments=comments)
+    if current is None:
+        return "\n".join((_TIER_RECORD_HEADING, _ABSENT_TIER_RECORD))
+    target = "(none)" if current.generalization_target is None else current.generalization_target
+    return "\n".join(
+        (
+            _TIER_RECORD_HEADING,
+            f"tier: {current.tier}",
+            f"generalization-target: {target}",
+        )
+    )
 
 
 def judgement_subject_digest(
