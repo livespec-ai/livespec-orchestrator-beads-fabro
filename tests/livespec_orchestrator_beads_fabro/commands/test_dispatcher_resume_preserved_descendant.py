@@ -77,3 +77,47 @@ def test_a_same_run_descending_ref_with_more_work_is_a_resume_refusal() -> None:
     assert outcome.preservation_ref == "refs/heads/needs-human/run-1"
     assert outcome.preservation_tip == "b" * 40
     assert outcome.published_head == "a" * 40
+
+
+class _PublishedDescendantRunner:
+    """A readable published head that contains every commit in the preservation."""
+
+    def run(
+        self,
+        *,
+        argv: list[str],
+        cwd: Path,
+        timeout_seconds: float,
+        env: dict[str, str] | None = None,
+        stdin: int | None = None,
+    ) -> CommandResult:
+        _ = cwd, timeout_seconds, env, stdin
+        assert argv == [
+            "git",
+            "merge-base",
+            "--is-ancestor",
+            "b" * 40,
+            "a" * 40,
+        ]
+        return CommandResult(exit_code=0, stdout="", stderr="")
+
+
+def test_an_unattributed_published_descendant_allows_the_resume() -> None:
+    """Commit ancestry settles a readable head even when its publishing row is absent."""
+    module: Any = importlib.import_module(_MODULE_NAME)
+
+    outcome = module.preserved_descendant(
+        runner=_PublishedDescendantRunner(),
+        repo=Path("/repo"),
+        preservation=RecoverySeed(
+            source_run_id="run-1",
+            remote="origin",
+            commit_sha="b" * 40,
+            preservation_ref="refs/heads/needs-human/run-1",
+            preservation_tip_sha="b" * 40,
+        ),
+        published_head="a" * 40,
+        head_is_later=None,
+    )
+
+    assert outcome is None
