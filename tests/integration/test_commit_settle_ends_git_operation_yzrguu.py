@@ -322,6 +322,33 @@ def test_the_third_failed_fix_commit_run_routes_to_needs_human_with_its_preserve
         assert all(run in cause for run in failed_runs)
 
 
+def test_a_passed_fix_commit_run_clears_prior_failed_fix_commit_runs(tmp_path: Path) -> None:
+    """Only consecutive failed fix commit runs may exhaust the fix loop."""
+    repo = _repo(tmp_path)
+    plugins = _plugins(tmp_path)
+
+    for _ in range(2):
+        _integrate(repo, "merge")
+        _hook(repo, status=1)
+        _, report = _run_commit(repo, plugins)
+        assert report["state"] == "failed"
+
+        result = _settle(repo, plugins, node="fix_commit_settle")
+
+        assert result.returncode != 0, result.stderr
+        assert "LIVESPEC_FIX_COMMIT_RUN_FAILED_EXHAUSTED" not in result.stderr
+
+    _integrate(repo, "merge")
+    _hook(repo, status=0)
+    _, report = _run_commit(repo, plugins)
+    assert report["state"] == "passed"
+
+    result = _settle(repo, plugins, node="fix_commit_settle")
+
+    assert result.returncode == 0, result.stderr
+    assert not (repo / ".git" / "livespec-fix-failed-commit-runs").exists()
+
+
 def test_fix_settle_records_the_runner_settled_run_not_a_prior_commit_token_in_its_brief(
     tmp_path: Path,
 ) -> None:
