@@ -295,7 +295,7 @@ wait_for_listing() {
 if [ -z "$ticket" ]; then
   ticket_number=${TICKET_NS:-$(date +%s%N)}
   ticket="$QUEUE/$ticket_number-$SEAT"
-  echo "owner=$SEAT pid=$$ item=$ITEM" > "$ticket"
+  publish_ticket "$ticket" || { ticket=""; exit_cause="ticket-publish-failed"; exit 75; }
   echo "$(date -u +%FT%TZ) gmktec FIFO ticket taken at start: ${ticket##*/}"
 fi
 

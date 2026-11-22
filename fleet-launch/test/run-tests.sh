@@ -1433,29 +1433,72 @@ stop_launcher "$foreign_pid"
 wait "$foreign_pid" 2>/dev/null || true
 
 scenario "6d. a whole-queue re-sort starts exactly one launcher per queued item"
-new_case resort-one-launcher
-queue_position_fixture
-dup_pids=()
-for n in 1 2 3 4 5; do
-    ONLY_GMK=1 "$LAUNCHER" bd-ib-queue-child > "$CASE_DIR/dup$n.log" 2>&1 &
-    dup_pids+=("$!")
+# Preserve taskset's reported affinity in shell variables rather than selecting
+# its first line through an early-exiting pipeline: this harness runs with
+# pipefail, and an upstream writer can otherwise make the read look like a
+# command failure.  Pin the contention burst to the first CPU in the range.
+pin_affinity=$(taskset -pc "$$" 2>/dev/null)
+pin_cpu=${pin_affinity##*: }
+pin_cpu=${pin_cpu%%,*}
+pin_cpu=${pin_cpu%%-*}
+burst_ok=1
+for burst_iteration in 1 2 3; do
+    new_case "resort-one-launcher-$burst_iteration"
+    queue_position_fixture
+    load_pids=()
+    for _ in 1 2 3 4 5 6; do
+        taskset -c "$pin_cpu" yes > /dev/null &
+        load_pids+=("$!")
+    done
+    dup_pids=()
+    for n in 1 2 3 4 5 6; do
+        ONLY_GMK=1 taskset -c "$pin_cpu" "$LAUNCHER" bd-ib-queue-child > "$CASE_DIR/dup$n.log" 2>&1 &
+        dup_pids+=("$!")
+    done
+    dup_exits=0
+    duplicate_terminals=0
+    deadline=$(( $(date +%s) + OBSERVE_WAIT_S ))
+    while { [ "$dup_exits" -lt 5 ] || [ "$duplicate_terminals" -lt 5 ]; } \
+        && [ "$(date +%s)" -lt "$deadline" ]; do
+        dup_exits=$(cat "$CASE_DIR"/dup?.log 2>/dev/null | grep -c 'already has a live launcher for bd-ib-queue-child')
+        duplicate_terminals=$(cat "$CASE_DIR"/dup?.log 2>/dev/null | grep -c 'terminal: item=bd-ib-queue-child ticket=none cause=duplicate-live-launcher')
+        sleep "$HARNESS_POLL_S"
+    done
+    deadline=$(( $(date +%s) + OBSERVE_WAIT_S ))
+    dup_tickets=0
+    while [ "$dup_tickets" -lt 1 ] && [ "$(date +%s)" -lt "$deadline" ]; do
+        dup_tickets=$(grep -lE '^owner=.* pid=[0-9]+ item=bd-ib-queue-child$' "$FLEET_LAUNCH_GMK_QUEUE_DIR"/* 2>/dev/null | wc -l)
+        sleep "$HARNESS_POLL_S"
+    done
+    if [ "$dup_exits" -ne 5 ] || [ "$duplicate_terminals" -ne 5 ] || [ "$dup_tickets" -ne 1 ]; then
+        burst_ok=0
+        fail "pinned burst $burst_iteration left $dup_tickets complete tickets, $dup_exits duplicate refusals and $duplicate_terminals duplicate terminal lines"
+    fi
+    stop_launcher "${dup_pids[@]}"
+    for pid in "${dup_pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+    for pid in "${load_pids[@]}"; do kill "$pid" 2>/dev/null || true; done
+    for pid in "${load_pids[@]}"; do wait "$pid" 2>/dev/null || true; done
 done
-dup_exits=0
-deadline=$(( $(date +%s) + OBSERVE_WAIT_S ))
-while [ "$dup_exits" -lt 4 ] && [ "$(date +%s)" -lt "$deadline" ]; do
-    dup_exits=$(cat "$CASE_DIR"/dup?.log 2>/dev/null | grep -c 'already has a live launcher for bd-ib-queue-child')
-    sleep "$HARNESS_POLL_S"
-done
-dup_tickets=$(grep -l 'item=bd-ib-queue-child' "$FLEET_LAUNCH_GMK_QUEUE_DIR"/* 2>/dev/null | wc -l)
-if [ "$dup_exits" -eq 4 ] && [ "$dup_tickets" -eq 1 ]; then
-    pass "five simultaneous launchers for one item leave one ticket and four duplicate refusals"
-else
-    fail "simultaneous launchers for one item left $dup_tickets tickets and $dup_exits refusals"
+if [ "$burst_ok" = 1 ]; then
+    pass "three six-launcher bursts under pinned CPU contention leave one complete ticket and five named duplicate terminal lines each"
 fi
-stop_launcher "${dup_pids[@]}"
-for pid in "${dup_pids[@]}"; do wait "$pid" 2>/dev/null || true; done
 
-scenario "6e. the committed defaults supply the parent-chain and priorities-record sources"
+scenario "6e. a fresh unreadable ticket is skipped without losing its FIFO place"
+new_case fresh-unreadable-ticket
+mkdir -p "$FLEET_LAUNCH_GMK_QUEUE_DIR"
+empty_ticket="$FLEET_LAUNCH_GMK_QUEUE_DIR/100-publishing-seat"
+live_ticket="$FLEET_LAUNCH_GMK_QUEUE_DIR/200-live-seat"
+: > "$empty_ticket"
+printf 'owner=live-seat pid=%s item=bd-ib-live\n' "$$" > "$live_ticket"
+scan_result=$(GMK_HOLD_FILE="$HOLD_FILE" FIFO_CLASS=gmk FLEET_LAUNCH_EMPTY_TICKET_GRACE_S=5 \
+    bash -c '. "$1"; scan_queue "$2"; printf "%s" "$OLT"' bash "$LAUNCH_DIR/launch-lib.sh" "$FLEET_LAUNCH_GMK_QUEUE_DIR" 2>&1)
+if [ -e "$empty_ticket" ] && [ "$scan_result" = "$live_ticket" ]; then
+    pass "a queue scan skips a fresh unreadable ticket without deleting it or reporting a stall"
+else
+    fail "a queue scan removed or stalled a fresh unreadable ticket (result: ${scan_result:-none})"
+fi
+
+scenario "6f. the committed defaults supply the parent-chain and priorities-record sources"
 new_case default-queue-sources
 open_boards
 export FLEET_LAUNCH_MAX_WAIT_S=120

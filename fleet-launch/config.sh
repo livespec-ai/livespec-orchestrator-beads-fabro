@@ -141,6 +141,9 @@ export LDSEAT_TMP_HOLD_PCT
 : "${FLEET_LAUNCH_INFLIGHT_DIR:=/run/user/1000/fleet-inflight.d}"
 : "${FLEET_LAUNCH_GMK_QUEUE_DIR:=/run/user/1000/gmktec-launch-queue.d}"
 : "${FLEET_LAUNCH_GMK_LOCK_DIR:=/run/user/1000/gmktec-launch-lock.d}"
+# A ticket is published by rename, but a reader also tolerates a just-created
+# unreadable ticket for this long before treating it as a stalled launcher.
+: "${FLEET_LAUNCH_EMPTY_TICKET_GRACE_S:=5}"
 # One launcher per queued item: a launcher claims its item here (a symlink named for the item whose
 # target is the owning pid), so a whole-queue re-sort never starts a second launcher for a queued item.
 : "${FLEET_LAUNCH_GMK_CLAIM_DIR:=${FLEET_LAUNCH_GMK_QUEUE_DIR}.claims}"

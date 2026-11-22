@@ -243,13 +243,10 @@ ensure_ticket() {
     else ticket_number=$(date +%s%N); fi
   fi
   ticket="$GMK_Q/$ticket_number-$SEAT"
-  if [ "$overwrite" = 1 ]; then
-    echo "owner=$SEAT pid=$$ item=$ITEM" > "$ticket" || { ticket=""; return 1; }
-  elif ! ( set -o noclobber; echo "owner=$SEAT pid=$$ item=$ITEM" > "$ticket" ) 2>/dev/null; then
+  if ! publish_ticket "$ticket" "$overwrite"; then
     ticket=""
     return 1
   fi
-  [ "$FIFO_CLASS" = hl ] && echo "server=hl" >> "$ticket"
   echo "$(date -u +%FT%TZ) gmktec FIFO ticket taken at start: ${ticket##*/}"
 }
 # yield_ticket <cause>: mark the ticket as yielding, with exactly one held= line naming the rule it yields
@@ -841,7 +838,7 @@ if [ -n "${ONLY_GMK:-}" ] || [ -n "${ONLY_HL:-}" ] || [ -n "${ONLY_ARM:-}" ]; th
   ticket_rc=$?
   if [ "$ticket_rc" = 2 ]; then
     echo "$(date -u +%FT%TZ) queue ticket already has a live launcher for $ITEM: do not start a duplicate"
-    terminal_written=1
+    write_terminal duplicate-live-launcher
     exit 0
   fi
   [ "$ticket_rc" = 0 ] || { echo "$(date -u +%FT%TZ) could not take queue ticket for $ITEM"; exit 75; }
