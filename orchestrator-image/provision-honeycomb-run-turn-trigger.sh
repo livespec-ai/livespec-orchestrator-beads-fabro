@@ -46,10 +46,10 @@ curl_json() {
   if [[ "$#" -eq 3 ]]; then
     data_arg=(--data @"$3")
   fi
-  curl --fail-with-body --silent --show-error \
+  printf 'X-Honeycomb-Team: %s\n' "${api_key}" | curl --fail-with-body --silent --show-error \
     --request "${method}" \
     --url "${url}" \
-    --header "X-Honeycomb-Team: ${api_key}" \
+    --header @- \
     --header "Content-Type: application/json" \
     "${data_arg[@]}"
 }
