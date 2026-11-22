@@ -149,6 +149,12 @@ def _clone(*, tmp_path: Path) -> Path:
     repo = tmp_path / "clone"
     repo.mkdir(parents=True)
     _ = subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+    # A completed Green turn leaves a recorded preview result, and the gate
+    # refuses a handoff without one, so the fixture starts from a clean one.
+    _ = (repo / ".git" / _GREEN_PREVIEW_RECORD_GIT_PATH).write_text(
+        json.dumps({"failed_targets": [], "preview_ran": True, "status": 0}) + "\n",
+        encoding="utf-8",
+    )
     return repo
 
 
