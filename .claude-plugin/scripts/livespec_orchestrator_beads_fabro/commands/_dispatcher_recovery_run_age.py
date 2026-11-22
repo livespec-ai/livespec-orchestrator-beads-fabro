@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-__all__: list[str] = ["foreign_run_ids", "published_head_is_later", "published_head_relation"]
+__all__: list[str] = [
+    "foreign_run_ids",
+    "published_head_attribution_gap",
+    "published_head_is_later",
+    "published_head_relation",
+]
 
 _PUBLISHED_HEAD_KEY = "published_head"
 _RUN_ID_KEY = "run_id"
@@ -57,6 +62,34 @@ def published_head_relation(
     if published_position is None or preserved_position is None:
         return None
     return published_position > preserved_position
+
+
+def published_head_attribution_gap(
+    *,
+    records: tuple[dict[str, object], ...],
+    preserved_run_id: str,
+    published_head: str,
+    publications: tuple[tuple[str, str], ...] = (),
+) -> Literal["published-head", "preserved-run"] | None:
+    """Name which journal row `published_head_relation` lacked, or ``None`` when none.
+
+    The relation answers ``None`` for two different gaps with different repairs:
+    no row attributes the published head to a run, or the head is attributed but
+    the preserved ref's own run has no journal position to order it against.
+    """
+    published_position = _publishing_run_position(records=records, head=published_head)
+    if published_position is None:
+        publishing_run = next((run for head, run in publications if head == published_head), None)
+        if publishing_run is None:
+            return "published-head"
+        if publishing_run == preserved_run_id:
+            return None
+        published_position = _run_position(records=records, run_id=publishing_run)
+    if published_position is None:
+        return "published-head"
+    if _run_position(records=records, run_id=preserved_run_id) is None:
+        return "preserved-run"
+    return None
 
 
 def _publishing_run_position(*, records: tuple[dict[str, object], ...], head: str) -> int | None:

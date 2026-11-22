@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandRunner
 from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_routes import RecoverySeed
@@ -43,6 +44,28 @@ def descending_preservation_refusal(
     )
 
 
+def _unattributed_detail(
+    *,
+    preservation: RecoverySeed,
+    published_head: str,
+    gap: Literal["published-head", "preserved-run"],
+) -> str:
+    """Name the one journal row the run-order comparison lacked and the command that records it."""
+    if gap == "preserved-run":
+        return (
+            f"publishing-run-unobservable: no journal row with a run_id places preserved run"
+            f" {preservation.source_run_id} (the source of {preservation.preservation_ref}),"
+            f" so it could not be ordered against the run that published head {published_head};"
+            " the dispatcher records that row through `dispatcher.py dispatch`"
+        )
+    return (
+        "publishing-run-unobservable: no journal row with a run_id attributes"
+        f" published head {published_head} to its publishing run; the dispatcher"
+        " records that row through `dispatcher.py dispatch`, so the preserved-"
+        " descendant comparison could not be ordered by run"
+    )
+
+
 def preserved_descendant(
     *,
     runner: CommandRunner,
@@ -50,6 +73,7 @@ def preserved_descendant(
     preservation: RecoverySeed,
     published_head: str,
     head_is_later: bool | None,
+    attribution_gap: Literal["published-head", "preserved-run"] = "published-head",
 ) -> PreservedDescendant | PreservedDescendantUnobservable | None:
     """Measure whether a same-or-newer preservation would be lost by a resume.
 
@@ -72,11 +96,8 @@ def preserved_descendant(
         return {
             0: None,
             1: PreservedDescendantUnobservable(
-                detail=(
-                    "publishing-run-unobservable: no journal row with a run_id attributes"
-                    f" published head {published_head} to its publishing run; the dispatcher"
-                    " records that row through `dispatcher.py dispatch`, so the preserved-"
-                    " descendant comparison could not be ordered by run"
+                detail=_unattributed_detail(
+                    preservation=preservation, published_head=published_head, gap=attribution_gap
                 )
             ),
         }.get(
