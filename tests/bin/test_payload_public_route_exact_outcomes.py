@@ -285,6 +285,12 @@ def _run(*, argv_of, tmp_path: Path, install_parent: Path, evict: bool):
         if key not in scrubbed and not key.startswith("COV_CORE_")
     }
     _ = env.pop("BEADS_DOLT_PASSWORD", None)
+    # The wrapper-exported GitHub App identity is ambient host state: a host whose
+    # wrapper exports GITHUB_APP_ID_ORG makes the bootstrap refuse "target
+    # repository App identity mismatch" against the wrapper double's own id, so
+    # drop every wrapper-exported App variable next to the secret (bd-ib-c6jqar).
+    for _app_variable in ("GITHUB_APP_ID", "GITHUB_APP_ID_ORG", "GITHUB_PRIVATE_KEY"):
+        _ = env.pop(_app_variable, None)
     _ = env.pop("LIVESPEC_CREDENTIAL_REEXEC", None)
     env["CLAUDE_PLUGIN_ROOT"] = str(install_root)
     env["LIVESPEC_BEADS_FAKE"] = "1"

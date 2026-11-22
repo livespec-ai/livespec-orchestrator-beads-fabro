@@ -117,6 +117,10 @@ def _base_env(*, install_root: Path) -> dict[str, str]:
         for key, value in os.environ.items()
         if key not in scrubbed and not key.startswith("COV_CORE_")
     }
+    # The org App identity is ambient host state: a host whose wrapper exports
+    # GITHUB_APP_ID_ORG makes the bootstrap refuse "target repository App identity
+    # mismatch", so no child inherits it (bd-ib-c6jqar).
+    _ = env.pop("GITHUB_APP_ID_ORG", None)
     env["CLAUDE_PLUGIN_ROOT"] = str(install_root)
     return env
 
