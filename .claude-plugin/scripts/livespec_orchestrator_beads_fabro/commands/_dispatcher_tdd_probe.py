@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import cast
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
@@ -84,6 +84,12 @@ _DISPATCH_ID_FIELD = "dispatch_id"
 # The commit-series probe budget, matching the sibling merged-PR diff-size
 # probe: fail-soft to None rather than hold up an already-final verdict.
 _COMMITS_PROBE_TIMEOUT_SECONDS = 60.0
+
+# Mirrors `livespec_dev_tooling.checks.red_green_replay`: the suffixes and
+# Justfile names the hook treats as non-Python implementation (docs and data
+# suffixes deliberately do not qualify).
+_NON_PYTHON_IMPL_SUFFIXES = (".sh", ".just", ".yml", ".yaml", ".fabro")
+_JUSTFILE_NAMES = ("justfile", "Justfile")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -328,13 +334,23 @@ def _has_only_non_python_implementation(*, stdout: str) -> bool:
     files = payload.get("files")
     if not isinstance(files, list):
         return False
-    implementation_paths = [
+    paths = [
         filename
         for raw_file in cast("list[object]", files)
         if isinstance(raw_file, dict)
         and isinstance((filename := cast("dict[str, object]", raw_file).get("filename")), str)
         and not filename.startswith("tests/")
     ]
-    return bool(implementation_paths) and all(
-        not filename.endswith(".py") for filename in implementation_paths
+    return any(_is_hook_exempt_implementation(path=path) for path in paths) and all(
+        not path.endswith(".py") for path in paths
     )
+
+
+def _is_hook_exempt_implementation(*, path: str) -> bool:
+    """Mirror the Red-Green hook's non-Python implementation discrimination.
+
+    Documentation and data (a README, JSON, CSV) are not implementation, so
+    they cannot close a Red.
+    """
+    name = PurePosixPath(path).name
+    return PurePosixPath(path).suffix in _NON_PYTHON_IMPL_SUFFIXES or name in _JUSTFILE_NAMES
