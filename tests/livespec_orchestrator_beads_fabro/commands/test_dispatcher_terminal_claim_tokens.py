@@ -39,10 +39,11 @@ from __future__ import annotations
 import copy
 import json
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pytest
+from livespec_orchestrator_beads_fabro import _store_claim_tokens as claim_tokens
 from livespec_orchestrator_beads_fabro._beads_client import (
     FakeBeadsClient,
     make_beads_client,
@@ -54,8 +55,10 @@ from livespec_orchestrator_beads_fabro._store_dispatch_claim import (
     create_claim_token,
     record_claim_stamp,
 )
+from livespec_orchestrator_beads_fabro.commands import _dispatcher_claim_writes as claim_writes
 from livespec_orchestrator_beads_fabro.commands import _dispatcher_completion
 from livespec_orchestrator_beads_fabro.commands._acp_candidate_schema import AcpCandidateIdentity
+from livespec_orchestrator_beads_fabro.commands._claim_takeover_wait import TakeoverWait
 from livespec_orchestrator_beads_fabro.commands._dispatcher_acceptance_result import (
     outcome_after_acceptance,
 )
@@ -556,6 +559,11 @@ def test_a_won_acceptance_close_wins_the_completion_token_and_then_its_successor
     item = _item()
     client, token = _seed(item=item)
     journal = _journal(repo=repo)
+    monkeypatch.setattr(
+        claim_writes,
+        "TakeoverWait",
+        lambda: pytest.fail("a current open token must not take the takeover wait"),
+    )
 
     reported = _accept(
         repo=repo, item=item, journal=journal, verdict=verdict, monkeypatch=monkeypatch
@@ -566,6 +574,60 @@ def test_a_won_acceptance_close_wins_the_completion_token_and_then_its_successor
     assert client.show_issue(issue_id=_ITEM_ID)["status"] == "closed"
     assert _won_intent(client=client, token=token) == "complete"
     assert _won_intent(client=client, token=held) == close_intent
+    assert _REFUSED_STAGE not in _stages(journal=journal)
+
+
+@dataclass
+class _TakeoverClock:
+    """A fake monotonic clock that advances only when the one-shot writer sleeps."""
+
+    now: float = 1000.0
+    slept: list[float] = field(default_factory=list)
+
+    def read(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += seconds
+
+
+def test_a_one_shot_reconcile_acceptance_waits_out_a_stranded_transition_and_takes_it_over(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`reconcile-merged` reaches acceptance through this one-shot completion write."""
+    repo = _repo(tmp_path=tmp_path)
+    item = _item()
+    client, token = _seed(item=item)
+    stranded = create_claim_token(client=client)
+    client.close_issue_without_verdict(
+        issue_id=token,
+        reason=json.dumps(
+            {
+                "kind": "claim-token-transition",
+                "writer": "dispatcher-terminal",
+                "intent": "complete",
+                "successor": stranded,
+            }
+        ),
+    )
+    clock = _TakeoverClock()
+    monkeypatch.setattr(
+        claim_writes,
+        "TakeoverWait",
+        lambda: TakeoverWait(clock=clock.read, sleep=clock.sleep),
+    )
+    monkeypatch.setattr(claim_tokens.time, "monotonic", clock.read)
+    journal = _journal(repo=repo)
+
+    reported = _accept(
+        repo=repo, item=item, journal=journal, verdict="PASS", monkeypatch=monkeypatch
+    )
+
+    assert clock.slept == [180.0]
+    assert (reported.status, reported.stage, reported.verdict) == ("green", "done", "PASS")
+    assert client.show_issue(issue_id=_ITEM_ID)["status"] == "closed"
+    assert _won_intent(client=client, token=stranded) == "complete"
     assert _REFUSED_STAGE not in _stages(journal=journal)
 
 

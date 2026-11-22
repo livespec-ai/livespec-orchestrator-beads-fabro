@@ -69,7 +69,6 @@ from the unguarded one only by the token.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,7 +78,6 @@ from typing_extensions import override
 
 from livespec_orchestrator_beads_fabro._beads_client import BeadsRecord, make_beads_client
 from livespec_orchestrator_beads_fabro._store_blocked_mutations import blocked_reason_labels
-from livespec_orchestrator_beads_fabro._store_claim_tokens import TRANSITION_WAIT_SECONDS
 from livespec_orchestrator_beads_fabro._store_factory_size_gate import (
     route_factory_size_decomposition,
 )
@@ -87,6 +85,7 @@ from livespec_orchestrator_beads_fabro._store_rework_mutations import (
     rework_pending_label_removals,
 )
 from livespec_orchestrator_beads_fabro._store_statuses import beads_status_for
+from livespec_orchestrator_beads_fabro.commands._claim_takeover_wait import TakeoverWait
 from livespec_orchestrator_beads_fabro.commands._dispatcher_claim_guard import (
     guarded_hold,
     guarded_status_write,
@@ -185,28 +184,6 @@ def _carries(*, record: BeadsRecord, labels: tuple[str, ...]) -> bool:
     carried = record.get("labels")
     present = cast("list[object]", carried) if isinstance(carried, list) else []
     return all(label in present for label in labels)
-
-
-@dataclass(frozen=True, kw_only=True)
-class TakeoverWait:
-    """How a one-shot writer waits out an unapplied transition before its one retry.
-
-    `seconds` is the protocol's own takeover wait. `change_claim` records its
-    first observation of the unapplied transition on `time.monotonic`, before
-    this wait starts, so `seconds` elapsed on that same clock from a later
-    reading is always at least the takeover wait since that observation.
-    `clock` and `sleep` are fields so a test supplies both and never sleeps.
-    """
-
-    seconds: float = TRANSITION_WAIT_SECONDS
-    clock: Callable[[], float] = time.monotonic
-    sleep: Callable[[float], None] = time.sleep
-
-    def wait_out(self) -> None:
-        """Return once `seconds` have elapsed on `clock`, however short `sleep` slept."""
-        deadline = self.clock() + self.seconds
-        while (remaining := deadline - self.clock()) > 0:
-            self.sleep(remaining)
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -45,6 +45,7 @@ from typing import Any
 from returns.pipeline import is_successful
 from returns.unsafe import unsafe_perform_io
 
+from livespec_orchestrator_beads_fabro.commands._claim_takeover_wait import TakeoverWait
 from livespec_orchestrator_beads_fabro.commands._dispatcher_claim_guard import (
     Decided,
     guarded_blocked_write,
@@ -104,6 +105,7 @@ LEDGER_WRITE_ERRORS: tuple[type[Exception], ...] = (
 )
 
 _BLOCKED_STATUS = "blocked"
+_TRANSITION_PENDING = "claim-transition-pending"
 
 
 def claim_tokens_setting(*, repo: Path) -> bool | None:
@@ -123,6 +125,7 @@ def settle_claim_write(  # noqa: PLR0913 — kw-only; the two writers and the au
     unguarded: Callable[[], None],
     guarded: Callable[[], str | None],
     journal: JournalWriter | None = None,
+    retry_transition_pending: bool = False,
 ) -> str | None:
     """Run the writer the committed key selects; `None` when its write landed.
 
@@ -130,12 +133,21 @@ def settle_claim_write(  # noqa: PLR0913 — kw-only; the two writers and the au
     writer, its intent and the outcome, so no caller can refuse silently. A
     caller with no journal of its own reports the returned outcome through
     whatever it does return.
+
+    A Dispatcher writer that opts in and first sees an unapplied token transition
+    waits out the protocol interval in this process, then retries its guarded
+    write exactly once.  This makes `reconcile-merged` capable of taking over
+    a stranded terminal transition instead of requiring a long-lived loop to
+    preserve the first observation.  No non-pending result waits.
     """
     enabled = claim_tokens_setting(repo=repo)
     if enabled is False:
         unguarded()
         return None
     refusal = guarded() if enabled else CLAIM_TOKENS_UNREADABLE
+    if retry_transition_pending and refusal == _TRANSITION_PENDING:
+        TakeoverWait().wait_out()
+        refusal = guarded()
     if refusal is not None and journal is not None:
         journal.append(
             record={
@@ -193,6 +205,7 @@ def claim_status_write(  # noqa: PLR0913 — kw-only; one status transition and 
         writer=writer,
         intent=intent,
         journal=journal,
+        retry_transition_pending=True,
         unguarded=lambda: write(path=path, item_id=item_id, status=status, **optional),
         guarded=_guarded_then_reconciled,
     )
@@ -219,6 +232,7 @@ def claim_blocked_write(  # noqa: PLR0913 — kw-only; one blocked rest and who 
         writer=writer,
         intent=intent,
         journal=journal,
+        retry_transition_pending=True,
         unguarded=lambda: write(
             path=path,
             item_id=item_id,
@@ -255,6 +269,7 @@ def claim_hold(  # noqa: PLR0913 — kw-only; one hold, who makes it and what it
         writer=writer,
         intent=intent,
         journal=journal,
+        retry_transition_pending=True,
         unguarded=lambda: None,
         guarded=lambda: guarded_hold(
             path=path,
@@ -289,6 +304,7 @@ def claim_stamp_write(  # noqa: PLR0913 — kw-only; one stamp, its two renderin
         writer=WRITER_RUN_STAMP,
         intent=intent,
         journal=journal,
+        retry_transition_pending=True,
         unguarded=write,
         guarded=lambda: guarded_metadata_write(
             path=path,

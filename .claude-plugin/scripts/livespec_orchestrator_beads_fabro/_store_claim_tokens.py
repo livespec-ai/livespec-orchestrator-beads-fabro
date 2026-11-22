@@ -80,7 +80,7 @@ def change_claim(  # noqa: PLR0911, PLR0913
     add_labels: list[str] | None = None,
     remove_labels: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
-    clock: Callable[[], float] = time.monotonic,
+    clock: Callable[[], float] | None = None,
     transition_observations: MutableMapping[tuple[str, str, str], float] | None = None,
     still_as_decided: Callable[[BeadsRecord], bool] | None = None,
 ) -> ClaimChangeResult:
@@ -97,6 +97,7 @@ def change_claim(  # noqa: PLR0911, PLR0913
     again of the record its write is finally based on. `None` asks nothing, and
     it is ignored while claim tokens are off.
     """
+    clock = time.monotonic if clock is None else clock
     update = _update_arguments(
         work_item_id=work_item_id,
         status=status,
