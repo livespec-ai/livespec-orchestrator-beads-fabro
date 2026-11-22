@@ -21,6 +21,16 @@ a unit-tier test); its dotted node-id prefix `tests.integration` is in the
   unreadable chain rather than passing; a retained repayment carrier is refused
   the `factory-override` label while the factory App passes.
 
+- `test_incident_item_only_history_scenario383.py` — binds
+  `SPECIFICATION/scenarios.md` Scenario 383 (bd-ib-l4dowx). It drives the
+  incident authority CLI's `main` with an item-only `read-history` against a
+  retained chain seeded in the in-memory tenant as the canonical writer records
+  it: five generations of two attempts come back oldest first with their
+  identities, only a closed head's last generation carries a read-time
+  `outstanding` list that no authority record stores, an ordinary or unknown
+  item refuses `incident-authority-missing`, a partial fence is a usage error,
+  and the full fenced identity still reads its historical generation.
+
 - `test_fleet_launch_scenario297.py` — binds `SPECIFICATION/scenarios.md`
   Scenario 297 by running the shipped `check-fleet-launch` driver over the
   committed tree. The hermetic harness proves a queued younger ticket begins
