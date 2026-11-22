@@ -13,9 +13,11 @@ measured each changed module only from its mirror-paired test file, at 100%. A
 module whose lines are executed by OTHER tests read as uncovered, so every
 in-turn commit on it was refused for coverage the full aggregate passes, and the
 fleet stopped. The selection per changed product module is now its mirror-paired
-test and that test's `test_<name>_*.py` siblings, plus EVERY test module that
-imports it directly or through another imported module, found by a static scan of
-the import graph. Coverage is then judged per changed module over that whole set.
+test and that test's `test_<name>_*.py` siblings, plus the tests that a current
+committed coverage-execution map recorded as executing it. When no current record
+exists, the gate conservatively falls back to EVERY test module that imports it
+directly or through another imported module, found by a static scan of the import
+graph. Coverage is then judged per changed module over that whole set.
 Over-selection only runs more tests, so the scan errs wide: an import is matched
 by every dotted-name suffix, and a module that a test names in a string literal (a
 path, a file name, a dotted name) counts as imported, which is how a test loads a
@@ -45,6 +47,7 @@ diagnostics flow through structlog (JSON to stderr).
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -91,6 +94,7 @@ __all__: list[str] = [
 EXIT_CANNOT_SCOPE = 75
 PREVIEW_VARIABLE = "LIVESPEC_GATE_PREVIEW"
 WORKFLOW_FILE_NAME = "workflow.fabro"
+COVERAGE_EXECUTION_MAP = Path("dev-tooling/coverage-execution-map.json")
 # A change to one of these cannot be mapped to the tests it affects: each is read
 # by the whole suite or by the gate itself.
 SHARED_CONFIGURATION = frozenset(
@@ -146,6 +150,40 @@ def _is_shared(*, path: str) -> bool:
     )
 
 
+def _recorded_coverage_tests(*, root: Path, path: str, scan: Any) -> set[str] | None:
+    """Return current recorded executors for `path`, or None when the record cannot apply.
+
+    The execution map is a full-suite coverage observation tied to a commit on the
+    default branch.  A malformed, uncommitted, or stale record is deliberately
+    ignored: the conservative import-graph selection remains the fallback.
+    """
+    map_path = root / COVERAGE_EXECUTION_MAP
+    try:
+        payload = json.loads(map_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return None
+    recorded_commit = payload.get("default_branch_commit") if isinstance(payload, dict) else None
+    modules = payload.get("modules") if isinstance(payload, dict) else None
+    if not isinstance(recorded_commit, str) or not isinstance(modules, dict):
+        return None
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", recorded_commit, "HEAD"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if ancestor.returncode:
+        return None
+    executors = modules.get(path)
+    if not isinstance(executors, list) or not all(isinstance(test, str) for test in executors):
+        return None
+    selected = set(executors)
+    if not selected or not selected <= set(scan.graph):
+        return None
+    return selected
+
+
 def select(*, root: Path, changed: list[str], preview: bool = False) -> Selection | Unscoped:
     """The tests and the product modules measured for `changed`, or why it cannot be scoped."""
     shared = [path for path in changed if _is_shared(path=path)]
@@ -163,7 +201,16 @@ def select(*, root: Path, changed: list[str], preview: bool = False) -> Selectio
         if is_test(path=path):
             continue
         mirrors = _mirror_tests(root=root, path=path, pairings=layout["mirror_pairings"])
-        reached = mirrors if preview else tests_reaching(seeds={path}, scan=scan) | mirrors
+        recorded = _recorded_coverage_tests(root=root, path=path, scan=scan)
+        reached = (
+            mirrors
+            if preview
+            else (
+                recorded | mirrors
+                if recorded is not None
+                else tests_reaching(seeds={path}, scan=scan) | mirrors
+            )
+        )
         if not reached and not preview:
             return Unscoped(reason=f"no test module imports or names {path}")
         tests |= reached
