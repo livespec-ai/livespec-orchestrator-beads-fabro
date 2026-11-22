@@ -164,6 +164,10 @@ class DispatchPlan:
     janitor_core_ref: str
     review_fix_visit_cap: int
     merge_on_review_cap_outcome: str
+    # The argv prefix that reaches the selected factory instance's Kubernetes
+    # credential.  Empty is the explicit local/unbound test route; production
+    # plans receive the factory host route from `_dispatcher_loop_plan`.
+    factory_cluster_kubectl_argv: tuple[str, ...] = ()
     # This item's effective merge hold — the per-item hold `contracts.md`
     # ratifies — resolved host-side HERE, at
     # plan-build time, and journaled with the dispatch record. It rides the plan
@@ -256,6 +260,7 @@ def build_plan(  # noqa: PLR0913 — kw-only plan resolver; each field is an ind
     fabro_factory_name: str = "default",
     fabro_factory_server: str | None = None,
     fabro_factory_dev_token: str | None = None,
+    factory_cluster_kubectl_argv: tuple[str, ...] = (),
     fabro_factory_environment: str | None = None,
     fabro_factory_github_app: object = NO_FACTORY_GITHUB_APP,
     sandbox_image: SandboxImageSource = COMMITTED_RUN_CONFIG_IMAGE,
@@ -298,6 +303,7 @@ def build_plan(  # noqa: PLR0913 — kw-only plan resolver; each field is an ind
         fabro_factory_name=fabro_factory_name,
         fabro_factory_server=fabro_factory_server,
         fabro_factory_dev_token=fabro_factory_dev_token,
+        factory_cluster_kubectl_argv=factory_cluster_kubectl_argv,
         fabro_factory_environment=fabro_factory_environment,
         fabro_factory_github_app=cast("FactoryGithubApp", fabro_factory_github_app),
         sandbox_image=sandbox_image,

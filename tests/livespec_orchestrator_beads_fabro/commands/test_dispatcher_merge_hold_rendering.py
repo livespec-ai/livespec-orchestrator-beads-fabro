@@ -211,11 +211,13 @@ def _pr_json(*, armed: bool) -> str:
     )
 
 
-def _dispatch_plan(*, repo: Path, raw_labels: tuple[str, ...]) -> DispatchPlan:
+def _dispatch_plan(
+    *, repo: Path, raw_labels: tuple[str, ...], factory_server: str | None = None
+) -> DispatchPlan:
     """A plan resolved the way a real dispatch resolves one, from raw labels."""
     args = argparse.Namespace(
         fabro_bin="fabro",
-        fabro_factory_target=FactoryTarget(name="default", server=None, dev_token=None),
+        fabro_factory_target=FactoryTarget(name="default", server=factory_server, dev_token=None),
     )
     return dispatch_plan_for_item(
         args=args,
@@ -246,6 +248,23 @@ def test_the_hold_label_resolves_onto_the_plan_and_its_absence_resolves_false(
     # The label edit moved ONLY the hold: the cap override beside it is
     # unchanged, so this is a per-field read rather than a plan-shaped one.
     assert held.review_fix_visit_cap == free.review_fix_visit_cap == 3
+
+
+def test_a_factory_plan_reads_termination_from_its_own_cluster(*, tmp_path: Path) -> None:
+    plan = _dispatch_plan(
+        repo=tmp_path,
+        raw_labels=(),
+        factory_server="https://gmktec.example:32278",
+    )
+
+    assert plan.factory_cluster_kubectl_argv == (
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "--",
+        "gmktec.example",
+        "with-factory-kubeconfig",
+    )
 
 
 def test_the_hold_renders_as_a_workflow_input_on_every_dispatch(tmp_path: Path) -> None:

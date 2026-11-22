@@ -21,6 +21,8 @@ fires:
   `run-wall-budget-exceeded` status;
 - a PROVIDER-LIMIT release returns the item to `ready` for the ordinary
   admission valve, and fires on the `provider-limit-release` status.
+- a LOST-SANDBOX release returns the item to `ready` for recovery, and fires on
+  the `lost-sandbox-release` status.
 
 Each one is a no-op for every status but its own, so the sequence below is a
 declaration of the complete route set rather than a priority order. Keeping
@@ -56,6 +58,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_completion import (
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import DispatchOutcome
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import JournalFile
+from livespec_orchestrator_beads_fabro.commands._dispatcher_lost_sandbox_disposition import (
+    dispose_lost_sandbox_release,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import store_config
 from livespec_orchestrator_beads_fabro.commands._dispatcher_provider_limit_disposition import (
     dispose_provider_limit_release,
@@ -111,6 +116,7 @@ def dispose_terminal_routing(
     dispose_provider_limit_release(
         repo=repo, item=item, outcome=outcome, journal=journal, now_iso=now_iso
     )
+    dispose_lost_sandbox_release(repo=repo, item=item, outcome=outcome, journal=journal)
     dispose_reclassified_turn_holds(
         repo=repo, item=item, outcome=outcome, journal=journal, now_iso=now_iso
     )

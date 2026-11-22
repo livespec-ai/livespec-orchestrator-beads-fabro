@@ -26,6 +26,7 @@ from livespec_orchestrator_beads_fabro.commands._fabro_resource_exhaustion impor
 )
 from livespec_orchestrator_beads_fabro.commands._fabro_sandbox_termination import (
     PERMANENT_CATEGORY,
+    lost_sandbox_reclassified_failure,
     oom_reclassified_failure,
     permanent_failure_signature,
     read_sandbox_termination,
@@ -60,7 +61,12 @@ def sandbox_termination_attachment(
     """Read the run's sandbox termination and reclassify an OOM-killed run."""
     if inspect.command.exit_code != 0 or inspect.status_kind != "failed":
         return inspect
-    termination = read_sandbox_termination(runner=runner, cwd=plan.repo, run_id=run_id)
+    termination = read_sandbox_termination(
+        runner=runner,
+        cwd=plan.repo,
+        run_id=run_id,
+        kubectl_argv=plan.factory_cluster_kubectl_argv,
+    )
     journal.append(
         record={
             "stage": JOURNAL_STAGE_SANDBOX_TERMINATION,
@@ -74,7 +80,10 @@ def sandbox_termination_attachment(
     )
     return replace(
         inspect,
-        failure=oom_reclassified_failure(failure=inspect.failure, termination=termination),
+        failure=lost_sandbox_reclassified_failure(
+            failure=oom_reclassified_failure(failure=inspect.failure, termination=termination),
+            run_id=run_id,
+        ),
         sandbox_termination=termination,
     )
 

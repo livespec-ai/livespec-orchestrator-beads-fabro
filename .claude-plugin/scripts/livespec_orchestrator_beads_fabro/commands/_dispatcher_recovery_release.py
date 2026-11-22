@@ -4,7 +4,8 @@
 → "Recovery from the failed run's preserved work" opens on this one question: "An
 item is *released for recovery* when its latest journaled dispatch ended in a
 first-stall release (the Dispatcher progress watchdog's own), a
-`provider-limit-release` record, or an `adapter-launch-release` record."
+`provider-limit-release`, `lost-sandbox-release`, or `adapter-launch-release`
+record."
 
 WHY THE READING IS "LATEST DISPATCH", NOT "EVER RELEASED". An item can be
 released, re-dispatched, and finish green; a lifetime reading would then route
@@ -17,9 +18,9 @@ written at every launch, so a release row that is followed by one belongs to a
 dispatch the item has moved past.
 
 WHY `adapter-launch-release` IS READ THOUGH NOTHING WRITES IT YET. The clause
-names three releases and this repository implements two of them; the adapter
-launch release is its own ratified work. Reading all three is what makes this
-module right when the third lands rather than silently excluding it — the cost is
+names four releases and this repository implements three of them; the adapter
+launch release is its own ratified work. Reading all four is what makes this
+module right when the fourth lands rather than silently excluding it — the cost is
 one literal, and the alternative is a release class that routes `fresh` with no
 indication that the route was decided by an omission.
 
@@ -36,6 +37,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import cast
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_lost_sandbox_disposition import (
+    LOST_SANDBOX_RELEASE_STAGE,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import (
     NON_CONVERGED_MARKER,
     RECAPTURE_EXHAUSTED_MARKER,
@@ -75,6 +79,7 @@ RELEASE_STAGES = frozenset(
     {
         STALL_RELEASE_STAGE,
         PROVIDER_LIMIT_RELEASE_STAGE,
+        LOST_SANDBOX_RELEASE_STAGE,
         ADAPTER_LAUNCH_RELEASE_STAGE,
         STALE_ASSIGNEE_CLEAR_STAGE,
     }

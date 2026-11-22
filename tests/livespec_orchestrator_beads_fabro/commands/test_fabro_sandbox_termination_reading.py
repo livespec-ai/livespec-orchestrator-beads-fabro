@@ -9,6 +9,7 @@ unreadable shape reports.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,8 @@ from livespec_orchestrator_beads_fabro.commands._fabro_resource_exhaustion impor
     sandbox_termination_statement,
 )
 from livespec_orchestrator_beads_fabro.commands._fabro_sandbox_termination import (
+    factory_cluster_kubectl_argv,
+    lost_sandbox_reclassified_failure,
     oom_reclassified_failure,
     permanent_failure_signature,
     read_sandbox_termination,
@@ -45,7 +48,7 @@ class _Kubectl:
         argv: list[str],
         cwd: Path,
         timeout_seconds: float,
-        env: dict[str, str] | None = None,
+        env: Mapping[str, str | None] | None = None,
         stdin: int | None = None,
     ) -> CommandResult:
         _ = (argv, cwd, timeout_seconds, env, stdin)
@@ -156,6 +159,73 @@ def test_a_failure_with_no_signature_stays_without_one() -> None:
     assert failure is not None
     assert failure.signature is None
     assert permanent_failure_signature(signature=None) is None
+
+
+def test_a_missing_provider_sandbox_is_a_recoverable_lost_sandbox() -> None:
+    arrived = FabroFailureDetail(
+        cause='sandbox exec failed: Sandbox "petri-run-l0" was not found',
+        category="transient_infra",
+        signature="implement|transient_infra|a1b2c3",
+    )
+
+    lost = lost_sandbox_reclassified_failure(failure=arrived, run_id=_RUN)
+
+    assert lost is not None
+    assert lost.category == "lost_sandbox"
+    assert lost.cause == f"lost sandbox for run {_RUN}: petri-run-l0"
+    assert lost.signature == "implement|lost_sandbox|a1b2c3"
+    assert lost_sandbox_reclassified_failure(failure=None, run_id=_RUN) is None
+    unchanged = lost_sandbox_reclassified_failure(
+        failure=FabroFailureDetail(
+            cause="a network error", category="transient_infra", signature=None
+        ),
+        run_id=_RUN,
+    )
+    assert unchanged is not None
+    assert unchanged.category == "transient_infra"
+    permanent = FabroFailureDetail(
+        cause='Sandbox "petri-run-l0" was not found',
+        category="deterministic",
+        signature="implement|deterministic|a1b2c3",
+    )
+    assert lost_sandbox_reclassified_failure(failure=permanent, run_id=_RUN) is permanent
+
+
+def test_the_observer_uses_the_selected_factory_cluster_credential() -> None:
+    prefix = factory_cluster_kubectl_argv(ssh_target="petri.example")
+
+    assert prefix == (
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "--",
+        "petri.example",
+        "with-factory-kubeconfig",
+    )
+    assert factory_cluster_kubectl_argv(ssh_target=None) == ()
+
+    @dataclass(kw_only=True)
+    class _RecordingKubectl:
+        calls: list[list[str]]
+
+        def run(
+            self,
+            *,
+            argv: list[str],
+            cwd: Path,
+            timeout_seconds: float,
+            env: Mapping[str, str | None] | None = None,
+            stdin: int | None = None,
+        ) -> CommandResult:
+            _ = cwd, timeout_seconds, env, stdin
+            self.calls.append(argv)
+            return CommandResult(exit_code=0, stdout='{"items": []}', stderr="")
+
+    runner = _RecordingKubectl(calls=[])
+    reading = read_sandbox_termination(runner=runner, cwd=Path(), run_id=_RUN, kubectl_argv=prefix)
+
+    assert reading.observed is False
+    assert runner.calls == [[*prefix, "kubectl", "get", "pods", "--all-namespaces", "-o", "json"]]
 
 
 def test_a_reading_that_shows_no_kill_returns_the_failure_as_it_arrived() -> None:

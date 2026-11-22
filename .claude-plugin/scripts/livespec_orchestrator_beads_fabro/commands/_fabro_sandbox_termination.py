@@ -41,7 +41,10 @@ if TYPE_CHECKING:
     from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandRunner
 
 __all__: list[str] = [
+    "LOST_SANDBOX_CATEGORY",
     "PERMANENT_CATEGORY",
+    "factory_cluster_kubectl_argv",
+    "lost_sandbox_reclassified_failure",
     "memory_quantity_bytes",
     "oom_reclassified_failure",
     "permanent_failure_signature",
@@ -52,7 +55,11 @@ KUBECTL_BIN = "kubectl"
 _KUBECTL_TIMEOUT_SECONDS = 60.0
 _OOM_KILLED_REASON = "OOMKilled"
 PERMANENT_CATEGORY = "deterministic"
+LOST_SANDBOX_CATEGORY = "lost_sandbox"
 _TRANSIENT_SIGNATURE_SEGMENT = "|transient_infra|"
+_LOST_SANDBOX_RE = re.compile(
+    r'\bsandbox\s+["`]?([^"`\s]+)["`]?\s+was\s+not\s+found\b', re.IGNORECASE
+)
 
 # The Kubernetes resource-quantity suffixes a memory limit is spelled with.
 _QUANTITY_RE = re.compile(r"^(\d+)(Ki|Mi|Gi|Ti|k|M|G|T)?$")
@@ -89,10 +96,11 @@ def read_sandbox_termination(
     runner: CommandRunner,
     cwd: Path,
     run_id: str,
+    kubectl_argv: tuple[str, ...] = (),
 ) -> SandboxTermination:
     """Ask the cluster how this run's sandbox container ended."""
     listed = runner.run(
-        argv=[KUBECTL_BIN, "get", "pods", "--all-namespaces", "-o", "json"],
+        argv=[*kubectl_argv, KUBECTL_BIN, "get", "pods", "--all-namespaces", "-o", "json"],
         cwd=cwd,
         timeout_seconds=_KUBECTL_TIMEOUT_SECONDS,
     )
@@ -111,6 +119,47 @@ def read_sandbox_termination(
         oom_killed=killed is not None,
         memory_limit_bytes=None if killed is None else killed.memory_limit_bytes,
         detail=f"{len(pods)} sandbox pod(s) read",
+    )
+
+
+def factory_cluster_kubectl_argv(*, ssh_target: str | None) -> tuple[str, ...]:
+    """The factory-scoped credential route, or direct kubectl for unbound plans.
+
+    A production dispatch carries its factory instance's SSH target. The
+    factory host owns the Kubernetes credential and refresh wrapper; the
+    dispatcher host deliberately does not borrow an ambient kubeconfig.
+    """
+    if ssh_target is None:
+        return ()
+    return ("ssh", "-o", "BatchMode=yes", "--", ssh_target, "with-factory-kubeconfig")
+
+
+def lost_sandbox_reclassified_failure(
+    *, failure: FabroFailureDetail | None, run_id: str
+) -> FabroFailureDetail | None:
+    """Classify a provider-reported missing sandbox as recoverable host loss."""
+    if failure is None or failure.cause is None:
+        return failure
+    # A provider observation of an OOM kill is stronger evidence than the
+    # later sandbox-exec refusal it can also cause, and Scenario 335 keeps that
+    # terminal permanent.
+    if failure.category == PERMANENT_CATEGORY:
+        return failure
+    match = _LOST_SANDBOX_RE.search(failure.cause)
+    if match is None:
+        return failure
+    sandbox = match.group(1)
+    return replace(
+        failure,
+        cause=f"lost sandbox for run {run_id}: {sandbox}",
+        category=LOST_SANDBOX_CATEGORY,
+        signature=(
+            None
+            if failure.signature is None
+            else failure.signature.replace(
+                _TRANSIENT_SIGNATURE_SEGMENT, f"|{LOST_SANDBOX_CATEGORY}|"
+            )
+        ),
     )
 
 

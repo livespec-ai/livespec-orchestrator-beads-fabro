@@ -35,6 +35,10 @@ _EXEC_FAILURE = (
     "failed: failed to upgrade to a WebSocket connection: failed to switch protocol: "
     "500 Internal Server Error"
 )
+_LOST_SANDBOX_FAILURE = (
+    "the checkpoint commit of `implement` failed: git rev-parse failed (wait failed): "
+    'sandbox exec failed: Sandbox "petri-01m7a7g3aprtwpmsas30myab7k-l0" was not found'
+)
 _ARRIVED_SIGNATURE = "implement|transient_infra|a1b2c3"
 _LIMIT_BYTES = 7629 * 1024 * 1024
 _SCRIPTS = (
@@ -73,6 +77,7 @@ class _Runner:
     pods: list[dict[str, Any]] = field(default_factory=list)
     kubectl_exit: int = 0
     status_kind: str = "failed"
+    failure: str = _EXEC_FAILURE
     calls: list[list[str]] = field(default_factory=list)
 
     def run(
@@ -104,7 +109,7 @@ class _Runner:
                         "run_id": _RUN,
                         "status": {"kind": self.status_kind},
                         "failure": {
-                            "causes": [_EXEC_FAILURE],
+                            "causes": [self.failure],
                             "category": "transient_infra",
                             "signature": _ARRIVED_SIGNATURE,
                         },
@@ -201,6 +206,18 @@ def test_connection_failure_with_no_oom_kill_keeps_its_classification(*, tmp_pat
     assert outcome.fabro_failure_category == "transient_infra"
     assert "unobservable" not in outcome.detail
     assert "OOM" not in outcome.detail
+
+
+def test_a_not_found_sandbox_is_lost_even_when_termination_is_unobservable(
+    *, tmp_path: Path
+) -> None:
+    runner = _Runner(kubectl_exit=1, failure=_LOST_SANDBOX_FAILURE)
+
+    inspect, outcome, _ = _derive(tmp_path=tmp_path, runner=runner)
+
+    assert inspect.failure.category == "lost_sandbox"
+    assert outcome.fabro_failure_category == "lost_sandbox"
+    assert "lost sandbox" in outcome.detail
 
 
 @pytest.mark.parametrize(

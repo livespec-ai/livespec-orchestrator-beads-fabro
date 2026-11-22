@@ -14,6 +14,7 @@ import argparse
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+from urllib.parse import urlparse
 
 from returns.unsafe import unsafe_perform_io
 
@@ -55,6 +56,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_image_source
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stall_window import (
     stall_window_from_timeouts,
 )
+from livespec_orchestrator_beads_fabro.commands._fabro_sandbox_termination import (
+    factory_cluster_kubectl_argv,
+)
 from livespec_orchestrator_beads_fabro.commands._node_timeouts import (
     NodeTimeouts,
     derive_fabro_timeout_seconds,
@@ -84,6 +88,14 @@ def _readable_text(*, path: Path) -> str:
     """
     text = attempt(action=lambda: path.read_text(encoding="utf-8"), exceptions=(OSError,))
     return "" if isinstance(text, AttemptFailure) else text
+
+
+def _factory_ssh_target(*, server: str | None) -> str | None:
+    """The SSH destination for a resolved factory instance, if its URL names one."""
+    if server is None:
+        return None
+    host = urlparse(server).hostname
+    return host if isinstance(host, str) and host else None
 
 
 def goal_file_path(*, work_item_id: str) -> Path:
@@ -133,6 +145,9 @@ def dispatch_plan_for_item(  # noqa: PLR0913 — kw-only plan resolver; each fie
         fabro_factory_name=factory_target.name,
         fabro_factory_server=factory_target.server,
         fabro_factory_dev_token=factory_target.dev_token,
+        factory_cluster_kubectl_argv=factory_cluster_kubectl_argv(
+            ssh_target=_factory_ssh_target(server=factory_target.server)
+        ),
         fabro_factory_environment=factory_environment_id(factory=factory_target),
         fabro_factory_github_app=factory_target.github_app,
         # WHERE this dispatch's sandbox image comes from, decided ONCE here and

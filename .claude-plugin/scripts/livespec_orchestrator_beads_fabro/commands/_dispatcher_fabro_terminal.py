@@ -18,6 +18,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_fabro_reattach impor
     inspect_run,
     unobservable_run_outcome,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_lost_sandbox_outcome import (
+    lost_sandbox_release_outcome,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_needs_human_terminal import (
     needs_human_terminal_outcome,
 )
@@ -98,7 +101,7 @@ def fabro_run_terminal_outcome(
     return outcome_naming_sandbox_termination(outcome=named, inspect=inspect)
 
 
-def _terminal_outcome(
+def _terminal_outcome(  # noqa: PLR0911 -- terminal priority is visible in its early returns.
     *,
     outcome_type: type[DispatchOutcome],
     plan: DispatchPlan,
@@ -191,6 +194,15 @@ def _terminal_outcome(
         )
     if terminated is not None:
         return terminated
+    lost_sandbox = lost_sandbox_release_outcome(
+        outcome_type=outcome_type,
+        plan=plan,
+        run_id=run_id,
+        inspect=inspect,
+        stderr=stderr,
+    )
+    if lost_sandbox is not None:
+        return lost_sandbox
     return outcome_type(
         work_item_id=plan.work_item_id,
         status="cancelled" if cancelled else "failed",
