@@ -933,13 +933,6 @@
   {
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "heading": "## Scenario 308 — A required check that fails terminally on infrastructure is re-run once and files a flake item",
-    "work_item": "bd-ib-xwwn23",
-    "first_seen": "2026-11-04"
-  },
-  {
-    "spec_root": "SPECIFICATION",
-    "spec_file": "scenarios.md",
     "heading": "## Scenario 309 — Fleet-launch launchers share one WIP claim-count read per repository per time-to-live",
     "work_item": "bd-ib-zwtfbq",
     "first_seen": "2026-11-04"
@@ -961,13 +954,6 @@
   {
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "heading": "## Scenario 312 — A fleet launcher that exits without a run leaves a terminal line, and its ready item's ticket is re-taken or reported",
-    "work_item": "bd-ib-xwwn23",
-    "first_seen": "2026-11-05"
-  },
-  {
-    "spec_root": "SPECIFICATION",
-    "spec_file": "scenarios.md",
     "heading": "## Scenario 313 — A failed scheduled default-branch workflow run becomes one ledger item per failed job",
     "work_item": "bd-ib-pgbr52",
     "first_seen": "2026-11-05"
@@ -984,13 +970,6 @@
     "spec_file": "scenarios.md",
     "heading": "## Scenario 315 — A hand-picked dispatch of a host-only item is refused with exit code 5 and one REFUSED line",
     "work_item": "bd-ib-t5aju3",
-    "first_seen": "2026-11-05"
-  },
-  {
-    "spec_root": "SPECIFICATION",
-    "spec_file": "scenarios.md",
-    "heading": "## Scenario 316 — A repository hold scoped to dispatch launches holds fresh dispatches and lets resumes run",
-    "work_item": "bd-ib-xwwn23",
     "first_seen": "2026-11-05"
   },
   {
