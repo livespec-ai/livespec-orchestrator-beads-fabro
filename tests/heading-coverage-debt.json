@@ -1115,13 +1115,6 @@
   {
     "spec_root": "SPECIFICATION",
     "spec_file": "scenarios.md",
-    "heading": "## Scenario 337 — A merged rework re-dispatch whose merge wait was handed off is completed by reconciliation, and a parked rework stays unsurveyed",
-    "work_item": "bd-ib-xwwn23",
-    "first_seen": "2026-11-09"
-  },
-  {
-    "spec_root": "SPECIFICATION",
-    "spec_file": "scenarios.md",
     "heading": "## Scenario 338 — The committed fleet launcher runs under the tenant wrapper, from the origin tip, with paced re-tickets and the configured routing",
     "work_item": "bd-ib-4xqmqh",
     "first_seen": "2026-11-09"
@@ -1159,13 +1152,6 @@
     "spec_file": "scenarios.md",
     "heading": "## Scenario 343 — A recapture-exhausted hold names the preserved implementation and the explicit resume route",
     "work_item": "bd-ib-ntqv42",
-    "first_seen": "2026-11-11"
-  },
-  {
-    "spec_root": "SPECIFICATION",
-    "spec_file": "scenarios.md",
-    "heading": "## Scenario 344 — An item classified bug whose asked-for behaviour the spec does not state waits for ratification, and classify-tier re-judges a changed item",
-    "work_item": "bd-ib-xwwn23",
     "first_seen": "2026-11-11"
   },
   {
@@ -1545,13 +1531,6 @@
     "heading": "## Scenario: incident entry owns one initial authority before a carrier PR exists",
     "work_item": "bd-ib-l7uzvb",
     "first_seen": "2026-11-05"
-  },
-  {
-    "spec_root": "SPECIFICATION",
-    "spec_file": "scenarios.md",
-    "heading": "## Scenario: the plan record posting primitive renders a record's artifact paths line",
-    "work_item": "bd-ib-xwwn23",
-    "first_seen": "2026-11-11"
   },
   {
     "spec_root": "SPECIFICATION",
