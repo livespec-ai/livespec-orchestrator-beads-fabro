@@ -3,8 +3,9 @@
 The pass has ONE call site — the tail of `dispatch_preamble` — because the
 preamble is the head of every `dispatch` AND of every `loop` iteration. These
 tests pin both readings of that single call: the loop reconciles once per tick
-BEFORE it selects a candidate, and the preamble reconciles before admission
-without ever converting a reconciliation failure into a dispatch refusal.
+(started at the head of the tick, beside the launch: bd-ib-4ifdud), and the
+preamble reconciles before admission without ever converting a reconciliation
+failure into a dispatch refusal.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from livespec_orchestrator_beads_fabro.errors import BeadsConnectionError
 from livespec_orchestrator_beads_fabro.types import WorkItem
 
 
-def test_the_loop_reconciles_once_per_tick_before_it_selects_anything(
+def test_the_loop_reconciles_once_per_tick_and_still_selects(
     *,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -69,9 +70,10 @@ def test_the_loop_reconciles_once_per_tick_before_it_selects_anything(
     )
 
     assert exit_code == 0
-    # Order, not merely presence: reconciling AFTER selection would let the
-    # tick pick work against an inventory it has not yet reconciled.
-    assert order == ["reconcile-runs-pass", "candidates"]
+    # Presence and count, not order: the pass runs beside the launch, so its
+    # position relative to selection is not defined (the loop awaits it before
+    # returning, which is why it is recorded here by the time `main` returns).
+    assert sorted(order) == ["candidates", "reconcile-runs-pass"]
 
 
 def test_the_preamble_reconciles_exactly_once_and_proceeds(

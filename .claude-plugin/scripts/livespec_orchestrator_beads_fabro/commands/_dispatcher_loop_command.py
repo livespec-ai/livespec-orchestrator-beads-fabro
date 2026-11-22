@@ -6,6 +6,9 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_background_reconcile import (
+    reconcile_in_background,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_command_common import (
     EXIT_PRECONDITION_ERROR,
     alarm_on_terminal_failure,
@@ -85,7 +88,7 @@ def run_loop_command(*, args: argparse.Namespace) -> int:
         refusal_exit = handpicked_host_only_refusal_exit(args=args, repo=Path(args.repo))
         if refusal_exit is not None:
             return refusal_exit
-    with pass_snapshot():
+    with pass_snapshot(), reconcile_in_background():
         return _loop_in_pass(args=args)
 
 
