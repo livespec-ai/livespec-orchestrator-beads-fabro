@@ -4,6 +4,9 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_base_advance import (
+    MERGE_QUEUE_REMOVED_AFTER_ARMING,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
     CommandResult,
     DispatchOutcome,
@@ -14,10 +17,15 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_merge import 
     await_merge,
     confirm_pr,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_merge_queue import (
+    MergeQueueObservation,
+    queue_removal_result,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import (
     DispatchPlan,
     build_plan,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_run_status import parse_pr_view
 
 from tests.merge_queue_support import merge_queue_read_answer
 
@@ -93,12 +101,14 @@ def _pr_json(
     merge_state: str = "CLEAN",
     sha: str | None = None,
     checks: list[dict[str, object]] | None = None,
+    queued: bool = False,
 ) -> str:
     return json.dumps(
         {
             "number": 7,
             "state": state,
             "autoMergeRequest": {"enabledAt": "now"} if armed else None,
+            "mergeQueueEntry": {"enqueuedAt": "now"} if queued else None,
             "mergeStateStatus": merge_state,
             "mergeCommit": {"oid": sha} if sha is not None else None,
             "statusCheckRollup": checks if checks is not None else [],
@@ -189,6 +199,134 @@ def test_await_merge_updates_behind_branch_then_returns_merged(tmp_path: Path) -
     assert merged.merge_sha == "cafe04"
     assert runner.calls[1][0] == ["gh", "pr", "update-branch", "7"]
     assert naps == [0.5]
+
+
+def test_a_queue_removal_rearms_an_open_unqueued_pull_request(tmp_path: Path) -> None:
+    runner = Runner(
+        queue=[
+            _ok(stdout=_pr_json(queued=True)),
+            _ok(stdout=_pr_json(armed=False)),
+            _ok(),
+            _ok(stdout=_pr_json()),
+        ]
+    )
+    journal = Journal()
+
+    outcome = await_merge(
+        outcome_type=DispatchOutcome,
+        plan=_plan(repo=tmp_path),
+        runner=runner,
+        journal=journal,
+        sleep=lambda _: None,
+        poll=PollPolicy(attempts=2, interval_seconds=0.0),
+    )
+
+    assert outcome is None
+    assert runner.calls[2][0][:3] == ["gh", "pr", "merge"]
+    assert [record["stage"] for record in journal.records] == [
+        "pr-view",
+        "pr-view",
+        "merge-queue-removed",
+        "merge-queue-rearm",
+        "pr-view",
+    ]
+
+
+def test_a_conflicting_queue_removal_stops_for_the_pr_refresh_resume(tmp_path: Path) -> None:
+    runner = Runner(
+        queue=[
+            _ok(stdout=_pr_json(queued=True)),
+            _ok(stdout=_pr_json(armed=False, merge_state="DIRTY")),
+        ]
+    )
+    journal = Journal()
+
+    outcome = await_merge(
+        outcome_type=DispatchOutcome,
+        plan=_plan(repo=tmp_path),
+        runner=runner,
+        journal=journal,
+        sleep=lambda _: None,
+        poll=PollPolicy(attempts=2, interval_seconds=0.0),
+    )
+
+    assert isinstance(outcome, DispatchOutcome)
+    assert outcome.base_advanced is not None
+    assert outcome.base_advanced.cause == MERGE_QUEUE_REMOVED_AFTER_ARMING
+    assert [record["stage"] for record in journal.records] == [
+        "pr-view",
+        "pr-view",
+        "merge-queue-removed",
+    ]
+
+
+def test_a_queue_removal_keeps_an_auto_merge_request_that_still_exists(tmp_path: Path) -> None:
+    view = parse_pr_view(stdout=_pr_json(queued=False, armed=True))
+    assert view is not None
+
+    result = queue_removal_result(
+        outcome_type=DispatchOutcome,
+        plan=_plan(repo=tmp_path),
+        runner=Runner(queue=[]),
+        journal=Journal(),
+        observation=MergeQueueObservation(was_present=True),
+        view=view,
+    )
+
+    assert result is view
+
+
+def test_a_queue_removal_respects_a_held_plans_unarmed_auto_merge(tmp_path: Path) -> None:
+    view = parse_pr_view(stdout=_pr_json(queued=False, armed=False))
+    assert view is not None
+
+    result = queue_removal_result(
+        outcome_type=DispatchOutcome,
+        plan=build_plan(
+            repo=tmp_path,
+            work_item_id="x-1",
+            workflow_toml=tmp_path / "wf.toml",
+            goal_file=tmp_path / "goal.md",
+            fabro_bin="fabro",
+            janitor=None,
+            janitor_checkout=tmp_path / "janitor-co",
+            config_text=_DECLARED_CONFIG,
+            default_branch="master",
+            merge_hold=True,
+        ),
+        runner=Runner(queue=[]),
+        journal=Journal(),
+        observation=MergeQueueObservation(was_present=True),
+        view=view,
+    )
+
+    assert result is view
+
+
+def test_a_queue_removal_retries_arming_without_delete_branch_for_a_merge_queue(
+    tmp_path: Path,
+) -> None:
+    view = parse_pr_view(stdout=_pr_json(queued=False, armed=False))
+    assert view is not None
+    runner = Runner(
+        queue=[
+            _err(stderr="Cannot use --delete-branch when merge queue enabled"),
+            _ok(),
+            _ok(stdout=_pr_json()),
+        ]
+    )
+
+    result = queue_removal_result(
+        outcome_type=DispatchOutcome,
+        plan=_plan(repo=tmp_path),
+        runner=runner,
+        journal=Journal(),
+        observation=MergeQueueObservation(was_present=True),
+        view=view,
+    )
+
+    assert result is not None
+    assert "--delete-branch" not in runner.calls[1][0]
 
 
 # Entries copied verbatim from `gh pr view 3913 --json statusCheckRollup`: the
