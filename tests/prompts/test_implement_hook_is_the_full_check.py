@@ -32,6 +32,14 @@ _GRAPH = (
 )
 
 
+# Every command node that holds no credential by contract starts by withdrawing them
+# (bd-ib-sgnfom; tests/integration/test_workflow_command_node_credential_scope_sgnfom.py).
+_WITHDRAWAL = (
+    "unset GITHUB_TOKEN GH_TOKEN GITHUB_APP_ID GITHUB_PRIVATE_KEY"
+    " GITHUB_APP_INSTALLATION_ID LIVESPEC_PUSH_TOKEN; "
+)
+
+
 def test_implement_commits_are_owned_by_command_nodes() -> None:
     """Red and Green do not start the detached commit runner themselves."""
     graph = parse_dot_graph(text=_GRAPH.read_text(encoding="utf-8"))
@@ -39,10 +47,12 @@ def test_implement_commits_are_owned_by_command_nodes() -> None:
 
     assert "implement" not in graph.nodes
     assert graph.nodes["commit_red"]["script"] == (
-        'bash "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-red.sh"'
+        _WITHDRAWAL
+        + 'bash "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-red.sh"'
     )
     assert graph.nodes["commit_green"]["script"] == (
-        'bash "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-green.sh"'
+        _WITHDRAWAL
+        + 'bash "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-green.sh"'
         " {{ inputs.implement_mechanical_reentries }} {{ inputs.implement_mechanical_targets }}"
     )
 

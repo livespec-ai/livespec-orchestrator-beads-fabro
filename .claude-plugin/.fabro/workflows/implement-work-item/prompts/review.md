@@ -217,9 +217,9 @@ that can tell them apart.
 
 Whenever you list at least one `[BLOCKING]` finding, post **exactly one NEW
 comment** on the same draft pull request you read the captured record from,
-and do it BEFORE you emit your routing JSON. The comment is this stage's one
-brokered exception to its publication boundary: do not attempt any other
-publication action, even if this request is refused.
+and do it BEFORE you emit your routing JSON:
+
+    gh pr comment <number> --body-file <file>
 
 Its FIRST LINE must be exactly:
 
@@ -238,62 +238,6 @@ and followed by your complete finding lines — every `[BLOCKING]` and
 you listed them. Resolve `<run-id>` the way the capture record does, from
 this run's own id. Never edit an earlier review record and never delete one;
 post a new comment per round.
-
-Route that new comment through the broker executable, never directly through
-`gh`. Stage the body outside the checkout, create the workflow-shaped launch
-record and a private credential file, then send the staged body as a `comment`
-request. Do not print the credential or its path:
-
-    broker="$(pwd)/.claude-plugin/scripts/bin/publication_broker.py"
-    mkdir -p "${TMPDIR:-/tmp}/review"
-    broker_dir="$(mktemp -d "${TMPDIR:-/tmp}/review/broker.XXXXXX")"
-    broker_launch="$broker_dir/launch.json"
-    broker_credential="$broker_dir/credential"
-    broker_request="$broker_dir/request.json"
-    chmod 700 "$broker_dir"
-    cp <file> "$broker_dir/findings.md"
-    printf %s "$GITHUB_TOKEN" > "$broker_credential"
-    chmod 600 "$broker_credential"
-    python3 - "$broker_launch" "<number>" "$broker_dir" <<'PY'
-    import json
-    import sys
-
-    path, number, request_directory = sys.argv[1:]
-    with open(path, "w", encoding="utf-8") as stream:
-        json.dump(
-            {
-                "stage": "review",
-                "pull_request_number": int(number),
-                "request_directory": request_directory,
-            },
-            stream,
-        )
-    PY
-    chmod 600 "$broker_launch"
-    python3 - "$broker_request" "$broker_dir/findings.md" "<number>" <<'PY'
-    import json
-    import sys
-
-    path, body, number = sys.argv[1:]
-    with open(path, "w", encoding="utf-8") as stream:
-        json.dump(
-            {
-                "operation": "comment",
-                "claimed_stage": "review",
-                "pull_request_number": int(number),
-                "comment_body": body,
-            },
-            stream,
-        )
-        stream.write("\n")
-    PY
-    "$broker" --launch-file "$broker_launch" --credential-file "$broker_credential" \
-      < "$broker_request"
-
-The one JSON reply must have a null `refusal` and zero `exit_code`; otherwise
-the broker request is blocked. The reply's `stdout` is the forge output and
-contains the posted-comment URL. Run the executable in the foreground, never
-as a Python module or a background process.
 
 This record is the DURABLE second route to `proof_capture`. The engine
 preamble carries your response to the next stage, but a preamble is a

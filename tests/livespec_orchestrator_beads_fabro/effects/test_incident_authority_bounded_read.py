@@ -10,6 +10,7 @@ reads the same authority the full walk from genesis reads.
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
 
 import pytest
@@ -173,6 +174,39 @@ def test_a_current_read_reads_a_bounded_number_of_token_records(
     assert reading.current_token_id == tokens[-1]
     assert reading.committed_token_id == tokens[-2]
     assert reading.is_current
+
+
+def test_a_current_read_overlaps_its_item_and_comment_reads_while_verifying_the_head_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, tokens, _reads = _hinted(generations=1, monkeypatch=monkeypatch)
+    item_show_started = threading.Event()
+    comments_read_started = threading.Event()
+    show_issue = client.show_issue
+    list_comments = client.list_comments
+
+    def overlapping_show(*, issue_id: str) -> BeadsRecord:
+        if issue_id == _ITEM:
+            item_show_started.set()
+            assert comments_read_started.wait(
+                timeout=0.2
+            ), "read-current must start the item comments read before the item show returns"
+        return show_issue(issue_id=issue_id)
+
+    def overlapping_comments(*, issue_id: str) -> list[BeadsRecord]:
+        if issue_id == _ITEM:
+            comments_read_started.set()
+            assert item_show_started.wait(
+                timeout=0.2
+            ), "read-current must start the item show before the comments read returns"
+        return list_comments(issue_id=issue_id)
+
+    monkeypatch.setattr(client, "show_issue", overlapping_show)
+    monkeypatch.setattr(client, "list_comments", overlapping_comments)
+    reading = _current(client=client, item=_ITEM, generation=1)
+    assert reading.is_current
+    assert reading.committed_token_id == tokens[-2]
+    assert reading.current_token_id == tokens[-1]
 
 
 def test_the_incident_head_read_reads_a_bounded_number_of_token_records(

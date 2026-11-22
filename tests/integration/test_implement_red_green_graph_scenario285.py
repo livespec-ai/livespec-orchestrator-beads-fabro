@@ -39,6 +39,14 @@ def _scratch_repo(*, tmp_path: Path) -> Path:
     return repo
 
 
+# Every command node that holds no credential by contract starts by withdrawing them
+# (bd-ib-sgnfom; tests/integration/test_workflow_command_node_credential_scope_sgnfom.py).
+_WITHDRAWAL = (
+    "unset GITHUB_TOKEN GH_TOKEN GITHUB_APP_ID GITHUB_PRIVATE_KEY"
+    " GITHUB_APP_INSTALLATION_ID LIVESPEC_PUSH_TOKEN; "
+)
+
+
 def test_scenario285_routes_each_implement_commit_through_red_and_green_command_nodes() -> None:
     """The split replaces ``implement`` and admissions name exhausted bounds."""
     graph = _graph()
@@ -72,10 +80,12 @@ def test_scenario285_routes_each_implement_commit_through_red_and_green_command_
     assert ("commit_green", "green_admission", "outcome=failed") in edges
     assert ("commit_green", "implementation_diff", None) in edges
     assert graph.nodes["commit_red"]["script"] == (
-        'bash "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-red.sh"'
+        _WITHDRAWAL
+        + 'bash "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-red.sh"'
     )
     assert graph.nodes["commit_green"]["script"] == (
-        'bash "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-green.sh"'
+        _WITHDRAWAL
+        + 'bash "${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-commit-green.sh"'
         " {{ inputs.implement_mechanical_reentries }} {{ inputs.implement_mechanical_targets }}"
     )
     assert "commit-runner.py" not in graph.nodes["red"].get("prompt", "")
