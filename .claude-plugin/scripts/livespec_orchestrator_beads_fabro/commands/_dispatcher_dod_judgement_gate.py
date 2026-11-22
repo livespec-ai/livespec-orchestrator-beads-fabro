@@ -361,7 +361,5 @@ def _unavailable(  # noqa: PLR0913 - each argument is one field of the record it
             )
         )
     return DodJudgementDecision(
-        work_item_id=item.id,
-        outcome=JUDGEMENT_UNAVAILABLE,
-        unavailable_cause=cause,
+        work_item_id=item.id, outcome=JUDGEMENT_UNAVAILABLE, unavailable_cause=cause
     )
