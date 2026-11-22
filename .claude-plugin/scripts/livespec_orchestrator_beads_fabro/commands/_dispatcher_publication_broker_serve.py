@@ -28,7 +28,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TextIO, cast
 
-from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_types import CommandRunner
+from livespec_orchestrator_beads_fabro.commands._dispatcher_command_types import CommandRunner
 from livespec_orchestrator_beads_fabro.commands._dispatcher_publication_broker import (
     BrokerRequest,
     BrokerResult,

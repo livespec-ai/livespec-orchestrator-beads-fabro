@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_types import (
+from livespec_orchestrator_beads_fabro.commands._dispatcher_command_types import (
     CommandResult,
     CommandRunner,
 )

@@ -92,6 +92,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_proof_grade_program 
     proof_grade_program_source,
     proof_record_reader_sources,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_publication_broker_helpers import (
+    publication_broker_helpers,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_publication_head import (
     PROOF_HEAD_PROGRAM_FILENAME,
     proof_head_program_source,
@@ -259,7 +262,10 @@ def helper_registry(*, scripts_root: Path | None = None) -> tuple[Helper, ...]:
     """
     root = Path(__file__).resolve().parents[2] if scripts_root is None else scripts_root
     return (
-        _plugin_root_programs() + gh_refresh_helpers(scripts_root=root) + _credential_use_helpers()
+        _plugin_root_programs()
+        + gh_refresh_helpers(scripts_root=root)
+        + publication_broker_helpers(scripts_root=root)
+        + _credential_use_helpers()
     )
 
 
