@@ -261,6 +261,19 @@ def test_green_amend_arm_still_runs_the_incremental_coverage_gate(*, tmp_path: P
     assert _INCREMENTAL_GATE not in invocation
 
 
+def test_staged_python_files_run_the_precheck_before_the_full_aggregate(*, tmp_path: Path) -> None:
+    """An ordinary Python commit takes the fast staged check before its aggregate."""
+    repo, env = _init_repo(tmp_path=tmp_path, baseline_message="baseline")
+    _stage(repo=repo, relative_path=".claude-plugin/scripts/widget.py", body="VALUE = 1\n")
+
+    invocation = _invoke_pre_commit(repo=repo, env=env)
+
+    assert invocation.splitlines() == [
+        "check-staged-precheck",
+        f"check-skipping check-codex-skill-picker {_FLEET_LAUNCH_GATE}",
+    ]
+
+
 def _declare_sandbox_exempt(*, repo: Path) -> None:
     """Set the resolved sandbox-exemption marker the way the sandbox prepare step does."""
     result = _run(argv=["git", "config", "--bool", _SANDBOX_EXEMPT_MARKER, "true"], cwd=repo)
