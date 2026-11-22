@@ -237,14 +237,12 @@ def test_an_agent_stage_cannot_reach_gh_pull_request_publication(
     capture = tmp_path / "gh-calls.txt"
     bin_dir = _stub_path_dir(root=tmp_path / "bin", capture=capture)
     _run_prepare_chain(scripts=scripts, repo=repo, bin_dir=bin_dir, tmp_path=tmp_path)
+    _record_agent_stage(bundle_root=bundle_root, stage="proof_verify")
 
     result = subprocess.run(
         ["gh", *command],
         cwd=repo,
-        env={
-            **_chain_env(bin_dir=bin_dir, capture=capture, mint_log=tmp_path / "mint-args.txt"),
-            "LIVESPEC_AGENT_STAGE": "proof_verify",
-        },
+        env=_chain_env(bin_dir=bin_dir, capture=capture, mint_log=tmp_path / "mint-args.txt"),
         capture_output=True,
         text=True,
         check=False,
@@ -318,14 +316,12 @@ def test_an_agent_stage_cannot_reach_gh_api_pull_request_publication(
     capture = tmp_path / "gh-calls.txt"
     bin_dir = _stub_path_dir(root=tmp_path / "bin", capture=capture)
     _run_prepare_chain(scripts=scripts, repo=repo, bin_dir=bin_dir, tmp_path=tmp_path)
+    _record_agent_stage(bundle_root=bundle_root, stage="proof_verify")
 
     result = subprocess.run(
         ["gh", *command],
         cwd=repo,
-        env={
-            **_chain_env(bin_dir=bin_dir, capture=capture, mint_log=tmp_path / "mint-args.txt"),
-            "LIVESPEC_AGENT_STAGE": "proof_verify",
-        },
+        env=_chain_env(bin_dir=bin_dir, capture=capture, mint_log=tmp_path / "mint-args.txt"),
         capture_output=True,
         text=True,
         check=False,
@@ -361,6 +357,7 @@ def test_an_agent_stage_can_still_read_the_forge_through_gh(
     capture = tmp_path / "gh-calls.txt"
     bin_dir = _stub_path_dir(root=tmp_path / "bin", capture=capture)
     _run_prepare_chain(scripts=scripts, repo=repo, bin_dir=bin_dir, tmp_path=tmp_path)
+    _record_agent_stage(bundle_root=bundle_root, stage="proof_verify")
     _write_executable(
         path=bin_dir / "python3",
         source="#!/usr/bin/env bash\nset -eu\nprintf minted-token\n",
@@ -369,10 +366,7 @@ def test_an_agent_stage_can_still_read_the_forge_through_gh(
     result = subprocess.run(
         ["gh", *command],
         cwd=repo,
-        env={
-            **_chain_env(bin_dir=bin_dir, capture=capture, mint_log=tmp_path / "mint-args.txt"),
-            "LIVESPEC_AGENT_STAGE": "proof_verify",
-        },
+        env=_chain_env(bin_dir=bin_dir, capture=capture, mint_log=tmp_path / "mint-args.txt"),
         capture_output=True,
         text=True,
         check=False,
@@ -396,6 +390,7 @@ def test_scripted_publication_stages_can_still_use_the_gh_wrapper(
     capture = tmp_path / "gh-calls.txt"
     bin_dir = _stub_path_dir(root=tmp_path / "bin", capture=capture)
     _run_prepare_chain(scripts=scripts, repo=repo, bin_dir=bin_dir, tmp_path=tmp_path)
+    _record_agent_stage(bundle_root=bundle_root, stage=stage[0])
     _write_executable(
         path=bin_dir / "python3",
         source="#!/usr/bin/env bash\nset -eu\nprintf minted-token\n",
@@ -404,10 +399,7 @@ def test_scripted_publication_stages_can_still_use_the_gh_wrapper(
     result = subprocess.run(
         ["gh", "pr", "create"],
         cwd=repo,
-        env={
-            **_chain_env(bin_dir=bin_dir, capture=capture, mint_log=tmp_path / "mint-args.txt"),
-            "LIVESPEC_AGENT_STAGE": stage[0],
-        },
+        env=_chain_env(bin_dir=bin_dir, capture=capture, mint_log=tmp_path / "mint-args.txt"),
         capture_output=True,
         text=True,
         check=False,
@@ -423,12 +415,14 @@ def test_scripted_publication_stages_can_still_use_the_gh_wrapper(
 
 def test_an_agent_stage_cannot_push_any_ref_to_origin(tmp_path: Path) -> None:
     """The push helper refuses before even reading the origin remote."""
-    helper = tmp_path / "push_origin"
+    (tmp_path / "bin").mkdir()
+    helper = tmp_path / "bin" / "push_origin"
     _write_executable(path=helper, source=PUSH_ORIGIN_SOURCE)
+    _record_agent_stage(bundle_root=tmp_path, stage="proof_verify")
 
     result = subprocess.run(
         [str(helper), "git", "push", "origin", "HEAD:feature"],
-        env={**os.environ, "LIVESPEC_AGENT_STAGE": "proof_verify"},
+        env=os.environ,
         capture_output=True,
         text=True,
         check=False,
@@ -445,13 +439,14 @@ def test_scripted_publication_stages_can_still_push_origin(
     tmp_path: Path, stage: tuple[str]
 ) -> None:
     """The push helper reaches the requested origin push only in publication stages."""
-    helper = tmp_path / "push_origin"
     capture = tmp_path / "git-calls.txt"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    helper = bin_dir / "push_origin"
     _write_executable(path=helper, source=PUSH_ORIGIN_SOURCE)
+    _record_agent_stage(bundle_root=tmp_path, stage=stage[0])
     _write_executable(
-        path=tmp_path / "mint_app_token.py",
+        path=bin_dir / "mint_app_token.py",
         source="#!/usr/bin/env bash\nset -eu\nprintf minted-token\n",
     )
     _write_executable(
@@ -474,7 +469,6 @@ def test_scripted_publication_stages_can_still_push_origin(
         env={
             **os.environ,
             "GIT_CAPTURE": str(capture),
-            "LIVESPEC_AGENT_STAGE": stage[0],
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         },
         capture_output=True,
@@ -484,6 +478,11 @@ def test_scripted_publication_stages_can_still_push_origin(
 
     assert result.returncode == 0, result.stderr
     assert capture.read_text(encoding="utf-8").splitlines() == ["push origin HEAD:feature"]
+
+
+def _record_agent_stage(*, bundle_root: Path, stage: str) -> None:
+    """The dispatcher's record of the running agent node: its live launcher and its stage."""
+    (bundle_root / "agent-stage").write_text(f"{os.getpid()} {stage}\n", encoding="utf-8")
 
 
 def _rendered_prepare_scripts(

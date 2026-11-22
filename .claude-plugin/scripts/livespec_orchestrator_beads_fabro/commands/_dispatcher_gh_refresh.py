@@ -115,6 +115,7 @@ _AGENT_PUBLICATION_GUARD_SOURCE = r"""livespec_agent_publication_action() {
         "pr merge") printf '%s' gh_pr_merge ;;
         "pr edit") printf '%s' gh_pr_edit ;;
         "api "*) livespec_agent_api_publication_action "$@" ;;
+        "auth git-credential") livespec_agent_credential_action "${3:-}" ;;
         *) return 1 ;;
     esac
 }
@@ -199,19 +200,75 @@ livespec_agent_api_publication_action() {
     esac
 }
 
-livespec_agent_publication_guard_is_active() {
-    case "${LIVESPEC_AGENT_STAGE:-}" in
-        ''|publish_draft|pr_refresh|pr) return 1 ;;
-        *) return 0 ;;
+# The stage is the one the dispatcher recorded for the running agent node, in the bundle root,
+# beside `bin/`: `<launcher pid> <stage>`. It is never read from LIVESPEC_AGENT_STAGE, which the
+# agent sets inline (`env LIVESPEC_AGENT_STAGE=pr gh ...`) or exports. A record whose launcher is
+# gone belongs to a finished node, so a later publication node is unguarded; an unreadable record
+# is treated as an agent stage.
+livespec_agent_recorded_stage() {
+    record="$(dirname "$mint")/../agent-stage"
+    test -e "$record" || return 1
+    pid=''
+    stage=''
+    read -r pid stage <"$record" 2>/dev/null || true
+    case "$pid" in
+        ''|*[!0-9]*) printf '%s' unrecorded; return 0 ;;
     esac
+    kill -0 "$pid" 2>/dev/null || return 1
+    printf '%s' "$stage"
 }
 
-if livespec_agent_publication_guard_is_active \
-    && action="$(livespec_agent_publication_action "$@")"; then
-    printf 'LIVESPEC_AGENT_PUBLICATION_DENIED: stage=%s action=%s\n' \
-        "$LIVESPEC_AGENT_STAGE" "$action" >&2
-    exit 1
-fi
+# git asks its credential helper the same question for a fetch and a push, so the helper looks
+# at the git process that is asking: the nearest ancestor that is `git` itself (or a script
+# named git), and the subcommand it was started with. Only the read subcommands are served; an
+# unrecognised subcommand, or no git ancestor at all, is refused.
+livespec_agent_credential_action() {
+    test "${1:-}" = get || return 1
+    pid=$$
+    while test -n "$pid" && test "$pid" -gt 1; do
+        arguments=()
+        while IFS= read -r -d '' argument; do
+            arguments+=("$argument")
+        done <"/proc/$pid/cmdline" 2>/dev/null || true
+        offset=''
+        case "${arguments[0]:-}" in git|*/git) offset=1 ;; esac
+        case "${arguments[1]:-}" in git|*/git) offset=2 ;; esac
+        if test -n "$offset"; then
+            subcommand=''
+            skip=''
+            for argument in "${arguments[@]:$offset}"; do
+                if test -n "$skip"; then skip=''; continue; fi
+                case "$argument" in
+                    -C|-c|--git-dir|--work-tree|--namespace|--exec-path) skip=1 ;;
+                    -*) ;;
+                    *) subcommand="$argument"; break ;;
+                esac
+            done
+            case "$subcommand" in
+                fetch|pull|clone|ls-remote|submodule|remote) return 1 ;;
+            esac
+            printf '%s' git_push
+            return 0
+        fi
+        stat=$(cat "/proc/$pid/stat" 2>/dev/null) || break
+        stat=${stat##*) }
+        set -- $stat
+        pid=${2:-}
+    done
+    printf '%s' git_credential
+}
+
+agent_stage="$(livespec_agent_recorded_stage)" || agent_stage=''
+case "$agent_stage" in
+    ''|publish_draft|pr_refresh|pr) ;;
+    *)
+        if action="$(livespec_agent_publication_action "$@")"; then
+            printf 'LIVESPEC_AGENT_PUBLICATION_DENIED: stage=%s action=%s\n' \
+                "$agent_stage" "$action" >&2
+            exit 1
+        fi
+        ;;
+esac
 """
 
 
