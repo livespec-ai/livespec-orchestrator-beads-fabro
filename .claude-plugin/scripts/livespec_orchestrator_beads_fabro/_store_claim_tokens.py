@@ -160,15 +160,17 @@ def change_claim(  # noqa: PLR0911, PLR0913
             return ClaimChangeResult(outcome="claim-changed")
 
     update["metadata"] = _with_successor(record=record, metadata=metadata, successor=successor)
-    if _write_successor_until_read_back(
+    outcome = _write_successor_until_read_back(
         client=client,
         work_item_id=work_item_id,
+        predecessor=named,
         successor=successor,
         update=update,
         started=started,
         clock=clock,
-    ):
-        return ClaimChangeResult(outcome="applied", successor_token_id=successor)
+    )
+    if outcome != "claim-transition-unlanded":
+        return ClaimChangeResult(outcome=outcome, successor_token_id=successor)
     return ClaimChangeResult(
         outcome=_unlanded_transition_refusal(
             work_item_id=work_item_id,
@@ -179,15 +181,16 @@ def change_claim(  # noqa: PLR0911, PLR0913
     )
 
 
-def _write_successor_until_read_back(
+def _write_successor_until_read_back(  # noqa: PLR0913
     *,
     client: BeadsClient,
     work_item_id: str,
+    predecessor: str,
     successor: str,
     update: dict[str, Any],
     started: float,
     clock: Callable[[], float],
-) -> bool:
+) -> str:
     """Retry a won item write only while its lease can still authorize it.
 
     A command error does not prove that the server did not apply its write, and
@@ -195,21 +198,24 @@ def _write_successor_until_read_back(
     sole success condition.  Leaving the successor open on exhaustion lets the
     normal stranded-transition recovery take over later.
     """
-    for attempt in range(_ITEM_WRITE_RETRY_LIMIT + 1):
+    attempt = 0
+    while True:
         if clock() - started >= _LEASE_SECONDS:
-            return False
+            return "claim-transition-unlanded"
         with suppress(BeadsConnectionError):
             client.update_issue(**update, names_claim_token=True)
         try:
-            landed = _current_token(record=client.show_issue(issue_id=work_item_id)) == successor
+            current = _current_token(record=client.show_issue(issue_id=work_item_id))
         except BeadsConnectionError:
-            landed = False
-        if landed:
-            return True
+            current = predecessor
+        if current == successor:
+            return "applied"
+        if current != predecessor:
+            return "claim-changed"
         if attempt == _ITEM_WRITE_RETRY_LIMIT or clock() - started >= _LEASE_SECONDS:
-            return False
+            return "claim-transition-unlanded"
         time.sleep(_ITEM_WRITE_RETRY_BACKOFF_SECONDS * (attempt + 1))
-    return False
+        attempt += 1
 
 
 def _unlanded_transition_refusal(

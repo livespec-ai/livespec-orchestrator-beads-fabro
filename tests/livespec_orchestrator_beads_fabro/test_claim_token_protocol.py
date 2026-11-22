@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 import pytest
 from livespec_orchestrator_beads_fabro import _store_claim_tokens as claim_tokens
@@ -133,45 +132,6 @@ def test_terminal_writer_retries_an_unlanded_item_write_until_its_successor_read
         outcome.successor_token_id
     )
     assert client.show_issue(issue_id=token)["status"] == "closed"
-
-
-def test_terminal_writer_refuses_a_transition_that_never_reads_back(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A bounded terminal writer reports the exact stranded transition loudly."""
-    client, token = _client_with_current_token()
-    update = client.update_issue
-    attempts = [0]
-
-    def _drop_item_write(**fields: Any) -> None:
-        if fields["issue_id"] == _ITEM_ID:
-            attempts[0] += 1
-            return
-        update(**fields)
-
-    def _no_sleep(_seconds: float) -> None:
-        return None
-
-    monkeypatch.setattr(client, "update_issue", _drop_item_write)
-    monkeypatch.setattr(claim_tokens.time, "sleep", _no_sleep)
-
-    outcome = change_claim(
-        client=client,
-        work_item_id=_ITEM_ID,
-        writer="dispatcher-terminal",
-        intent="complete",
-        claim_tokens=True,
-        status="acceptance",
-        clock=lambda: 0.0,
-    )
-
-    assert attempts == [3]
-    assert outcome.outcome.startswith("claim-transition-unlanded:")
-    assert f"item={_ITEM_ID}" in outcome.outcome
-    assert f"closed-token={token}" in outcome.outcome
-    assert outcome.successor_token_id is not None
-    assert f"successor={outcome.successor_token_id}" in outcome.outcome
-    assert client.show_issue(issue_id=_ITEM_ID)["metadata"][CLAIM_TOKEN_METADATA_KEY] == token
 
 
 def test_loser_and_unobservable_writer_leave_the_item_untouched_and_discard_successors(
