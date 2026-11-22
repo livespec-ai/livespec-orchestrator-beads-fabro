@@ -293,3 +293,38 @@ def _item() -> object:
         id: str
 
     return _Item(id="ad-1")
+
+
+def _with_listing(*, listing: CommandResult) -> _Runner:
+    runner = _runner(identity=_named(), probe=CommandResult(exit_code=0, stdout="", stderr=""))
+    runner.results[tuple(preflight._INSTALLATION_LISTING_ARGV)] = listing  # noqa: SLF001
+    return runner
+
+
+def test_a_listing_naming_the_target_casefolded_reaches() -> None:
+    """An installation that lists the target, in any letter case, covers it."""
+    listing = CommandResult(exit_code=0, stdout=f"other/repo\n{_TARGET.upper()}\n", stderr="")
+
+    reading = _reading(runner=_with_listing(listing=listing), token_supplier=lambda: _TOKEN)
+
+    assert reading.reaches is True
+    assert "covers" in reading.detail
+
+
+def test_a_readable_listing_missing_the_target_is_the_definite_negative() -> None:
+    """A readable target absent from the installation's listing refuses."""
+    listing = CommandResult(exit_code=0, stdout="other/repo\n", stderr="")
+
+    reading = _reading(runner=_with_listing(listing=listing), token_supplier=lambda: _TOKEN)
+
+    assert reading.reaches is False
+    assert "not installed" in reading.detail
+
+
+def test_an_unreadable_listing_keeps_the_read_reach_answer() -> None:
+    """A listing that cannot be read never turns a read-reach into a refusal."""
+    listing = CommandResult(exit_code=1, stdout="", stderr="HTTP 500")
+
+    reading = _reading(runner=_with_listing(listing=listing), token_supplier=lambda: _TOKEN)
+
+    assert reading.reaches is True
