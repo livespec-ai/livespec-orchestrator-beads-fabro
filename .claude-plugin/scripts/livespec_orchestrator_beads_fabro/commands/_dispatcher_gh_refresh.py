@@ -247,8 +247,13 @@ livespec_agent_credential_action() {
             case "$subcommand" in
                 fetch|pull|clone|ls-remote|submodule|remote) return 1 ;;
             esac
-            printf '%s' git_push
-            return 0
+            # Over http git asks from its transport helper, `git remote-http`, a child of the
+            # user's own `git fetch`/`git push`: that is not the command being classified, so
+            # the walk goes on to its parent.
+            case "$subcommand" in
+                remote-http|remote-https) ;;
+                *) printf '%s' git_push; return 0 ;;
+            esac
         fi
         stat=$(cat "/proc/$pid/stat" 2>/dev/null) || break
         stat=${stat##*) }
