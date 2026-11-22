@@ -105,6 +105,30 @@ def dispatch_base(root):
     raise RuntimeError("gate preview found too many consecutive Fabro checkpoint commits")
 
 
+def latest_checkpoint(root):
+    """Return this run's newest checkpoint, if its history carries one.
+
+    ``dispatch_base`` deliberately walks past consecutive checkpoints so the
+    preview can identify every path that ``commit_green`` will fold.  That is
+    not, however, the tree the hook is meant to inspect: a Green run's latest
+    checkpoint is the tree it will hand to the commit node.  Keep these two
+    choices separate.
+    """
+    ref = "HEAD"
+    for _ in range(CHECKPOINT_LIMIT):
+        if checkpoint_commit(ref, root):
+            return ref
+        parent = command("git", "rev-parse", "--verify", f"{ref}~1", cwd=root, check=False)
+        if parent.returncode:
+            return None
+        ref = f"{ref}~1"
+    raise RuntimeError("gate preview found too many commits while finding its checkpoint")
+
+
+def tree_sha(ref, root):
+    return git("rev-parse", f"{ref}^{{tree}}", cwd=root).stdout.strip()
+
+
 def changed_paths(root, base):
     tracked = git("diff", "--name-only", "--no-renames", base, cwd=root).stdout.splitlines()
     untracked = git("ls-files", "--others", "--exclude-standard", cwd=root).stdout.splitlines()
@@ -206,22 +230,44 @@ def preview_parent():
 def preview(stage, test_file, hook_log):
     root = Path(git("rev-parse", "--show-toplevel", cwd=Path.cwd()).stdout.strip())
     base = dispatch_base(root)
+    checkpoint = latest_checkpoint(root) if stage == "green" else None
+    checkpoint_tree = tree_sha(checkpoint, root) if checkpoint else None
+    preview_ref = checkpoint or base
     paths = selected_paths(stage, root, test_file, base)
     if not paths:
-        return 2, [], [], False, None
+        return 2, [], [], False, None, None
     preview_root = Path(tempfile.mkdtemp(prefix="livespec-gate-preview-", dir=preview_parent()))
     unset = []
+    tree_mismatch = None
     try:
-        git("worktree", "add", "--detach", "--quiet", str(preview_root), base, cwd=root)
+        git("worktree", "add", "--detach", "--quiet", str(preview_root), preview_ref, cwd=root)
+        graded_tree = tree_sha("HEAD", preview_root)
+        if checkpoint_tree is not None and graded_tree != checkpoint_tree:
+            tree_mismatch = {
+                "graded_tree_sha": graded_tree,
+                "latest_checkpoint_tree_sha": checkpoint_tree,
+            }
         for path in paths:
             copy_path(path, root, preview_root)
-        git("add", "--all", "--", *paths, cwd=preview_root)
+        if checkpoint is None:
+            git("add", "--all", "--", *paths, cwd=preview_root)
+        else:
+            # The hook must see the same affected-path scope that commit_green
+            # gets after folding checkpoint commits, while its HEAD must remain
+            # the latest checkpoint tree.  Seed the disposable index with the
+            # pre-checkpoint base, which makes checkpoint-carried paths visible
+            # to hook selectors without moving HEAD.  Only post-checkpoint
+            # edits need ordinary staging on top of that index.
+            git("read-tree", base, cwd=preview_root)
+            after_checkpoint = changed_paths(root, checkpoint)
+            if after_checkpoint:
+                git("add", "--all", "--", *after_checkpoint, cwd=preview_root)
         hook_path = git(
             "rev-parse", "--git-path", "hooks/pre-commit", cwd=preview_root
         ).stdout.strip()
         hook = Path(hook_path)
         if not hook.is_file():
-            return 0, [], unset, True, None
+            return 0, [], unset, True, None, tree_mismatch
         environment, unset = skipped_environment()
         # The hook selects the scoped affected-tests gate for commits made by an
         # implement turn.  This disposable index is the prospective implement
@@ -237,10 +283,10 @@ def preview(stage, test_file, hook_log):
         trust_output = trust.stdout + trust.stderr
         if trust.returncode:
             sys.stderr.write(trust_output)
-            return trust.returncode, [], unset, False, None
+            return trust.returncode, [], unset, False, None, tree_mismatch
         exports, exports_status = just_exports(cwd=preview_root, environment=environment)
         if exports_status:
-            return exports_status, [], unset, False, None
+            return exports_status, [], unset, False, None, tree_mismatch
         environment.update(exports)
         # The hook's output streams into the log the caller follows (bd-ib-42erfz):
         # captured in memory, nothing reached a caller until the whole aggregate
@@ -259,10 +305,10 @@ def preview(stage, test_file, hook_log):
         preview_ran = bool(HOOK_STEP_RAN.search(output)) or not bool(
             NO_MATCHING_STAGED_FILES.search(output)
         )
-        return returncode, failed_targets(output), unset, preview_ran, output
+        return returncode, failed_targets(output), unset, preview_ran, output, tree_mismatch
     except (OSError, RuntimeError) as error:
         print(error, file=sys.stderr)
-        return 2, [], unset, False, None
+        return 2, [], unset, False, None, tree_mismatch
     finally:
         command("git", "worktree", "remove", "--force", str(preview_root), cwd=root, check=False)
         shutil.rmtree(preview_root, ignore_errors=True)
@@ -468,7 +514,7 @@ def launch(stage, test_file):
 def work(stage, test_file):
     record = record_path(toplevel(), stage)
     write_json(record, running_record(stage, os.getpid(), time.time(), record))
-    status, targets, unset, preview_ran, output = preview(
+    status, targets, unset, preview_ran, output, tree_mismatch = preview(
         stage, test_file, log_paths(record, stage)[0]
     )
     report = {
@@ -479,6 +525,8 @@ def work(stage, test_file):
     }
     if status != 0 and not targets and output is not None:
         report["output_tail"] = output_tail(output)
+    if tree_mismatch is not None:
+        report.update(tree_mismatch)
     sys.stdout.flush()
     sys.stderr.flush()
     write_json(record, report)
