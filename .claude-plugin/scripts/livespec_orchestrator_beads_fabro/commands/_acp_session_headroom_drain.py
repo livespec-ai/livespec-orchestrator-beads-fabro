@@ -122,6 +122,8 @@ class SessionHeadroomBaseline:
     utilization_percent: float
     observed_at: str
     elapsed_hours: float
+    carried_drain_percent_per_hour: float | None = None
+    unavailable_reason: str | None = None
 
 
 def drain_rate_attempted(*, reading: SessionHeadroomReading, floor_percent: int) -> bool:
@@ -202,6 +204,13 @@ def reading_with_drain_rate(
     negative rate would report a credential REFILLING at a measured pace, which
     an operator judging a floor's adequacy would read as headroom arriving.
     """
+    if baseline is not None and baseline.unavailable_reason is not None:
+        return reading
+    if baseline is not None and baseline.carried_drain_percent_per_hour is not None:
+        return replace(
+            reading,
+            five_hour_drain_percent_per_hour=baseline.carried_drain_percent_per_hour,
+        )
     utilization = reading.utilization_percent
     if baseline is None or utilization is None or utilization <= baseline.utilization_percent:
         return reading

@@ -66,6 +66,7 @@ from livespec_orchestrator_beads_fabro.commands._acp_session_headroom_drain impo
 from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential import (
     CLAUDE_OAUTH_TOKEN_ENV,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import state_root
 
 _NOW = "2026-10-16T12:00:00Z"
 _EARLIER = "2026-10-16T11:30:00Z"
@@ -350,3 +351,43 @@ def test_the_gate_projects_once_per_credential_and_spends_one_usage_request(
     assert first.projection.result == headroom.PROJECTED_RESULT
     assert first.projection.projected_exhaustion_at == "2026-10-16T12:37:30Z"
     assert first.projection.horizon_minutes == _HORIZON
+
+
+def test_an_empty_checkout_journal_uses_its_hosts_credential_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A new checkout inherits a same-host rate without treating it as unavailable."""
+    monkeypatch.setenv(CLAUDE_OAUTH_TOKEN_ENV, _TOKEN)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "host-state"))
+    host_history = (
+        state_root() / "livespec-orchestrator-beads-fabro" / "session-headroom-history.jsonl"
+    )
+    host_history.parent.mkdir(parents=True)
+    _ = host_history.write_text(
+        json.dumps(
+            {
+                "credential_identity": _IDENTITY,
+                "utilization_percent": 10.0,
+                "observed_at": _EARLIER,
+                "repository": "another-repository",
+                "checkout": "/worktrees/another-checkout",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def _read(*, token: str | None, observed_at: str) -> headroom.SessionHeadroomReading:
+        assert token == _TOKEN
+        return headroom.session_headroom_reading(
+            credential_identity=_IDENTITY, observed_at=observed_at, utilization=50
+        )
+
+    reading = headroom_gate.session_headroom_policy(
+        repo=tmp_path,
+        now_iso=_NOW,
+        journal_path=tmp_path / "empty-checkout-journal.jsonl",
+        read=_read,
+    ).read()
+
+    assert reading.five_hour_drain_percent_per_hour == 80.0

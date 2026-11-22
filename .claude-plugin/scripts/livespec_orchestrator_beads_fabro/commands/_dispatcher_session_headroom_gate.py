@@ -91,6 +91,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_account_sele
 from livespec_orchestrator_beads_fabro.commands._dispatcher_session_headroom_baseline import (
     session_headroom_baseline,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_session_headroom_host_history import (
+    append_host_session_headroom_history,
+    host_session_headroom_baseline,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_session_headroom_io import (
     central_slot_identity,
     read_projected_session_headroom,
@@ -278,6 +282,11 @@ def _assessed(
         if drain_rate_attempted(reading=reading, floor_percent=floor_percent)
         else None
     )
+    if baseline is None and drain_rate_attempted(reading=reading, floor_percent=floor_percent):
+        history = host_session_headroom_baseline(
+            credential_identity=reading.credential_identity, now_iso=now_iso
+        )
+        baseline = history.baseline
     rated = reading_with_drain_rate(reading=reading, baseline=baseline)
     return reading_with_projection(
         reading=rated,
@@ -343,7 +352,11 @@ def _projected_token(*, env_name: str) -> str | None:
 
 
 def journal_session_headroom(
-    *, work_item_id: str, verdict: AcpPreflightVerdict, journal: JournalWriter
+    *,
+    work_item_id: str,
+    verdict: AcpPreflightVerdict,
+    journal: JournalWriter,
+    repo: Path | None = None,
 ) -> None:
     """Record this evaluation's readings against ONE affected work-item.
 
@@ -391,6 +404,7 @@ def journal_session_headroom(
                 nodes=verdict.nodes,
             )
         )
+        append_host_session_headroom_history(assessments=verdict.headroom_assessments, repo=repo)
     if verdict.codex_headroom_assessments:
         journal.append(
             record=codex_headroom_assessment_record(

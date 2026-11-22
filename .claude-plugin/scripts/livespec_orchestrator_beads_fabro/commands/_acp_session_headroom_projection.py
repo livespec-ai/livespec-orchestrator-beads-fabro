@@ -72,6 +72,7 @@ __all__: list[str] = [
     "FLOOR_DISABLED_REASON",
     "FLOOR_SKIPPED_READING_REASON",
     "FLOOR_SKIP_KIND",
+    "HOST_HISTORY_UNREADABLE_REASON",
     "NO_BASELINE_REASON",
     "PROJECTION_SKIP_KIND",
     "SEVEN_DAY_FLOOR_SKIP_KIND",
@@ -102,6 +103,7 @@ UNOBSERVABLE_READING_REASON = "unobservable-reading"
 # this module's own: an observation instant that cannot be read is an
 # exhaustion instant that cannot be rendered.
 NO_BASELINE_REASON = "no-baseline"
+HOST_HISTORY_UNREADABLE_REASON = "host-history-unreadable"
 UTILIZATION_NOT_HIGHER_REASON = "utilization-not-higher"
 UNREADABLE_OBSERVATION_REASON = "unreadable-observation-instant"
 
@@ -242,7 +244,11 @@ def _attempted_projection(
             result=UNAVAILABLE_RESULT,
             reason=_unavailable_reason(baseline=baseline, observed=observed),
             five_hour_drain_percent_per_hour=rate,
-            baseline_observed_at=None if baseline is None else baseline.observed_at,
+            baseline_observed_at=(
+                None
+                if baseline is None or baseline.unavailable_reason is not None
+                else baseline.observed_at
+            ),
             horizon_minutes=horizon_minutes,
         )
     exhaustion = observed + timedelta(hours=remaining / rate)
@@ -303,7 +309,9 @@ def projection_skips_candidate(*, reading: SessionHeadroomReading) -> bool:
 
 
 def _unavailable_reason(
-    *, baseline: SessionHeadroomBaseline | None, observed: datetime | None
+    *,
+    baseline: SessionHeadroomBaseline | None,
+    observed: datetime | None,
 ) -> str:
     """Which input an attempted projection could not measure.
 
@@ -315,6 +323,8 @@ def _unavailable_reason(
     """
     if observed is None:
         return UNREADABLE_OBSERVATION_REASON
+    if baseline is not None and baseline.unavailable_reason is not None:
+        return baseline.unavailable_reason
     if baseline is None:
         return NO_BASELINE_REASON
     return UTILIZATION_NOT_HIGHER_REASON

@@ -152,7 +152,9 @@ def filter_eligible_candidates(
         # for each affected work-item whether or not it refused anything, and
         # recording it inside the ladder would lose it on exactly the admitted
         # case the journal exists to make auditable.
-        journal_session_headroom(work_item_id=item.id, verdict=preflight, journal=journal)
+        journal_session_headroom(
+            work_item_id=item.id, verdict=preflight, journal=journal, repo=repo
+        )
         refusal = _refusal_for(
             repo=repo,
             preflight=preflight,
