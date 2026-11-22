@@ -58,6 +58,11 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_effective_criteria i
     EffectiveCriteria,
     effective_criteria,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_filing_node_rubric import (
+    NodeJudgementTaker,
+    host_node_judgement_taker,
+    node_rubric_lines,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import ShellCommandRunner
 from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import store_config
 from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_capabilities import (
@@ -125,7 +130,11 @@ UNDECLARED_PROOF_MODE_REPORT = "undeclared"
 
 
 def filing_display(
-    *, item: WorkItem, cwd: Path, governing: GoverningHeadingReader | None = None
+    *,
+    item: WorkItem,
+    cwd: Path,
+    governing: GoverningHeadingReader | None = None,
+    node_judgement: NodeJudgementTaker | None = None,
 ) -> str:
     """The whole pre-confirmation display for one item, as lines of text.
 
@@ -159,6 +168,13 @@ def filing_display(
     the advisory directly, through `advisory_definition_of_done_findings`.
     """
     not_taken_reason: str | None = None
+    # The node rubric is taken by default exactly when the production governing
+    # reader is, so a caller that names its own reader spends no second judgement.
+    taker = (
+        host_node_judgement_taker()
+        if governing is None and node_judgement is None
+        else node_judgement
+    )
     if governing is None:
         taking = host_governing_heading_taking_reader(runner=ShellCommandRunner())(
             item=item, repo=cwd
@@ -181,6 +197,8 @@ def filing_display(
             not_taken_reason=not_taken_reason,
         )
     )
+    if taker is not None:
+        lines.extend(node_rubric_lines(judgement=taker(item=item, cwd=cwd, governing=verdict)))
     lines.extend(_recorded_tier_lines(item=item, cwd=cwd))
     return "\n".join(lines)
 
