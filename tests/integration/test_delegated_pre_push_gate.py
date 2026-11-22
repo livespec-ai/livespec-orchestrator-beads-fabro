@@ -96,6 +96,10 @@ def _run_delegate_probe(
     from `sys.argv`, so both are set here and nothing else about the call
     differs from the one a pre-push hook makes.
     """
+    # A cluster gate Job exports LIVESPEC_GATE_CONTEXT, and the shared client then
+    # narrates "running inside the delegated gate Job" instead of the host answer
+    # under test, so an inherited value is scrubbed.
+    monkeypatch.delenv("LIVESPEC_GATE_CONTEXT", raising=False)
     monkeypatch.setenv(_GATES_KUBECONFIG_ENV, str(kubeconfig))
     monkeypatch.chdir(_REPO_ROOT)
     monkeypatch.setattr(sys, "argv", ["gate_remote_delegate", "enabled"])
