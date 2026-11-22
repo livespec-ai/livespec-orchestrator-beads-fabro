@@ -93,7 +93,7 @@ def test_the_probe_carries_the_minted_token_rather_than_the_ambient_login() -> N
     a fleet operator reaching an adopter repository is a credential that CAN see
     it — a clean, plausible, entirely wrong reach reading.
     """
-    runner = _runner(identity=_named(), probe=CommandResult(exit_code=0, stdout="", stderr=""))
+    runner = _with_listing(listing=CommandResult(exit_code=0, stdout=f"{_TARGET}\n", stderr=""))
 
     reading = _reading(runner=runner, token_supplier=lambda: _TOKEN)
 
@@ -293,3 +293,39 @@ def _item() -> object:
         id: str
 
     return _Item(id="ad-1")
+
+
+def _with_listing(*, listing: CommandResult) -> _Runner:
+    runner = _runner(identity=_named(), probe=CommandResult(exit_code=0, stdout="", stderr=""))
+    runner.results[tuple(preflight._INSTALLATION_LISTING_ARGV)] = listing  # noqa: SLF001
+    return runner
+
+
+def test_a_listing_naming_the_target_casefolded_reaches() -> None:
+    """An installation that lists the target, in any letter case, covers it."""
+    listing = CommandResult(exit_code=0, stdout=f"other/repo\n{_TARGET.upper()}\n", stderr="")
+
+    reading = _reading(runner=_with_listing(listing=listing), token_supplier=lambda: _TOKEN)
+
+    assert reading.reaches is True
+    assert "covers" in reading.detail
+
+
+def test_a_readable_listing_missing_the_target_is_the_definite_negative() -> None:
+    """A readable target absent from the installation's listing refuses."""
+    listing = CommandResult(exit_code=0, stdout="other/repo\n", stderr="")
+
+    reading = _reading(runner=_with_listing(listing=listing), token_supplier=lambda: _TOKEN)
+
+    assert reading.reaches is False
+    assert "not installed" in reading.detail
+
+
+def test_an_unreadable_listing_is_unknown_and_never_a_refusal() -> None:
+    """A listing that cannot be read is unobservable, so it never refuses."""
+    listing = CommandResult(exit_code=1, stdout="", stderr="HTTP 500")
+
+    reading = _reading(runner=_with_listing(listing=listing), token_supplier=lambda: _TOKEN)
+
+    assert reading.reaches is None
+    assert "HTTP 500" in reading.detail
