@@ -31,7 +31,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from livespec_orchestrator_beads_fabro._beads_client import (
+    FakeBeadsClient,
+    make_beads_client,
+    reset_fake_singleton,
+)
+from livespec_orchestrator_beads_fabro._store_dispatch_claim import CLAIM_STAMP_METADATA_KEY
 from livespec_orchestrator_beads_fabro.commands import _acp_session_headroom as headroom
+from livespec_orchestrator_beads_fabro.commands import (
+    _dispatcher_admission as admission_module,
+)
 from livespec_orchestrator_beads_fabro.commands import (
     _dispatcher_central_factory_selection as central_module,
 )
@@ -68,6 +77,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_claude_credential_po
     parse_claude_credential_policy,
     resolve_claude_credential_policy,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_io import JournalFile, utc_now_iso
+from livespec_orchestrator_beads_fabro.store import append_work_item
+from livespec_orchestrator_beads_fabro.types import StoreConfig, WorkItem
 from returns.result import Failure, Success
 
 _PLUGIN = "livespec-orchestrator-beads-fabro"
@@ -675,3 +687,180 @@ def test_no_central_row_is_written_under_local_ranking(tmp_path: Path) -> None:
     headroom_gate.journal_session_headroom(work_item_id="bd-x", verdict=verdict, journal=journal)
 
     assert _central_rows(journal) == []
+
+
+# --- no claim is taken without a usable central record ------------------------
+#
+# Scenario 378: with the record absent, unreadable, naming no account, stale, or
+# naming a slot the policy does not declare or the wrapper does not inject, covered
+# candidates are skipped with `no-central-factory-selection` AND "the item stays
+# ready without a claim". These drive the REAL admission valve (`admit_and_select`)
+# against the in-memory tenant and assert on what the tenant holds afterwards, so the
+# claim is observed at the seam that writes it, not at a stand-in for it.
+
+_CLAIM_ITEM_ID = "bd-ib-noclaim"
+
+
+def _tenant_config() -> StoreConfig:
+    return StoreConfig(
+        tenant="livespec-impl-beads",
+        prefix="bd-ib",
+        server_user="livespec-impl-beads",
+        database="livespec-impl-beads",
+        bd_path="bd",
+        fake=True,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _fresh_tenant(monkeypatch: pytest.MonkeyPatch) -> Any:
+    monkeypatch.setenv("LIVESPEC_BEADS_FAKE", "1")
+    reset_fake_singleton()
+    yield
+    reset_fake_singleton()
+
+
+def _ready_item() -> WorkItem:
+    return WorkItem(
+        id=_CLAIM_ITEM_ID,
+        type="task",
+        status="ready",
+        title="A ready slice behind the central factory selection",
+        description="Implement the slice.",
+        origin="freeform",
+        gap_id=None,
+        rank="a0",
+        assignee=None,
+        depends_on=(),
+        captured_at="2026-11-21T00:00:00Z",
+        resolution=None,
+        reason=None,
+        audit=None,
+        superseded_by=None,
+    )
+
+
+def _claim_repo(*, tmp_path: Path) -> Path:
+    repo = tmp_path / "governed"
+    repo.mkdir()
+    config = {
+        _PLUGIN: {
+            "connection": {"prefix": "bd-ib"},
+            "dispatcher": {
+                "claude_credential_policy": {
+                    "mode": NUMBERED_SLOTS,
+                    "slots": [_SLOT_4, _SLOT_5],
+                    "selection": CENTRAL_FACTORY_SELECTION,
+                }
+            },
+        }
+    }
+    (repo / ".livespec.jsonc").write_text(json.dumps(config), encoding="utf-8")
+    return repo
+
+
+def _admit_with_readings(
+    *, repo: Path, monkeypatch: pytest.MonkeyPatch, seen: list[str | None]
+) -> admission_module.Admission:
+    item = _ready_item()
+    path = repo / "journal.jsonl"
+    path.write_text("", encoding="utf-8")
+    real_policy = headroom_gate.session_headroom_policy
+    monkeypatch.setattr(
+        admission_module,
+        "session_headroom_policy",
+        lambda **kwargs: real_policy(
+            **kwargs,
+            read=_reader(utilization_by_token={_TOKENS[_SLOT_5]: 10.0}, seen=seen),
+        ),
+    )
+    return admission_module.admit_and_select(
+        repo=repo,
+        items=[item],
+        candidates=[item],
+        journal=JournalFile(path=path),
+        enforce_cap=False,
+    )
+
+
+def _tenant_item() -> dict[str, Any]:
+    client = make_beads_client(config=_tenant_config())
+    assert isinstance(client, FakeBeadsClient)
+    return client.show_issue(issue_id=_CLAIM_ITEM_ID)
+
+
+def _no_claim_taken(*, record: dict[str, Any]) -> None:
+    assert record["status"] == "ready"
+    assert not record.get("assignee")
+    assert CLAIM_STAMP_METADATA_KEY not in (record.get("metadata") or {})
+    assert record.get("comments") in (None, [], ())
+
+
+def _unreadable_record(*, home: Path) -> None:
+    record = home / central_module.FACTORY_SELECTION_RECORD_REL
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.mkdir()
+
+
+def _arrange_record(*, kind: str, home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lay down the central record in one of the six unusable conditions."""
+    now = utc_now_iso()
+    if kind == "unreadable":
+        _unreadable_record(home=home)
+    elif kind == "names no account":
+        _write_record(home=home, payload=_record(profile=None, written_at=now))
+    elif kind == "stale":
+        _write_record(home=home, payload=_record(written_at="2000-01-01T00:00:00Z"))
+    elif kind == "not declared":
+        _write_record(home=home, payload=_record(profile="anthropic-9", written_at=now))
+    elif kind == "not injected non-empty":
+        _write_record(home=home, payload=_record(written_at=now))
+        monkeypatch.setenv(_SLOT_5, "")
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "record absent",
+        "unreadable",
+        "names no account",
+        "stale",
+        "not declared",
+        "not injected non-empty",
+    ],
+)
+def test_no_usable_central_record_skips_the_candidate_and_takes_no_claim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    condition: str,
+) -> None:
+    repo = _claim_repo(tmp_path=tmp_path)
+    append_work_item(path=_tenant_config(), item=_ready_item())
+    _arrange_record(kind=condition, home=tmp_path, monkeypatch=monkeypatch)
+    seen: list[str | None] = []
+
+    admission = _admit_with_readings(repo=repo, monkeypatch=monkeypatch, seen=seen)
+
+    assert admission.admitted == []
+    (refused,) = admission.refused
+    assert refused.work_item_id == _CLAIM_ITEM_ID
+    assert refused.stage == "claude-credential-refusal"
+    assert "no-central-factory-selection" in refused.detail
+    assert condition in refused.detail
+    assert seen == []
+    _no_claim_taken(record=_tenant_item())
+
+
+def test_a_current_central_record_does_take_the_claim_so_the_control_can_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _claim_repo(tmp_path=tmp_path)
+    append_work_item(path=_tenant_config(), item=_ready_item())
+    _write_record(home=tmp_path, payload=_record(written_at=utc_now_iso()))
+
+    admission = _admit_with_readings(repo=repo, monkeypatch=monkeypatch, seen=[])
+
+    assert [item.id for item in admission.admitted] == [_CLAIM_ITEM_ID]
+    record = _tenant_item()
+    assert (record["status"], record["assignee"]) == ("active", "fabro")
+    assert CLAIM_STAMP_METADATA_KEY in record["metadata"]
