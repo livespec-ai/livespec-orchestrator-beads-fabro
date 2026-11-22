@@ -36,7 +36,10 @@ restriction is a separate limitation that slice S4 owns.
 
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
     CommandRunner,
@@ -49,9 +52,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_implement_adapter im
     implement_adapter_selection,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_tdd_commits import (
+    GREEN_TRAILER_KEY,
+    RED_TRAILER_KEY,
     TddCommitSignals,
     commit_trailers,
-    parse_commit_messages,
     tdd_commit_signals,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_tdd_order_sink import TddOrderSink
@@ -80,6 +84,14 @@ _DISPATCH_ID_FIELD = "dispatch_id"
 # The commit-series probe budget, matching the sibling merged-PR diff-size
 # probe: fail-soft to None rather than hold up an already-final verdict.
 _COMMITS_PROBE_TIMEOUT_SECONDS = 60.0
+
+
+@dataclass(frozen=True, kw_only=True)
+class _Commit:
+    """The PR-list evidence needed to inspect one authored commit's files."""
+
+    message: str
+    oid: str | None
 
 
 def gather_tdd_signals(
@@ -201,14 +213,128 @@ def commit_signals_for_dispatch(
     )
     if result.exit_code != 0:
         return None
-    messages = parse_commit_messages(stdout=result.stdout)
-    if messages is None:
+    commits = _commits_from_payload(stdout=result.stdout)
+    if commits is None:
         return None
     mine = tuple(
-        message
-        for message in messages
-        if commit_trailers(message=message).get(FACTORY_RUN_ID_TRAILER_KEY) == dispatch_id
+        commit
+        for commit in commits
+        if commit_trailers(message=commit.message).get(FACTORY_RUN_ID_TRAILER_KEY) == dispatch_id
     )
     if not mine:
         return None
-    return tdd_commit_signals(messages=mine)
+    messages = tuple(commit.message for commit in mine)
+    return tdd_commit_signals(
+        messages=messages,
+        green_exempt_messages=_green_exempt_messages(repo=repo, commits=mine, runner=runner),
+    )
+
+
+def _commits_from_payload(*, stdout: str) -> tuple[_Commit, ...] | None:
+    """Parse PR commits while retaining the object id needed for file evidence."""
+    try:
+        payload_raw: object = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload_raw, dict):
+        return None
+    payload = cast("dict[str, object]", payload_raw)
+    raw_commits = payload.get("commits")
+    if not isinstance(raw_commits, list):
+        return None
+    commits: list[_Commit] = []
+    for raw in cast("list[object]", raw_commits):
+        if not isinstance(raw, dict):
+            continue
+        entry = cast("dict[str, object]", raw)
+        headline = entry.get("messageHeadline")
+        if not isinstance(headline, str):
+            continue
+        body = entry.get("messageBody")
+        oid = entry.get("oid")
+        commits.append(
+            _Commit(
+                message=f"{headline}\n\n{body if isinstance(body, str) else ''}",
+                oid=oid if isinstance(oid, str) and oid else None,
+            )
+        )
+    return tuple(commits)
+
+
+def _green_exempt_messages(
+    *, repo: Path, commits: tuple[_Commit, ...], runner: CommandRunner
+) -> frozenset[str]:
+    """Return Red-only commits whose non-Python amend was hook-green-exempt.
+
+    The Red-Green hook deliberately omits its Green trailer when an amend has
+    implementation outside `tests/` but no Python implementation. A commit's
+    message alone cannot distinguish that accepted amend from a genuine open
+    Red, so inspect changed-file evidence only for Red-only candidates. An
+    unavailable lookup contributes no synthetic Green.
+    """
+    candidates = tuple(
+        commit
+        for commit in commits
+        if commit.oid is not None
+        and RED_TRAILER_KEY in commit_trailers(message=commit.message)
+        and GREEN_TRAILER_KEY not in commit_trailers(message=commit.message)
+    )
+    if not candidates:
+        return frozenset()
+    repository = _repository_name(repo=repo, runner=runner)
+    if repository is None:
+        return frozenset()
+    exempt: set[str] = set()
+    for commit in candidates:
+        result = runner.run(
+            argv=["gh", "api", f"/repos/{repository}/commits/{commit.oid}"],
+            cwd=repo,
+            timeout_seconds=_COMMITS_PROBE_TIMEOUT_SECONDS,
+        )
+        if result.exit_code == 0 and _has_only_non_python_implementation(stdout=result.stdout):
+            exempt.add(commit.message)
+    return frozenset(exempt)
+
+
+def _repository_name(*, repo: Path, runner: CommandRunner) -> str | None:
+    """The repository slug used by the commit-files REST endpoint."""
+    result = runner.run(
+        argv=["gh", "repo", "view", "--json", "nameWithOwner"],
+        cwd=repo,
+        timeout_seconds=_COMMITS_PROBE_TIMEOUT_SECONDS,
+    )
+    if result.exit_code != 0:
+        return None
+    try:
+        payload_raw: object = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload_raw, dict):
+        return None
+    payload = cast("dict[str, object]", payload_raw)
+    name = payload.get("nameWithOwner")
+    return name if isinstance(name, str) and name else None
+
+
+def _has_only_non_python_implementation(*, stdout: str) -> bool:
+    """Whether a commit has implementation outside tests but no Python there."""
+    try:
+        payload_raw: object = json.loads(stdout)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(payload_raw, dict):
+        return False
+    payload = cast("dict[str, object]", payload_raw)
+    files = payload.get("files")
+    if not isinstance(files, list):
+        return False
+    implementation_paths = [
+        filename
+        for raw_file in cast("list[object]", files)
+        if isinstance(raw_file, dict)
+        and isinstance((filename := cast("dict[str, object]", raw_file).get("filename")), str)
+        and not filename.startswith("tests/")
+    ]
+    return bool(implementation_paths) and all(
+        not filename.endswith(".py") for filename in implementation_paths
+    )

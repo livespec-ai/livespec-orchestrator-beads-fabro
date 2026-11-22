@@ -22,6 +22,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_calibration import (
+    build_calibration_record,
+    calibration_journal_record,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_calibration_span import (
+    calibration_request_line,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
     CommandResult,
     DispatchOutcome,
@@ -314,6 +321,110 @@ def test_a_non_green_outcome_still_reads_its_published_series() -> None:
 
     assert signals is not None
     assert signals.red_commit_count == 1
+
+
+def test_a_green_exempt_non_python_amend_is_a_completed_cycle_in_both_terminal_projections(
+    tmp_path: Path,
+) -> None:
+    """A `.fabro` Green amend keeps Red trailers but owes no Green trailer.
+
+    The hook accepts this pair because its implementation is non-Python, so
+    the terminal projections must recognise its committed file list as the
+    sanctioned completed cycle rather than presenting it as an open Red.
+    """
+    module = _module()
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_tdd_order_sink import TddOrderSink
+
+    class _GreenExemptRunner:
+        def run(
+            self,
+            *,
+            argv: list[str],
+            cwd: Path,
+            timeout_seconds: float,
+            env: dict[str, str] | None = None,
+        ) -> CommandResult:
+            assert cwd == Path("/repo")
+            assert timeout_seconds > 0
+            assert env is None
+            if argv[:3] == ["gh", "pr", "view"]:
+                return CommandResult(
+                    exit_code=0,
+                    stdout=json.dumps(
+                        {
+                            "headRepository": {"nameWithOwner": "livespec-ai/test-repo"},
+                            "commits": [
+                                {
+                                    "oid": "abc123",
+                                    "messageHeadline": "fix: change the workflow",
+                                    "messageBody": (
+                                        "TDD-Red-Captured-At: 2026-11-22T18:00:00Z\n"
+                                        f"Factory-Run-Id: {_DISPATCH_ID}\n"
+                                    ),
+                                }
+                            ],
+                        }
+                    ),
+                    stderr="",
+                )
+            if argv[:3] == ["gh", "repo", "view"]:
+                return CommandResult(
+                    exit_code=0,
+                    stdout='{"nameWithOwner": "livespec-ai/test-repo"}',
+                    stderr="",
+                )
+            if argv[:2] == ["gh", "api"] and argv[-1].endswith("/commits/abc123"):
+                return CommandResult(
+                    exit_code=0,
+                    stdout=json.dumps(
+                        {
+                            "files": [
+                                {
+                                    "filename": (
+                                        ".claude-plugin/.fabro/workflows/implement-work-item/"
+                                        "workflow.fabro"
+                                    )
+                                },
+                                {"filename": "tests/integration/test_workflow_slice.py"},
+                            ]
+                        }
+                    ),
+                    stderr="",
+                )
+            raise AssertionError(f"unexpected command: {argv}")
+
+    signals = module.gather_tdd_signals(
+        repo=Path("/repo"),
+        item=_item(),
+        outcome=_outcome(),
+        records=(_dispatch_id_record(),),
+        sink=TddOrderSink(path=tmp_path / "tdd-order.json"),
+        runner=_GreenExemptRunner(),
+    )
+    record = build_calibration_record(
+        item=_item(),
+        outcome=_outcome(),
+        repo_name="livespec-orchestrator-beads-fabro",
+        journal_records=(),
+        wall_clock_seconds=1.0,
+        token_cost_micros=None,
+        dispatch_context_size=1,
+        merged_pr_diff_size=None,
+        tdd=signals,
+    )
+    journal = calibration_journal_record(record=record)
+    span = json.loads(calibration_request_line(record=record, now_ns=1))
+    attributes = {
+        entry["key"]: entry["value"]
+        for entry in span["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
+    }
+
+    assert (
+        journal["tdd.red_commit_count"],
+        journal["tdd.green_commit_count"],
+        attributes["tdd.red_commit_count"],
+        attributes["tdd.green_commit_count"],
+    ) == (1, 1, {"intValue": "1"}, {"intValue": "1"})
 
 
 # --- the assembled signals -------------------------------------------------
