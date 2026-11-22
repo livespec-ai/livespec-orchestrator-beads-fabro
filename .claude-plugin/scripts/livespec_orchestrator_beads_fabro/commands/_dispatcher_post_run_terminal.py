@@ -16,6 +16,9 @@ from dataclasses import dataclass, replace
 from livespec_orchestrator_beads_fabro.commands._dispatcher_already_satisfied import (
     already_satisfied_outcome,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_gate_tier_hold import (
+    attach_dod_gate_tier_hold,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine_journal import (
     journal_run_output_markers,
     run_wall_budget_outcome,
@@ -192,6 +195,9 @@ def post_run_terminal(
             events_payload=None if inspect is None else inspect.events_payload,
             journal=journal,
         )
+        # The hold a dod_gate check 4 refusal leaves, placed at the step that blocks
+        # the item so release-spec-tier is valid on it (bd-ib-dfqrc7).
+        refusal = attach_dod_gate_tier_hold(outcome=refusal, repo=plan.repo, journal=journal)
     return PostRunTerminal(
         run_id=run_id,
         run_output=run_output,
