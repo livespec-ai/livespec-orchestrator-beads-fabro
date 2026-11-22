@@ -174,6 +174,29 @@ def test_gate_preview_records_the_hook_output_tail_when_no_failed_target_summary
     assert report.get("output_tail", "").endswith("type pre-check rejected created.py\n")
 
 
+def test_gate_preview_records_an_empty_output_tail_when_the_failing_hook_wrote_nothing(
+    tmp_path: Path,
+) -> None:
+    """A silent non-zero hook still records an output tail, so the refusal can say so."""
+    preview = importlib.import_module(_MODULE)
+    repo, runner, env = _preview_repository(tmp_path=tmp_path, preview=preview)
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 23\n", encoding="utf-8")
+    hook.chmod(0o755)
+
+    completed = _run(
+        repo=repo,
+        env=env,
+        argv=[sys.executable, str(runner), "green"],
+        check=False,
+    )
+
+    report = cast("dict[str, Any]", json.loads(completed.stdout.splitlines()[-1]))
+    assert completed.returncode == 23
+    assert report["failed_targets"] == []
+    assert report["output_tail"] == ""
+
+
 def test_gate_preview_redacts_credential_shaped_values_from_the_recorded_output_tail(
     tmp_path: Path,
 ) -> None:
