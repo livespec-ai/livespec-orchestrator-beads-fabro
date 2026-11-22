@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.345.4](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.345.3...v0.345.4) (2026-11-22)
+
+
+### Bug Fixes
+
+* a Green turn that changed the Red test file has it restored from the Red commit at the end of the green node (bd-ib-v2amjz) ([6b6a1b5](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/6b6a1b5146d034630944b5babc0dbb2007add6ec))
+* **bd-ib-2cye52:** an agent stage mints a read-only installation token ([3e1b304](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/3e1b304d838fa59c55a1ccf44efca665687de565))
+* label a dispatch whose goal carries preserved-work riders seeded, never fresh ([facc91c](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/facc91c20a37a4d048d18586158af054e51c6193))
+
 ## [0.345.3](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.345.2...v0.345.3) (2026-11-22)
 
 
