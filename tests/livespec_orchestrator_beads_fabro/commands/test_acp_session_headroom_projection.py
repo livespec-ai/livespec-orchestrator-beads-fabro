@@ -359,6 +359,14 @@ def test_an_empty_checkout_journal_uses_its_hosts_credential_baseline(
     """A new checkout inherits a same-host rate without treating it as unavailable."""
     monkeypatch.setenv(CLAUDE_OAUTH_TOKEN_ENV, _TOKEN)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "host-state"))
+    attempts: list[headroom.SessionHeadroomReading] = []
+    original_attempted = headroom_gate.drain_rate_attempted
+
+    def _attempted(*, reading: headroom.SessionHeadroomReading, floor_percent: int) -> bool:
+        attempts.append(reading)
+        return original_attempted(reading=reading, floor_percent=floor_percent)
+
+    monkeypatch.setattr(headroom_gate, "drain_rate_attempted", _attempted)
     host_history = (
         state_root() / "livespec-orchestrator-beads-fabro" / "session-headroom-history.jsonl"
     )
@@ -391,3 +399,4 @@ def test_an_empty_checkout_journal_uses_its_hosts_credential_baseline(
     ).read()
 
     assert reading.five_hour_drain_percent_per_hour == 80.0
+    assert len(attempts) == 1
