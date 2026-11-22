@@ -277,6 +277,7 @@ def _drive_wave(*, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Wave:
         )
 
     monkeypatch.setattr(loop_wave, "dispatch_one", _launch)
+    monkeypatch.setattr(loop_wave, "launching_preserved_work_riders", lambda **_kwargs: ())
     outcomes = loop_wave.dispatch_loop_wave(
         args=_args(repo=tmp_path, journal=journal),
         repo=tmp_path,

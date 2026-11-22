@@ -59,6 +59,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_records imp
     recovery_route_record,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_recovery_routes import (
+    ROUTE_FRESH,
     ROUTE_RESUME,
     RecoveryRoute,
 )
@@ -146,7 +147,12 @@ def recovery_launch_args(
     return seeded
 
 
-def journal_recovery_route(*, route: RecoveryRoute | None, journal: JournalFile) -> None:
+def journal_recovery_route(
+    *,
+    route: RecoveryRoute | None,
+    journal: JournalFile,
+    carried_riders: Callable[[], tuple[str, ...]] | None = None,
+) -> None:
     """Record this item's route, now that the valve has decided it will launch.
 
     An item routing never measured writes NOTHING, because there is no route to
@@ -157,9 +163,17 @@ def journal_recovery_route(*, route: RecoveryRoute | None, journal: JournalFile)
     the route row says which route this pass took, while the resume record is the
     attribution link, and an interrupted write that landed only the route row
     would leave a resumed run looking plain rather than looking unattributed.
+
+    `carried_riders` answers the preserved-work riders this dispatch's goal will
+    carry (`_dispatcher_recovery_rider_read`). It is asked only for a `fresh`
+    route, the one label those riders can make false, so no other route pays for
+    the ledger read.
     """
     if route is None:
         return
+    seeded_by_riders = (
+        carried_riders() if carried_riders is not None and route.route == ROUTE_FRESH else ()
+    )
     resume = route.resume
     if resume is not None:
         journal.append(
@@ -180,5 +194,6 @@ def journal_recovery_route(*, route: RecoveryRoute | None, journal: JournalFile)
             loss=route.loss,
             preserved_work=route.preserved_work,
             fresh=route,
+            seeded_by_riders=seeded_by_riders,
         )
     )

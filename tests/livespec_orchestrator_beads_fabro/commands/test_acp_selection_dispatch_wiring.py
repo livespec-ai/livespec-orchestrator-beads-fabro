@@ -450,6 +450,7 @@ def test_the_loop_wave_launches_every_admitted_item_with_the_admission_verdict(
     )
     monkeypatch.setattr(wave_module, "args_with_dispatch_workflow_name", _same_args)
     monkeypatch.setattr(wave_module, "post_admission_publish_branch_reclaim", _unused)
+    monkeypatch.setattr(wave_module, "launching_preserved_work_riders", lambda **_kwargs: ())
     monkeypatch.setattr(wave_module, "await_usable_credential", _unused)
 
     _ = wave_module.dispatch_loop_wave(
