@@ -192,10 +192,10 @@ question of fact — the spec tree above all.
 4. **The assertions are coherent.** This is the judgement only you can make.
    Read each assertion against the item's title, its description, and the
    **referenced heading** you resolved in step 2, then ask: could a competent
-   engineer, given this repository and that heading, tell whether this
-   assertion is satisfied? An assertion a competent engineer could not
-   recognise as satisfied or unsatisfied from the referenced heading is
-   INCOHERENT and is a finding.
+   engineer tell from that heading's whole section whether this assertion is
+   satisfied? An assertion a competent engineer could not recognise as satisfied or unsatisfied from the referenced heading is
+   INCOHERENT and is a finding. Repository state may supply evidence for an assertion, but it
+   cannot make coherent a claim that the referenced section does not govern.
 
    **A referenced heading means its WHOLE SECTION, never its lead text
    alone.** The referenced heading you read is the named H2 together with
@@ -224,6 +224,13 @@ question of fact — the spec tree above all.
    or derive the assertion. This exception applies only to that current newest
    record and only to its matching References heading; without it, a
    non-governing referenced heading remains incoherent under this check.
+
+   A `kind: unstated` governing-heading verdict does NOT license a pass.
+   An assertion remains incoherent when the referenced heading's whole section
+   does not state or derive its subject, even if an engineer could check that
+   subject from repository state without the specification. That verdict means
+   no governing heading was returned for the reference-line check; it does not
+   relax this coherence check.
 
    Concretely, treat these as incoherent:
    - An assertion whose subject does not appear in, and cannot be derived

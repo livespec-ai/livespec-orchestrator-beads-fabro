@@ -148,10 +148,10 @@ api_call() {
   local curl_stderr="${tmpdir}/api-curl-stderr"
   local status
   if status="$(
-    curl --fail-with-body --silent --show-error \
+    printf 'X-Honeycomb-Team: %s\n' "${api_key}" | curl --fail-with-body --silent --show-error \
       --request "${method}" \
       --url "${url}" \
-      --header "X-Honeycomb-Team: ${api_key}" \
+      --header @- \
       --header "Content-Type: application/json" \
       "${data_arg[@]}" \
       --output "${body}" \

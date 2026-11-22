@@ -91,6 +91,11 @@ from __future__ import annotations
 import re
 import shlex
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_gh_refresh import (
+    DEFAULT_SANDBOX_GH_REFRESH_ROOT,
+    SANDBOX_GH_REFRESH_ROOT_ENV_VAR,
+)
+
 __all__: list[str] = [
     "CREDENTIAL_EXPIRY_ENV_VAR",
     "CREDENTIAL_REQUIRED_REMAINING_ENV_VAR",
@@ -321,6 +326,17 @@ if [ "${{1:-}}" = "--check-start" ]; then
     shift
 elif [ "${{1:-}}" = "--" ]; then
     shift
+fi
+
+# THE DISPATCHER'S STAGE RECORD (bd-ib-ssipvb). The workflow node's stage reaches this
+# guard through the leading env assignment the renderer wrote, which the agent cannot have
+# edited because it has not started. Record it beside the publication helpers as
+# `<this launcher's pid> <stage>`; the publication guard reads THAT, never an environment
+# value the agent sets, and treats the record as ended once this launcher has exited.
+if [ "$mode" != "check" ] && [ -n "${{LIVESPEC_AGENT_STAGE:-}}" ]; then
+    stage_root="${{{SANDBOX_GH_REFRESH_ROOT_ENV_VAR}:-{DEFAULT_SANDBOX_GH_REFRESH_ROOT}}}"
+    {{ printf '%s %s\\n' "$$" "$LIVESPEC_AGENT_STAGE" \\
+        >"$stage_root/agent-stage"; }} 2>/dev/null || true
 fi
 
 # A proof-capture turn is read-only. Git evaluates `-c core.hooksPath=...`

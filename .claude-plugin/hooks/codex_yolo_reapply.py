@@ -40,7 +40,6 @@ The classification and rewrite logic is PURE so it is unit-testable by import,
 with no subprocess spawn (`check-tests-no-subprocess-spawn`).
 """
 
-# EXPEDITED_INCIDENT_RESPONSE flag: bd-ib-r4xzme
 from __future__ import annotations
 
 import sys

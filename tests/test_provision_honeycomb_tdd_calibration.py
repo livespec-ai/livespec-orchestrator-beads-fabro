@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 from collections.abc import Iterator
@@ -419,6 +420,38 @@ def _run(
     )
 
 
+def _write_recording_curl_stub(*, bin_dir: Path) -> None:
+    """Install a curl shim that records its argv and stdin before delegating."""
+    real_curl = shutil.which("curl")
+    assert real_curl is not None, "the test image must provide curl"
+    stub = bin_dir / "curl"
+    _ = stub.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'printf \'%s\\0\' "$@" >> "${CURL_ARGV_LOG}"\n'
+        "printf '%s\\n' '-- curl stdin --' >> \"${CURL_STDIN_LOG}\"\n"
+        "read_stdin=0\n"
+        "previous=''\n"
+        'for argument in "$@"; do\n'
+        '  if [[ "${previous}" == --header && "${argument}" == @- ]]; then\n'
+        "    read_stdin=1\n"
+        "  fi\n"
+        '  previous="${argument}"\n'
+        "done\n"
+        "if ((read_stdin)); then\n"
+        "  input=$(mktemp)\n"
+        "  trap 'rm -f \"${input}\"' EXIT\n"
+        '  cat >"${input}"\n'
+        '  cat "${input}" >> "${CURL_STDIN_LOG}"\n'
+        '  "${CURL_REAL_BINARY}" "$@" <"${input}"\n'
+        "else\n"
+        '  "${CURL_REAL_BINARY}" "$@"\n'
+        "fi\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+
+
 def _post(*, api_base: str, path: str, payload: dict[str, Any]) -> int:
     """POST a payload straight at the fixture, returning its status code."""
     request = Request(  # noqa: S310 — the local test fixture.
@@ -499,6 +532,36 @@ def test_every_committed_panel_is_a_query_panel_with_a_caption_and_a_position() 
 
 
 # --- provisioning, against the local fixture -------------------------------
+
+
+def test_every_calibration_request_keeps_the_api_key_out_of_curl_argv(
+    honeycomb: tuple[_FakeHoneycomb, str], tmp_path: Path
+) -> None:
+    """The management key must reach curl's headers through stdin, never argv."""
+    _api, api_base = honeycomb
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    curl_argv_log = tmp_path / "curl-argv.log"
+    curl_stdin_log = tmp_path / "curl-stdin.log"
+    _write_recording_curl_stub(bin_dir=bin_dir)
+
+    result = _run(
+        api_base=api_base,
+        overrides={
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "CURL_ARGV_LOG": str(curl_argv_log),
+            "CURL_STDIN_LOG": str(curl_stdin_log),
+            "CURL_REAL_BINARY": shutil.which("curl") or "curl",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    argv = curl_argv_log.read_bytes()
+    stdin = curl_stdin_log.read_text(encoding="utf-8")
+    calls = stdin.count("-- curl stdin --\n")
+    assert calls > 0
+    assert _API_KEY.encode() not in argv
+    assert stdin.count(f"X-Honeycomb-Team: {_API_KEY}") == calls
 
 
 def test_a_first_run_creates_every_resource(

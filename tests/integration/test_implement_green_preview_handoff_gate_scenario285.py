@@ -15,6 +15,7 @@ _GATE = "implement_completion"
 _COMPLETION = '{"definition_of_done_complete": true}'
 _PREVIEW_RECORD = "livespec-implement-gate-preview-green-result.json"
 _HANDOFF = "livespec-implement-handoff.md"
+_SEED_HEAD_VARIABLE = "LIVESPEC_RESUME_PUBLISHED_HEAD"
 
 
 def _gate_script() -> str:
@@ -160,7 +161,10 @@ def _seed_clean_green_records(*, repo: Path) -> None:
     )
 
 
-def _run_gate(*, repo: Path) -> subprocess.CompletedProcess[str]:
+def _run_gate(*, repo: Path, seed_head: str | None = None) -> subprocess.CompletedProcess[str]:
+    env = {key: value for key, value in os.environ.items() if key != _SEED_HEAD_VARIABLE}
+    if seed_head is not None:
+        env[_SEED_HEAD_VARIABLE] = seed_head
     return subprocess.run(
         ["sh", "-c", _gate_script()],
         cwd=repo,
@@ -168,13 +172,20 @@ def _run_gate(*, repo: Path) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         input=_COMPLETION,
         text=True,
+        env=env,
     )
 
 
 def test_a_seeded_green_is_never_judged_clean_against_a_non_dispatch_remote_branch(
     tmp_path: Path,
 ) -> None:
-    """With origin/HEAD absent, an unrelated remote branch is not the dispatch base."""
+    """With origin/HEAD absent, an unrelated remote branch is not the dispatch base.
+
+    The unrelated branch stands at HEAD, so reading it as the base would judge the
+    tree unchanged and take the already-satisfied terminal. Read against
+    origin/master, the committed change is a carried seed, which proceeds to
+    commit_green (bd-ib-orez2i).
+    """
     repo, _base = _clean_seeded_repo(tmp_path=tmp_path)
     _ = (repo / "changed.txt").write_text("seeded green change\n", encoding="utf-8")
     _ = subprocess.run(["git", "add", "changed.txt"], cwd=repo, check=True)
@@ -184,10 +195,10 @@ def test_a_seeded_green_is_never_judged_clean_against_a_non_dispatch_remote_bran
     )
     _seed_clean_green_records(repo=repo)
 
-    completion = _run_gate(repo=repo)
+    completion = _run_gate(repo=repo, seed_head=_head(repo=repo))
 
     assert completion.returncode == 0, completion.stderr
-    assert json.loads(completion.stdout) == {"preferred_next_label": "incomplete"}
+    assert json.loads(completion.stdout) == {"preferred_next_label": "complete"}
 
 
 def test_a_seeded_green_fails_closed_when_the_dispatch_base_ref_is_missing(
@@ -207,3 +218,111 @@ def test_a_seeded_green_fails_closed_when_the_dispatch_base_ref_is_missing(
 
     assert completion.returncode == 0, completion.stderr
     assert json.loads(completion.stdout) == {"preferred_next_label": "incomplete"}
+
+
+def _head(*, repo: Path) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _carried_seed_repo(*, tmp_path: Path) -> Path:
+    """A seeded clone whose HEAD carries a complete change the dispatch base lacks."""
+    repo, _base = _clean_seeded_repo(tmp_path=tmp_path)
+    _ = (repo / "carried.py").write_text("ANSWER = 42\n", encoding="utf-8")
+    _ = subprocess.run(["git", "add", "carried.py"], cwd=repo, check=True)
+    _ = subprocess.run(
+        ["git", "commit", "--quiet", "-m", "reseed: complete tree of an earlier run"],
+        cwd=repo,
+        check=True,
+    )
+    _seed_clean_green_records(repo=repo)
+    return repo
+
+
+def test_a_carried_complete_seed_with_preview_exit_two_proceeds_to_commit_green(
+    tmp_path: Path,
+) -> None:
+    """A seeded-red-passes Green that stages nothing on a carried seed is complete.
+
+    The carried seed already meets the Definition of Done and is not on the
+    dispatch base, so its preview has nothing to stage and exits 2 with no failed
+    targets. The run must reach commit_green and publish the carried change
+    (Scenario 285, "A seed whose carried changes already meet the Definition of
+    Done is published"), not end refused at the preview. Measured on run
+    01M819P2G6AK (livespec-driver-codex-hmfbv4), where this exact record ended
+    the run at needs_human (bd-ib-orez2i).
+    """
+    repo = _carried_seed_repo(tmp_path=tmp_path)
+
+    completion = _run_gate(repo=repo, seed_head=_head(repo=repo))
+
+    assert completion.returncode == 0, completion.stderr
+    assert json.loads(completion.stdout) == {"preferred_next_label": "complete"}
+    assert "LIVESPEC_GREEN_PREVIEW_REFUSED" not in completion.stderr
+    assert "LIVESPEC_CARRIED_SEEDED_GREEN" in completion.stderr
+    handoff = (repo / ".git" / _HANDOFF).read_text(encoding="utf-8")
+    assert "## green-preview-refused" not in handoff
+    graph = parse_dot_graph(text=_GRAPH.read_text(encoding="utf-8"))
+    assert not isinstance(graph, str), graph
+    complete_route = next(
+        edge.destination
+        for edge in graph.edges
+        if edge.source == _GATE and edge.attributes.get("condition") == "preferred_label=complete"
+    )
+    assert complete_route == "commit_green"
+
+
+def test_a_carried_seed_with_an_uncommitted_change_is_still_refused(tmp_path: Path) -> None:
+    """A Green that left a tracked change uncommitted has something the preview never graded."""
+    repo = _carried_seed_repo(tmp_path=tmp_path)
+    seed_head = _head(repo=repo)
+    _ = (repo / "carried.py").write_text("ANSWER = 43\n", encoding="utf-8")
+
+    completion = _run_gate(repo=repo, seed_head=seed_head)
+
+    assert completion.returncode == 0, completion.stderr
+    assert json.loads(completion.stdout) == {"preferred_next_label": "incomplete"}
+    assert "LIVESPEC_GREEN_PREVIEW_REFUSED" in completion.stderr
+
+
+def test_a_fresh_run_whose_red_turn_claims_seeded_red_passes_is_not_routed_to_commit_green(
+    tmp_path: Path,
+) -> None:
+    """Only a SEEDED run's untouched seed takes the carried route; a fresh run's own turn never does.
+
+    Measured on fresh run 01M81FHNK5J3 (livespec-dev-tooling-mwh6o5, candidate
+    :32278): red@1 implemented the change in its own turn, commit_red refused it
+    ("names no test file") and left the tree carrying that change, and red@2 then
+    called it a preserved implementation and declared seeded-red-passes. Its Green
+    preview exited 2 with no failed targets. With no LIVESPEC_RESUME_PUBLISHED_HEAD,
+    no seed exists, so the carried route must not admit that turn's change
+    (bd-ib-orez2i).
+    """
+    repo = _carried_seed_repo(tmp_path=tmp_path)
+
+    completion = _run_gate(repo=repo)
+
+    assert completion.returncode == 0, completion.stderr
+    assert json.loads(completion.stdout) == {"preferred_next_label": "incomplete"}
+    assert "LIVESPEC_CARRIED_SEEDED_GREEN" not in completion.stderr
+    assert "LIVESPEC_GREEN_PREVIEW_REFUSED" in completion.stderr
+
+
+def test_a_seeded_run_whose_turns_changed_the_seed_is_not_routed_to_commit_green(
+    tmp_path: Path,
+) -> None:
+    """A committed change made on top of the seed by this run's own turns is not the carried seed."""
+    repo = _carried_seed_repo(tmp_path=tmp_path)
+    seed_head = _head(repo=repo)
+    _ = (repo / "turn.py").write_text("WRITTEN_BY_THIS_RUN = True\n", encoding="utf-8")
+    _ = subprocess.run(["git", "add", "turn.py"], cwd=repo, check=True)
+    _ = subprocess.run(
+        ["git", "commit", "--quiet", "-m", "fabro(01FIXTURE): red (success)"], cwd=repo, check=True
+    )
+
+    completion = _run_gate(repo=repo, seed_head=seed_head)
+
+    assert completion.returncode == 0, completion.stderr
+    assert json.loads(completion.stdout) == {"preferred_next_label": "incomplete"}
+    assert "LIVESPEC_CARRIED_SEEDED_GREEN" not in completion.stderr

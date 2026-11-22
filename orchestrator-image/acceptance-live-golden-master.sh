@@ -76,7 +76,7 @@ VARLIB_VOL="${VARLIB_VOL:-livespec-orch-live-gm-varlib}"
 FABRO_PORT_WAS_SET="${FABRO_PORT+x}"
 FABRO_PORT="${FABRO_PORT:-32276}"
 HOST_PUBLISH_PORT="${HOST_PUBLISH_PORT:-32282}"
-HOST_FABRO_BIN="${HOST_FABRO_BIN:-$HOME/.fabro/bin/fabro}"
+HOST_FABRO_BIN="${HOST_FABRO_BIN:-$HOME/.local/state/fabro-web-prod/v0408-d22808f8e/fabro}"
 # The impl-beads repo is mounted so the dispatcher code + the
 # .fabro/workflows/implement-work-item/ phase graph resolve from the package
 # root; the throwaway clone is mounted separately as the dispatch --repo.
@@ -253,8 +253,15 @@ cleanup() {
 trap cleanup EXIT
 
 stage_and_build_image() {
+  local expected_sha256 computed_sha256
   log "staging Fabro binary and building $IMAGE"
   [ -x "$HOST_FABRO_BIN" ] || fail "fabro binary not found at $HOST_FABRO_BIN"
+  expected_sha256="$(sed -nE 's/^ARG FABRO_BINARY_SHA256=([[:xdigit:]]{64})$/\1/p' "$HERE/Dockerfile")"
+  [ "$(printf '%s\n' "$expected_sha256" | wc -l | tr -d ' ')" -eq 1 ] \
+    || fail "could not read a single FABRO_BINARY_SHA256 from $HERE/Dockerfile"
+  computed_sha256="$(sha256sum "$HOST_FABRO_BIN" | awk '{print $1}')"
+  [ "$computed_sha256" = "$expected_sha256" ] \
+    || fail "fabro binary sha256 mismatch: expected $expected_sha256, computed $computed_sha256"
   cp "$HOST_FABRO_BIN" "$HERE/fabro"
   chmod +x "$HERE/fabro"
   # Log fabro's version for the record. Capture-then-head, NEVER a live
