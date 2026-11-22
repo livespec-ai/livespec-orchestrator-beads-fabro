@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+staged=$(git diff --cached --name-only --diff-filter=AM)
+py_staged=$(echo "$staged" | grep -E '\.py$' || true)
+
+# Refuse lint and type errors before the delegated or local aggregate starts.
+# The no-Python path below remains its early exit and does not invoke this
+# staged-files-only check.
+if [[ -n "$py_staged" ]] \
+    && ! uv run python -m livespec_dev_tooling.workflow_checks.staged_precheck; then
+    echo ":: staged pre-check phase refused the commit" >&2
+    exit 1
+fi
+
 # The gate Job sets LIVESPEC_GATE_CONTEXT after restoring the staged index.
 # Its aggregate must run locally there, never submit another Job.
 if [[ -z "${LIVESPEC_GATE_CONTEXT:-}" ]]; then
@@ -54,8 +66,6 @@ fi
 # nothing extra is skipped.
 read -ra delegated_skip_targets <<< "${SKIP_TARGETS:-}"
 
-staged=$(git diff --cached --name-only --diff-filter=AM)
-py_staged=$(echo "$staged" | grep -E '\.py$' || true)
 # The ordinary Red/Green shape detection below intentionally considers only
 # added and modified paths. An authoring turn's affected-tests gate, however,
 # must also cover a deleted product module: the selector includes deletions in
@@ -215,9 +225,6 @@ if [[ "$merge_in_progress" == false ]] \
             echo ":: doc-only gates refused the commit" >&2
             exit 1
         fi
-    elif ! just check-staged-precheck; then
-        echo ":: staged pre-check phase refused the commit" >&2
-        exit 1
     fi
     if [[ -n "$fleet_launch_input_staged" ]] && ! just check-fleet-launch; then
         echo ":: fleet-launch gate refused the commit" >&2
@@ -242,7 +249,9 @@ if [[ "$merge_in_progress" == false ]] \
     && grep -q 'TDD-Red-Test-File-Checksum:' <<<"$head_msg" \
     && ! grep -q 'TDD-Green-Verified-At:' <<<"$head_msg"; then
     echo ":: Green-amend shape detected (implementation staged; HEAD carries Red-only trailers)"
-    if ! just check-staged-precheck; then
+    # A workflow-only Green amend reaches this arm without a staged Python
+    # file. Keep its existing staged-precheck phase before staged tests.
+    if [[ -z "$py_staged" ]] && ! just check-staged-precheck; then
         echo ":: staged pre-check phase refused the commit" >&2
         exit 1
     fi

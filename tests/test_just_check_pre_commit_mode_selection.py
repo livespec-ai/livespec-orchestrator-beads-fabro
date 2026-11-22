@@ -58,7 +58,7 @@ def _run(
 
 
 def _install_fake_just(*, repo: Path) -> Path:
-    """Put a `just` on PATH that records its argv instead of running the aggregate."""
+    """Put hook stand-ins on PATH that record aggregate calls instead of running them."""
     bin_dir = repo / "fake-bin"
     bin_dir.mkdir()
     fake_just = bin_dir / "just"
@@ -78,6 +78,24 @@ def _install_fake_just(*, repo: Path) -> Path:
         encoding="utf-8",
     )
     _ = fake_just.chmod(fake_just.stat().st_mode | stat.S_IXUSR)
+    fake_uv = bin_dir / "uv"
+    _ = fake_uv.write_text(
+        "\n".join(
+            (
+                "#!/usr/bin/env bash",
+                "set -uo pipefail",
+                'case "$*" in',
+                '  *"workflow_checks.staged_precheck"*)',
+                '    printf "%s\\n" "check-staged-precheck" >> just.log',
+                "    ;;",
+                '  *"pre_commit_delegate run"*) exit 75 ;;',
+                "esac",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _ = fake_uv.chmod(fake_uv.stat().st_mode | stat.S_IXUSR)
     return bin_dir
 
 
