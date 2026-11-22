@@ -245,7 +245,8 @@ record and a private credential file, then send the staged body as a `comment`
 request. Do not print the credential or its path:
 
     broker="$(pwd)/.claude-plugin/scripts/bin/publication_broker.py"
-    broker_dir="$(mktemp -d \"${TMPDIR:-/tmp}/review/broker.XXXXXX\")"
+    mkdir -p "${TMPDIR:-/tmp}/review"
+    broker_dir="$(mktemp -d "${TMPDIR:-/tmp}/review/broker.XXXXXX")"
     broker_launch="$broker_dir/launch.json"
     broker_credential="$broker_dir/credential"
     broker_request="$broker_dir/request.json"
