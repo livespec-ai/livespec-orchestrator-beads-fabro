@@ -7,7 +7,13 @@ from dataclasses import dataclass, field
 
 from livespec_orchestrator_beads_fabro._incident_carrier import IncidentCarrier
 
-__all__: list[str] = ["AuthorityRefusal", "IncidentAttempt", "IncidentReading"]
+__all__: list[str] = [
+    "AuthorityRefusal",
+    "IncidentAttempt",
+    "IncidentReading",
+    "RepaymentMasterCiEvidence",
+    "RepaymentPreexistingJob",
+]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -16,6 +22,27 @@ class AuthorityRefusal:
 
     code: str
     detail: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class RepaymentPreexistingJob:
+    """The independently read reason one failed landed-run job was already failing."""
+
+    job: str
+    preexisting_run_id: str
+    attributed_item_id: str
+    attributed_landed_commit: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class RepaymentMasterCiEvidence:
+    """Forge and authority evidence for a descendant-run repayment admission."""
+
+    admitted_run_id: str
+    admitted_head: str
+    landed_commit: str
+    landed_failed_run_id: str
+    preexisting_jobs: tuple[RepaymentPreexistingJob, ...]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -39,6 +66,10 @@ class IncidentAttempt:
     repayment_required: bool
     # None is a schema-1 record written before the explicit carrier model.
     carrier: IncidentCarrier | None = None
+    # Present only when a descendant master run, rather than the landed commit's
+    # own run, admitted repayment.  It keeps the exceptional admission auditable
+    # in the same immutable authority history as the successor it authorized.
+    repayment_master_ci_evidence: RepaymentMasterCiEvidence | None = None
 
 
 @dataclass(frozen=True, kw_only=True)

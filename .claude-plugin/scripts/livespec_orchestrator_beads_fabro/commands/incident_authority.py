@@ -36,6 +36,9 @@ from livespec_orchestrator_beads_fabro.commands._incident_authority_lifecycle im
     lifecycle_body,
     run_lifecycle_action,
 )
+from livespec_orchestrator_beads_fabro.commands._incident_authority_reply import (
+    without_walk_scope,
+)
 from livespec_orchestrator_beads_fabro.commands._intake_valve_claim_writes import TakeoverWait
 from livespec_orchestrator_beads_fabro.commands.incident_local_gate_lookup import (
     LocalGateLookup,
@@ -115,6 +118,7 @@ def _parse(*, argv: Sequence[str] | None) -> argparse.Namespace:
     _ = parser.add_argument("action", choices=(*_ACTION_ARGUMENTS, "read-current", "read-history"))
     for field in _PAYLOAD_OWNERS:
         _ = parser.add_argument("--" + field.replace("_", "-"))
+    _ = parser.add_argument("--attributed-incident", action="append", default=[])
     _ = parser.add_argument("--admission-complete", action="store_true")
     _ = parser.add_argument("--receipt-stdin", action="store_true")
     _ = parser.add_argument("--repo", required=True, type=Path)
@@ -133,6 +137,8 @@ def _parse(*, argv: Sequence[str] | None) -> argparse.Namespace:
     _check_receipt_source(parser=parser, args=args)
     if args.admission_complete and args.action != _ADVANCE:
         parser.error(f"--admission-complete is only valid for {_ADVANCE}")
+    if args.attributed_incident and args.action != "enter-repayment":
+        parser.error("--attributed-incident is only valid for enter-repayment")
     # A filing has no item identity yet; every other action names one exactly.
     if any((getattr(args, name) is None) != (args.action == _FILING) for name in _IDENTITY):
         parser.error(_IDENTITY_RULE)
@@ -256,24 +262,8 @@ def _filing(*, args: argparse.Namespace) -> FilingReceipt | AuthorityRefusal:
     )
 
 
-def _without_walk_scope(*, value: object) -> object:
-    """Leave out the operations a reading happened to walk.
-
-    That set is the whole chain for a historical read and only the segment after the
-    item's head hint for a current one, so the same committed reading would otherwise
-    serialize differently when a retry recovers it.
-    """
-    if isinstance(value, dict):
-        return {
-            key: _without_walk_scope(value=item)
-            for key, item in cast("dict[str, object]", value).items()
-            if key != "operation_ids"
-        }
-    return value
-
-
 def _result_body(*, result: _Reply) -> dict[str, object]:
-    body = cast("dict[str, Any]", _without_walk_scope(value=asdict(result)))
+    body = cast("dict[str, Any]", without_walk_scope(value=asdict(result)))
     if isinstance(result, IncidentReading | GenesisReceipt):
         body["attempt"] = attempt_record(attempt=result.attempt)
     if isinstance(result, RepaymentEntry | RecoveryEntry | IncidentCompletion):
