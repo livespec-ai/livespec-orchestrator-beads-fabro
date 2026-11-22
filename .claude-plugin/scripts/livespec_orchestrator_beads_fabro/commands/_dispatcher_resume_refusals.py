@@ -170,6 +170,7 @@ class ResumeObservation:
     pull_request: int | None = None
     pull_request_state: str | None = None
     pull_request_head: str | None = None
+    closed_publication: int | None = None
     records_observed: bool = True
     live_runs: tuple[LiveRun, ...] = ()
     liveness_observed: bool = False
@@ -478,6 +479,15 @@ def pull_request_state_refusals(*, observation: ResumeObservation) -> tuple[str,
     if observation.pull_request_state == PR_STATE_MERGED:
         if _is_proof_only_resume(observation=observation):
             return ()
+        if observation.closed_publication is not None:
+            hand_redo = (
+                f"journaled pull request #{observation.closed_publication} closed without"
+                f" merging, but merged pull request #{observation.pull_request} names the item;"
+                " re-run acceptance with"
+                f" `dispatcher.py reconcile-merged --item {observation.work_item_id}`, which"
+                f" anchors a later proof-only resume on #{observation.pull_request}"
+            )
+            return (hand_redo,)
         merged = (
             f"pull request #{observation.pull_request} is already merged, so there is"
             " no unmerged publication left to finish; close the item out with"

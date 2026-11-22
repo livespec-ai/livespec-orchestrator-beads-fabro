@@ -175,6 +175,11 @@ def gather_resume(
     """Measure the ledger, the forge and the factory for one candidate resume."""
     branch = publish_branch_for(work_item_id=item.id)
     forge = branch_pull_request(repo=repo, branch=branch, runner=runner)
+    closed_publication = (
+        forge.pull_request.number
+        if forge.pull_request is not None and forge.pull_request.state == "CLOSED"
+        else None
+    )
     if forge.pull_request is not None and forge.pull_request.state == "CLOSED":
         hand_redo = merged_item_pull_request(repo=repo, work_item_id=item.id, runner=runner)
         forge = replacement_for_closed_publication(published=forge, hand_redo=hand_redo)
@@ -238,6 +243,7 @@ def gather_resume(
             pull_request=None if pull_request is None else pull_request.number,
             pull_request_state=None if pull_request is None else pull_request.state,
             pull_request_head=None if pull_request is None else pull_request.head,
+            closed_publication=closed_publication,
             records_observed=records_observed,
             live_runs=factory.live_runs,
             liveness_observed=factory.observed,

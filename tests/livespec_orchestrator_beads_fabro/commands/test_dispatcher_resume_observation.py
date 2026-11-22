@@ -522,6 +522,34 @@ def test_an_acceptance_proof_resume_anchors_on_the_merged_hand_redo_not_its_clos
     assert gather.anchor.resumed_at == "proof_capture"
 
 
+def test_a_hand_redo_refusal_names_its_closed_publication_and_proof_resume_route(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hand redo needs acceptance to establish its proof-only resume anchor."""
+    proof_only_module = importlib.import_module(
+        "livespec_orchestrator_beads_fabro.commands._dispatcher_resume_proof_only_observation"
+    )
+    monkeypatch.setattr(proof_only_module, "read_dispatch_comments", lambda **_kwargs: ())
+
+    gather = _gather(
+        repo=repo,
+        item=_item(status="acceptance"),
+        runner=_runner(
+            listing=_ok(stdout=_pr_listing(state="CLOSED")),
+            merged_listing=_ok(stdout=_merged_item_listing()),
+            view=_ok(stdout=_comments(body="")),
+        ),
+    )
+
+    refusals = resume_refusals(observation=gather.observation)
+
+    assert gather.observation.proof_only_resume is False
+    assert "journaled pull request #2639 closed without merging" in refusals[-1]
+    assert "merged pull request #5487" in refusals[-1]
+    assert f"dispatcher.py reconcile-merged --item {_ITEM_ID}" in refusals[-1]
+    assert "anchors a later proof-only resume on #5487" in refusals[-1]
+
+
 def test_the_items_own_status_and_blocked_reason_are_carried(repo: Path) -> None:
     """The first refusal names the status and picks its remedy from it."""
     assert _GATHER_PATH.is_file()
