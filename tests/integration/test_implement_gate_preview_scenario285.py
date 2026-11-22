@@ -395,6 +395,54 @@ def test_green_preview_uses_the_pre_checkpoint_base(tmp_path: Path) -> None:
     }
 
 
+def test_green_preview_grades_its_latest_checkpoint_tree(tmp_path: Path) -> None:
+    """A Green gate sees the tree that its latest run checkpoint actually carries."""
+    preview = importlib.import_module(_MODULE)
+    repo, runner, env = _preview_repository(tmp_path=tmp_path, preview=preview)
+    checkpoint_env = env.copy()
+    _ = checkpoint_env.pop("LIVESPEC_CHECK_SKIP")
+    _git(repo=repo, env=env, argv=["add", "tracked.py", "created.py"])
+    _git(
+        repo=repo,
+        env=checkpoint_env,
+        argv=[
+            "commit",
+            "--quiet",
+            "--no-verify",
+            "-m",
+            "fabro(run): green (success)",
+            "-m",
+            "Fabro-Run: run",
+        ],
+    )
+    checkpoint_tree = _git(repo=repo, env=env, argv=["rev-parse", "HEAD^{tree}"])
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text(
+        "#!/bin/sh\n"
+        f'if test "$(git rev-parse HEAD^{{tree}})" != "{checkpoint_tree}"; then\n'
+        f"  printf 'Failed targets (1):\\n  - {_FAILED_TARGET}\\n'\n"
+        "  exit 1\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+
+    completed = _run(
+        repo=repo,
+        env=env,
+        argv=[sys.executable, str(runner), "green"],
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout.splitlines()[-1]) == {
+        "failed_targets": [],
+        "preview_ran": True,
+        "status": 0,
+        "unset_variables": ["LIVESPEC_CHECK_SKIP"],
+    }
+
+
 def test_gate_preview_reports_not_run_when_nothing_would_be_staged(tmp_path: Path) -> None:
     """An empty prospective commit is not a clean preview."""
     preview = importlib.import_module(_MODULE)
