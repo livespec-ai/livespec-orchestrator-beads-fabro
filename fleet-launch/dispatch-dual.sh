@@ -93,11 +93,9 @@ FIFO_CLASS=gmk; [ -n "${ONLY_HL:-}${ONLY_ARM:-}" ] && FIFO_CLASS=hl
 deadline=$(( $(date +%s) + FLEET_LAUNCH_MAX_WAIT_S ))
 wait_deadline=$(( SECONDS + FLEET_LAUNCH_MAX_WAIT_S ))
 ticket=""; ticket_number=""; item_claim=""; lock=""; marker=""; FLEET_CAP=0; plugin=""; build=""
-# Resolve before any gate can pass the directory to a helper or credential
-# probe. A registry failure is therefore reported as itself, never as a bad
-# credential against an empty cache path.
-plugin=$(installed_plugin_dir) || exit 70
-build=${plugin##*/}
+# Resolve after the repository and canary hold checks. A canary hold with a
+# build identity must fail closed when the target registry cannot resolve it,
+# rather than letting this early guard bypass the hold.
 # Non-run exit accounting: a launcher that exits before its run lists writes one terminal line and,
 # when its item still reads ready, one ledger comment naming the dropped ticket (Scenario 312).
 run_listed=0; terminal_written=0; exit_cause=""; exit_comment=if-ready; ready_refusals=0
@@ -846,6 +844,27 @@ if [ -n "${ONLY_GMK:-}" ] || [ -n "${ONLY_HL:-}" ] || [ -n "${ONLY_ARM:-}" ]; th
   fi
   [ "$ticket_rc" = 0 ] || { echo "$(date -u +%FT%TZ) could not take queue ticket for $ITEM"; exit 75; }
 fi
+# A build-qualified canary hold must be evaluated before the ready-set helper:
+# the helper needs an installed plugin directory, while a registry that cannot
+# resolve the held build is itself a reason to keep this launch held.  Do not
+# let the helper's registry lookup turn that fail-closed hold into an exit.
+canary_initially_held=0
+while canary_held; do
+  [ "$canary_initially_held" = 0 ] || [ "$SECONDS" -lt "$wait_deadline" ] || give_up
+  canary_initially_held=1
+  ensure_ticket
+  ticket_rc=$?
+  if [ "$ticket_rc" = 2 ]; then
+    echo "$(date -u +%FT%TZ) queue ticket already has a live launcher for $ITEM: do not start a duplicate"
+    terminal_written=1
+    exit 0
+  fi
+  [ "$ticket_rc" = 0 ] || { echo "$(date -u +%FT%TZ) could not take queue ticket for $ITEM"; exit 75; }
+  yield_ticket canary-hold
+  log_canary_hold
+  sleep "$FLEET_LAUNCH_POLL_S"
+done
+restore_ticket
 # A seat-gated release starts blocked, so it cannot pass the ordinary ready-set
 # check until its release valve runs.  Defer that check until after this
 # launcher has taken the same FIFO, mutex, cap and in-flight-marker path as a
@@ -1014,6 +1033,10 @@ while :; do
       log_canary_hold
       sleep "$FLEET_LAUNCH_POLL_S"
       continue
+    fi
+    if [ -z "$plugin" ]; then
+      plugin=$(installed_plugin_dir) || { exit_cause="build unresolved"; exit 70; }
+      build=${plugin##*/}
     fi
     if [ -n "$ticket" ] && [ -f "$ticket" ]; then
       # A ticket yielding on the repository WIP gate re-reads only that count until it has room.

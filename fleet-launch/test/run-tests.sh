@@ -3811,7 +3811,7 @@ fi
 # --- parity with the running launcher copies (bd-ib-yax6gv, 2026-11-15) ---------------------------
 # The gates the dispatching host's interim launcher copies carried that the committed launchers lacked.
 # Each refusal carries its own positive control.
-if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = parity ]; then
+if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = parity ] || [ "$HARNESS_SLICE" = scenario307 ]; then
 
 scenario "32. the fleet count sums the gmktec, candidate and mi-homelab lanes and leaves arm64 out"
 new_case fleet-sum-candidate
@@ -3980,7 +3980,7 @@ ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-canary-held > "$CASE_DIR/held.log" 2>
 canary_pid=$!
 if wait_for_line "$CASE_DIR/held.log" "canary repository hold present" "$OBSERVE_WAIT_S" && kill -0 "$canary_pid" 2>/dev/null \
     && grep -qx 'held=canary-hold' "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat" && [ ! -s "$DRIVE_LOG" ]; then
-    pass "an unlisted item yields on the canary hold, marks its ticket held=canary-hold and launches nothing"
+    pass "a canary hold without a build identity holds every launch, marks its ticket held=canary-hold and launches nothing"
 else
     fail "the canary hold did not yield the unlisted item"
     tail -5 "$CASE_DIR/held.log" >&2
@@ -3999,6 +3999,117 @@ else
     fail "control: the held launcher did not launch after the canary hold was removed"
     stop_launcher "$canary_pid"; wait "$canary_pid" 2>/dev/null
 fi
+
+CANARY_HELD_BUILD="0.346.1"
+CANARY_OTHER_BUILD="0.345.0"
+for canary_build in "$CANARY_HELD_BUILD" "$CANARY_OTHER_BUILD"; do
+    mkdir -p "$PLUGIN_CACHE/$canary_build"
+    cp -R "$PLUGIN_CACHE/$PLUGIN_BUILD/." "$PLUGIN_CACHE/$canary_build/"
+done
+set_canary_registry_build() {
+    printf '{"plugins":{"%s":[{"version":"%s","projectPath":"%s"}]}}\n' \
+        "$PLUGIN_KEY" "$1" "$TENANT" > "$REGISTRY"
+}
+set_canary_hold() {
+    set_hold "$FLEET_LAUNCH_CANARY_HOLD_DIR/canary-hold-repo-$(basename "$TENANT")" "build: $CANARY_HELD_BUILD\ncanary adoption"
+}
+
+scenario "37b. a build-qualified canary hold applies only to its target's installed build"
+new_case canary-build-petri-match
+export FLEET_LAUNCH_MAX_WAIT_S=120
+open_boards
+set_canary_registry_build "$CANARY_HELD_BUILD"
+set_canary_hold
+ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-canary-petri-match > "$CASE_LOG" 2>&1 &
+canary_petri_pid=$!
+if wait_for_line "$CASE_LOG" "canary repository hold present" "$OBSERVE_WAIT_S" \
+    && grep -qx 'held=canary-hold' "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat" \
+    && [ ! -s "$DRIVE_LOG" ]; then
+    pass "the petri launcher holds a target registered at the canary hold's build"
+else
+    fail "the petri launcher did not hold the matching installed build"
+    tail -5 "$CASE_LOG" >&2
+fi
+stop_launcher "$canary_petri_pid"; wait "$canary_petri_pid" 2>/dev/null || true
+
+new_case canary-build-hl-match
+export FLEET_LAUNCH_MAX_WAIT_S=120
+open_boards
+set_canary_registry_build "$CANARY_HELD_BUILD"
+set_canary_hold
+ONLY_HL=1 TICKET_NS=100 "$LAUNCHER" bd-ib-canary-hl-match > "$CASE_LOG" 2>&1 &
+canary_hl_pid=$!
+if wait_for_line "$CASE_LOG" "canary repository hold present" "$OBSERVE_WAIT_S" \
+    && grep -qx 'held=canary-hold' "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat" \
+    && [ ! -s "$DRIVE_LOG" ]; then
+    pass "the hl launcher holds a target registered at the canary hold's build"
+else
+    fail "the hl launcher did not hold the matching installed build"
+    tail -5 "$CASE_LOG" >&2
+fi
+stop_launcher "$canary_hl_pid"; wait "$canary_hl_pid" 2>/dev/null || true
+
+new_case canary-build-petri-other
+open_boards
+set_canary_registry_build "$CANARY_OTHER_BUILD"
+set_canary_hold
+ONLY_GMK=1 TICKET_NS=100 run_launcher bd-ib-canary-petri-other
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-canary-petri-other ] \
+    && log_has "$CASE_LOG" "canary repository hold names another build"; then
+    pass "a canary hold naming another build lets a differently registered target launch"
+else
+    fail "a differently registered petri target did not launch past the canary hold (rc=$RC, dispatches: $(drive_log_items))"
+    tail -5 "$CASE_LOG" >&2
+fi
+
+new_case canary-build-hl-other
+open_boards
+set_canary_registry_build "$CANARY_OTHER_BUILD"
+set_canary_hold
+ONLY_HL=1 TICKET_NS=100 run_launcher bd-ib-canary-hl-other
+if [ "$RC" = 0 ] && [ "$(drive_log_items)" = bd-ib-canary-hl-other ] \
+    && log_has "$CASE_LOG" "canary repository hold names another build"; then
+    pass "the hl launcher also launches a target registered at another build"
+else
+    fail "a differently registered hl target did not launch past the canary hold (rc=$RC, dispatches: $(drive_log_items))"
+    tail -5 "$CASE_LOG" >&2
+fi
+
+new_case canary-build-resume-match
+export FLEET_LAUNCH_MAX_WAIT_S=120
+open_boards
+set_canary_registry_build "$CANARY_HELD_BUILD"
+set_canary_hold
+TICKET_NS=100 "$RESUME_LAUNCHER" bd-ib-canary-resume-match > "$CASE_LOG" 2>&1 &
+canary_resume_pid=$!
+if wait_for_line "$CASE_LOG" "canary repository hold present" "$OBSERVE_WAIT_S" \
+    && grep -qx 'held=canary-hold' "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat" \
+    && [ ! -s "$RESUME_LOG" ]; then
+    pass "the resume launcher shares the build-matching canary hold rule"
+else
+    fail "the resume launcher did not hold the matching installed build"
+    tail -5 "$CASE_LOG" >&2
+fi
+stop_launcher "$canary_resume_pid"; wait "$canary_resume_pid" 2>/dev/null || true
+
+new_case canary-build-unresolvable
+export FLEET_LAUNCH_MAX_WAIT_S=120
+open_boards
+printf '{"plugins":{"%s":[{"version":"%s","projectPath":"%s"}]}}\n' \
+    "$PLUGIN_KEY" "$CANARY_OTHER_BUILD" "$WORK/no-registry-match" > "$REGISTRY"
+set_canary_hold
+ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-canary-unresolvable > "$CASE_LOG" 2>&1 &
+canary_unresolvable_pid=$!
+if wait_for_line "$CASE_LOG" "canary repository hold present" "$OBSERVE_WAIT_S" \
+    && grep -qx 'held=canary-hold' "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat" \
+    && [ ! -s "$DRIVE_LOG" ]; then
+    pass "an unresolvable installed build fails closed under a build-qualified canary hold"
+else
+    fail "an unresolvable installed build bypassed the canary hold"
+    tail -5 "$CASE_LOG" >&2
+fi
+stop_launcher "$canary_unresolvable_pid"; wait "$canary_unresolvable_pid" 2>/dev/null || true
+cp "$REGISTRY_ORIGINAL" "$REGISTRY"
 
 scenario "38. launch-time commands run under the target repository's committed credential wrapper"
 TENANT_STUB_WRAPPER="$STUB/tenant-wrapper"
