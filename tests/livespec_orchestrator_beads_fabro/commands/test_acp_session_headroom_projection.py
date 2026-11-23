@@ -399,4 +399,4 @@ def test_an_empty_checkout_journal_uses_its_hosts_credential_baseline(
     ).read()
 
     assert reading.five_hour_drain_percent_per_hour == 80.0
-    assert len(attempts) == 1
+    assert attempts == [reading]
