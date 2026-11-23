@@ -114,7 +114,8 @@ def _transition(
     )
     if (
         payload is None
-        or payload["repository"] != repository
+        or not isinstance(payload["repository"], str)
+        or not same_repository(recorded=payload["repository"], caller=repository)
         or payload["item_id"] != item_id
         or payload["prior_token_id"] != token
         or not isinstance(payload["next_token_id"], str)
@@ -126,7 +127,7 @@ def _transition(
     attempt = decode_attempt(value=payload["attempt"])
     if (
         attempt is None
-        or attempt.repository != repository
+        or not same_repository(recorded=attempt.repository, caller=repository)
         or attempt.item_id != item_id
         or (generation is not None and attempt.generation != generation)
     ):
