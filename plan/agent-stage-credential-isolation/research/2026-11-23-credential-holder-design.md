@@ -76,3 +76,40 @@ after S2. S4 the test that fails if any agent-stage-readable credential file exi
 absent after the final reader node". The regroomed w64kr3 Definition of Done MUST name the nodes that KEEP
 the credential (`publish_draft`, `pr_refresh`, `pr`, and the preserving steps `needs_human`,
 `fix_commit_settle`, `review_fix_commit_settle`) so a "delete it everywhere" diff fails it.
+
+## Engine spike: can the engine scope the credential to a node (2026-11-23, plan seat)
+
+Method: READ-ONLY source reading of the fork's `fabro-petri` crate (tree `carrier-v0.408-d22808f8e-leakfix-20261120`,
+`lib/components/fabro-petri/`). Nothing was run against a live engine, and the upstream `petri-runtime` crate
+(`lithoscomputer/petri`) is not on this host, so its API was read only through the fork's uses of it. This is a
+code-reading finding, not a measurement of a run.
+
+Findings.
+
+- **Today's credential is run-wide by construction.** `stage_credentials.rs` wraps the run's executor
+  (`engine.rs` `executor_layer`), writes one private store directory per SCOPE (`/tmp/fabro-git-credentials.*/store`,
+  `umask 077`), and `CredentialEnv::apply` injects `GITHUB_TOKEN` plus the git credential helper into EVERY
+  spawn. `SpawnEnv::apply` receives only `SpawnTarget::{Process, Container}`, never a node. So per-node env is
+  NOT available as configuration: no workflow or `workflow.toml` setting selects which node gets the token.
+- **The store file is in the same sandbox as the agent.** The sandbox runs as root (measured earlier), so an
+  agent process can read the store file even if its own environment lacks the token. Scoping only the env
+  would therefore NOT satisfy "files hold no forge token"; the store must also be absent during agent nodes.
+- **The fork already knows the node at attempt boundaries.** `run_turn.rs` receives `HookContext` and
+  `FiringView` in `before_attempt` (`view.node_name()`, execution, scope, firing, attempt) and keeps an
+  env-to-execution binding (`bind_env`). A credential layer driven by those hooks could write the store and
+  enable the env projection only while an allow-listed node (`publish_draft`, `pr_refresh`, `pr`,
+  `needs_human`, `fix_commit_settle`, `review_fix_commit_settle`) is attempting, and delete the store after
+  every attempt.
+
+Verdict. **C is possible, but as a fork engine change, not as configuration.** It needs: (1) a per-attempt
+credential gate in `stage_credentials.rs` fed by the attempt hooks, (2) removal of the store after each
+allow-listed attempt, and (3) a check that attempts in one scope never overlap (a concurrent agent node
+would see a sibling's window); the workflow is sequential, but this was not verified. Not verified: whether
+the `before_attempt`/after-attempt hooks run before the first spawn of an attempt and after its last, and
+whether a failed or killed attempt still reaches the removal path. These are the first things the S2 slice for
+C must prove with a test that fails on a readable store during an agent node.
+
+Recommendation after the spike: **C stands**, with a smaller claim than the earlier text made. It is a fork
+change gated on the two unverified hook-ordering facts above, not a switch. If either fails, move to **E**.
+This is a fork hand-build (see `.ai/fabro-fork-hand-build.md`), so S2 for C carries `factory_safety:
+mutates-host-machinery` and needs maintainer approval to start.
