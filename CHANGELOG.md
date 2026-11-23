@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.346.3](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.346.2...v0.346.3) (2026-11-23)
+
+
+### Bug Fixes
+
+* reader command nodes read the forge from an INTERIM owner-only inputs file and carry no App input (bd-ib-zf2kdh) ([229cadd](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/229cadd53af398fd5c07c6935a425dc9dc27c092))
+
 ## [0.346.2](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.346.1...v0.346.2) (2026-11-23)
 
 
