@@ -155,6 +155,21 @@ wrapper_description() {
   esac
 }
 
+# wrapper_preserves_installed_plugin_root: the Dispatcher needs the installed
+# plugin root it inherited from the launcher in order to recover the build it
+# executes.  A target's credential wrapper is allowed to add its credentials,
+# but it must not silently remove or replace that inherited value.  Only probe
+# when the launcher actually inherited a value: an absent value is handled by
+# the Dispatcher-side build recovery path, while this guard owns the distinct
+# wrapper-scrubbing failure.
+wrapper_preserves_installed_plugin_root() {
+  local inherited observed
+  inherited=${LIVESPEC_INSTALLED_PLUGIN_ROOT:-}
+  [ -n "$inherited" ] || return 0
+  observed=$(wrap -- sh -c 'printf %s "${LIVESPEC_INSTALLED_PLUGIN_ROOT:-}"') || return 1
+  [ "$observed" = "$inherited" ]
+}
+
 # --- the installed plugin build ----------------------------------------------
 # FLEET_LAUNCH_BUILD_OVERRIDE=<build>: ONE launch runs on that candidate build instead of the registry's
 # (a canary beside band work on the launch build). It names a directory under FLEET_LAUNCH_PLUGIN_CACHE; an

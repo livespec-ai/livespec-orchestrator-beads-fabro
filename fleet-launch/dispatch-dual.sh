@@ -388,6 +388,15 @@ if ! resolve_tenant_wrapper; then
   report_dropped_ticket credential-wrapper-unreadable
   exit 75
 fi
+# A dispatch that would lose the installed-plugin root inside the target's
+# credential wrapper cannot recover its executing build.  Test the resolved
+# chain before any ready-set, preflight or FIFO work can take a launch slot;
+# reporting the declared wrapper makes the target configuration actionable.
+if ! wrapper_preserves_installed_plugin_root; then
+  exit_cause="credential wrapper stripped LIVESPEC_INSTALLED_PLUGIN_ROOT"
+  echo "$(date -u +%FT%TZ) credential-wrapper preflight refused: $(wrapper_description) stripped LIVESPEC_INSTALLED_PLUGIN_ROOT: no slot, no launch"
+  exit 75
+fi
 
 rows_count() { if [ "$1" = U ]; then echo U; else printf '%s' "$1" | grep -c .; fi; }
 
@@ -605,6 +614,13 @@ try:
 except (OSError, ValueError):
     sys.exit(1)
 kind = walk(document)
+dispatcher = document.get("dispatcher") if isinstance(document, dict) else None
+stderr = dispatcher.get("stderr") if isinstance(dispatcher, dict) else None
+# A Dispatcher admission refusal (exit 3) writes its reason to stderr, while
+# drive records that stderr inside its JSON result and leaves stdout_json null.
+# It is permanent for this launch just like an explicit -refused outcome.
+if not kind and isinstance(dispatcher, dict) and dispatcher.get("exit_code") == 3 and isinstance(stderr, str) and "refus" in stderr.lower():
+    kind = "refused"
 print(kind)
 sys.exit(0 if kind else 1)
 PY
@@ -1267,8 +1283,11 @@ else
   # The drive ended without its run listing, whatever its exit status: a drive that exits 0 first is an
   # early exit too, so the item is never dropped from the queue.
   detail=$(python3 -I -c 'import json,sys
-t=open(sys.argv[1]).read(); d=json.loads(t[t.find("{"):]) if "{" in t else {}; s=(d.get("dispatcher") or {}).get("stdout_json")
-print("; ".join(str(x.get("stage"))+" "+str(x.get("status"))+": "+str(x.get("detail")) for x in (s if isinstance(s,list) else []) if isinstance(x,dict)) or "no stdout_json detail")' "$OUT/$ITEM-r267.json" 2>/dev/null)
+t=open(sys.argv[1]).read(); d=json.loads(t[t.find("{"):]) if "{" in t else {}; dispatcher=d.get("dispatcher") or {}; s=dispatcher.get("stdout_json") if isinstance(dispatcher,dict) else None
+details="; ".join(str(x.get("stage"))+" "+str(x.get("status"))+": "+str(x.get("detail")) for x in (s if isinstance(s,list) else []) if isinstance(x,dict))
+stderr=dispatcher.get("stderr") if isinstance(dispatcher,dict) else None
+reason=" ".join(stderr.strip().splitlines()) if isinstance(stderr,str) else ""
+print(details or (("JSON refusal reason: "+reason) if "refus" in reason.lower() else "no stdout_json detail"))' "$OUT/$ITEM-r267.json" 2>/dev/null)
   echo "$(date -u +%FT%TZ) early-exit detail: ${detail:-<unreadable>}"
   # A goal template preflight failure fails the same way on every retry until the item's record is
   # repaired, and a stage or status ending in -refused is a permanent refusal: neither is re-ticketed.
