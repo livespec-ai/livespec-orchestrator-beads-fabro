@@ -37,10 +37,22 @@ restriction is a separate limitation that slice S4 owns.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import cast
 
+from livespec_orchestrator_beads_fabro.commands._dispatcher_completed_cycles import (
+    VerifiedPairCount,
+    observed_pair_count,
+    unobserved_pair_count,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_dispatch_series import (
+    COMMITS_PROBE_TIMEOUT_SECONDS,
+    FACTORY_RUN_ID_TRAILER_KEY,
+    DispatchCommitSeries,
+    PrCommit,
+    commits_from_payload,
+    dispatch_commit_series,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
     CommandRunner,
     DispatchOutcome,
@@ -62,28 +74,22 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_tdd_order_sink impor
 from livespec_orchestrator_beads_fabro.commands._dispatcher_tdd_signals import (
     TddSignals,
     tdd_signals,
+    with_verified_pairs,
 )
 from livespec_orchestrator_beads_fabro.types import WorkItem
 
 __all__: list[str] = [
     "FACTORY_RUN_ID_TRAILER_KEY",
+    "DispatchCommitSeries",
     "commit_signals_for_dispatch",
+    "dispatch_commit_series",
     "dispatch_id_for",
     "dispatch_ids_for",
     "gather_tdd_signals",
 ]
 
-# The trailer the sandbox's `livespec.factoryRunId` git config stamps on every
-# commit the run authors. Its VALUE is the Dispatcher's `dispatch_id`, which is
-# what makes this a per-run selector rather than a per-item one.
-FACTORY_RUN_ID_TRAILER_KEY = "Factory-Run-Id"
-
 _DISPATCH_ID_STAGE = "dispatch-id"
 _DISPATCH_ID_FIELD = "dispatch_id"
-
-# The commit-series probe budget, matching the sibling merged-PR diff-size
-# probe: fail-soft to None rather than hold up an already-final verdict.
-_COMMITS_PROBE_TIMEOUT_SECONDS = 60.0
 
 # Mirrors `livespec_dev_tooling.checks.red_green_replay`: the suffixes and
 # Justfile names the hook treats as non-Python implementation (docs and data
@@ -91,13 +97,10 @@ _COMMITS_PROBE_TIMEOUT_SECONDS = 60.0
 _NON_PYTHON_IMPL_SUFFIXES = (".sh", ".just", ".yml", ".yaml", ".fabro")
 _JUSTFILE_NAMES = ("justfile", "Justfile")
 
-
-@dataclass(frozen=True, kw_only=True)
-class _Commit:
-    """The PR-list evidence needed to inspect one authored commit's files."""
-
-    message: str
-    oid: str | None
+# The extracted series reader's names, kept reachable on this module for its
+# existing callers and tests.
+_Commit = PrCommit
+_commits_from_payload = commits_from_payload
 
 
 def gather_tdd_signals(
@@ -125,11 +128,12 @@ def gather_tdd_signals(
         work_item_id=item.id,
         dispatch_id=dispatch_id,
     )
-    return tdd_signals(
+    series = dispatch_commit_series(
+        repo=repo, outcome=outcome, dispatch_id=dispatch_id, runner=runner
+    )
+    signals = tdd_signals(
         item=item,
-        commits=commit_signals_for_dispatch(
-            repo=repo, outcome=outcome, dispatch_id=dispatch_id, runner=runner
-        ),
+        commits=_commit_signals(repo=repo, series=series, runner=runner),
         order=sink.signals_for(
             keys=(dispatch_id, item.id) if dispatch_id is not None else (item.id,)
         ),
@@ -142,6 +146,7 @@ def gather_tdd_signals(
             dispatch_id=dispatch_id,
         ),
     )
+    return with_verified_pairs(signals=signals, pairs=_verified_pairs(series=series))
 
 
 def _size_justified_signal(
@@ -203,74 +208,39 @@ def commit_signals_for_dispatch(
     dispatch_id: str | None,
     runner: CommandRunner,
 ) -> TddCommitSignals | None:
-    """This dispatch's commit-derived TDD signals, or None when unobservable.
+    """This dispatch's commit-derived TDD signals, or None when unobservable."""
+    return _commit_signals(
+        repo=repo,
+        series=dispatch_commit_series(
+            repo=repo, outcome=outcome, dispatch_id=dispatch_id, runner=runner
+        ),
+        runner=runner,
+    )
 
-    `None` for every arm that cannot identify THIS run's series: no pull
-    request to read, no dispatch id to select by, a failing `gh` probe, an
-    unparseable payload, or a payload whose commits carry none of this run's
-    `Factory-Run-Id` trailer.
-    """
-    if outcome.pr_number is None or dispatch_id is None:
+
+def _commit_signals(
+    *, repo: Path, series: DispatchCommitSeries, runner: CommandRunner
+) -> TddCommitSignals | None:
+    if series.unreadable_reason is not None:
         return None
-    result = runner.run(
-        argv=["gh", "pr", "view", str(outcome.pr_number), "--json", "commits"],
-        cwd=repo,
-        timeout_seconds=_COMMITS_PROBE_TIMEOUT_SECONDS,
-    )
-    if result.exit_code != 0:
-        return None
-    commits = _commits_from_payload(stdout=result.stdout)
-    if commits is None:
-        return None
-    mine = tuple(
-        commit
-        for commit in commits
-        if commit_trailers(message=commit.message).get(FACTORY_RUN_ID_TRAILER_KEY) == dispatch_id
-    )
-    if not mine:
-        return None
-    exempt_oids = _green_exempt_oids(repo=repo, commits=mine, runner=runner)
+    commits = series.commits
+    exempt_oids = _green_exempt_oids(repo=repo, commits=commits, runner=runner)
     return tdd_commit_signals(
-        messages=tuple(commit.message for commit in mine),
+        messages=tuple(commit.message for commit in commits),
         green_exempt_positions=frozenset(
-            position for position, commit in enumerate(mine) if commit.oid in exempt_oids
+            position for position, commit in enumerate(commits) if commit.oid in exempt_oids
         ),
     )
 
 
-def _commits_from_payload(*, stdout: str) -> tuple[_Commit, ...] | None:
-    """Parse PR commits while retaining the object id needed for file evidence."""
-    try:
-        payload_raw: object = json.loads(stdout)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload_raw, dict):
-        return None
-    payload = cast("dict[str, object]", payload_raw)
-    raw_commits = payload.get("commits")
-    if not isinstance(raw_commits, list):
-        return None
-    commits: list[_Commit] = []
-    for raw in cast("list[object]", raw_commits):
-        if not isinstance(raw, dict):
-            continue
-        entry = cast("dict[str, object]", raw)
-        headline = entry.get("messageHeadline")
-        if not isinstance(headline, str):
-            continue
-        body = entry.get("messageBody")
-        oid = entry.get("oid")
-        commits.append(
-            _Commit(
-                message=f"{headline}\n\n{body if isinstance(body, str) else ''}",
-                oid=oid if isinstance(oid, str) and oid else None,
-            )
-        )
-    return tuple(commits)
+def _verified_pairs(*, series: DispatchCommitSeries) -> VerifiedPairCount:
+    if series.unreadable_reason is not None:
+        return unobserved_pair_count(reason=series.unreadable_reason)
+    return observed_pair_count(messages=tuple(commit.message for commit in series.commits))
 
 
 def _green_exempt_oids(
-    *, repo: Path, commits: tuple[_Commit, ...], runner: CommandRunner
+    *, repo: Path, commits: tuple[PrCommit, ...], runner: CommandRunner
 ) -> frozenset[str]:
     """Return the object ids of Red-only commits whose non-Python amend was hook-green-exempt.
 
@@ -299,7 +269,7 @@ def _green_exempt_oids(
         result = runner.run(
             argv=["gh", "api", f"/repos/{repository}/commits/{commit.oid}"],
             cwd=repo,
-            timeout_seconds=_COMMITS_PROBE_TIMEOUT_SECONDS,
+            timeout_seconds=COMMITS_PROBE_TIMEOUT_SECONDS,
         )
         if result.exit_code == 0 and _has_only_non_python_implementation(stdout=result.stdout):
             exempt.add(cast("str", commit.oid))
@@ -311,7 +281,7 @@ def _repository_name(*, repo: Path, runner: CommandRunner) -> str | None:
     result = runner.run(
         argv=["gh", "repo", "view", "--json", "nameWithOwner"],
         cwd=repo,
-        timeout_seconds=_COMMITS_PROBE_TIMEOUT_SECONDS,
+        timeout_seconds=COMMITS_PROBE_TIMEOUT_SECONDS,
     )
     if result.exit_code != 0:
         return None
