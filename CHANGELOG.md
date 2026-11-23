@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.346.2](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.346.1...v0.346.2) (2026-11-23)
+
+
+### Bug Fixes
+
+* the publication broker is shipped in the helper bundle, not read from the target clone (bd-ib-2cye52) ([97416e6](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/97416e6fe9dfdbd26117050d9c9281ae37c9bdf4))
+
 ## [0.346.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.346.0...v0.346.1) (2026-11-23)
 
 
