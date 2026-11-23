@@ -1,10 +1,17 @@
 # Workflow-edit exemption — one exemption binds to one reviewed change.
 #
-# The change: a new daily workflow, fleet-launch-full-proof.yml, that runs check-fleet-launch at
-# the full signal-race attempt counts (100 jittered, 200 resume-INT) so the per-PR gate can sample
-# fewer. ADDITIVE tier: a new file, no existing line modified. Authorized by the throughput
-# coordinator (legacy-coordinator-agent) with label approval:workflow-edit-additive on the item.
-work_item=bd-ib-ftfjda
+# The change: .github/workflows/fast-forward-release-branch.yml gains ONE step,
+# between the tag checkout and the fast-forward push, that finds each split
+# revert/reland pair for the dispatched tag and refuses the roll unless the
+# release's canary-coverage.json covers it (spec v400, contracts.md "Revert and
+# reland coverage"). ADDITIVE ONLY: no workflow line is deleted or modified, so
+# the merge-base diff has zero removed lines. The step only adds a refusal; it
+# never moves `release`, relaxes another check, or runs on a PR or push CI path
+# (the job runs only on the operator's workflow_dispatch roll).
+# actionlint (-shellcheck=) is clean on the branch and on master, no new finding.
+# Authorized by legacy-coordinator-agent R301 ruling, 2026-11-23 ~19:0xZ, under
+# the maintainer's delegation of the additive tier, recorded on bd-ib-ozxhs4.
+work_item=bd-ib-ozxhs4
 change=additive
 ci_runtime=no-significant-increase
-reason=Adds a scheduled full-count proof of fleet-launch scenario 23 so lowering the per-PR attempt defaults does not reduce what is proven; actionlint clean; no existing workflow line changes.
+reason=Adds one refusal step to the operator-dispatched release roll so a tag that holds a revert but not its reland cannot roll without a covering canary-coverage.json citation; roll runs only on workflow_dispatch, adds seconds of git and gh reads, and removes or changes no existing workflow line.
