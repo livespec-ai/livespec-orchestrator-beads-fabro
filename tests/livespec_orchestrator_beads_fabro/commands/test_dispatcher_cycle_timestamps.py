@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from importlib.util import find_spec
 
 
@@ -10,4 +11,25 @@ def test_completed_cycle_timestamp_derivations_have_a_dedicated_module() -> None
     assert (
         find_spec("livespec_orchestrator_beads_fabro.commands._dispatcher_cycle_timestamps")
         is not None
+    )
+    timestamps = import_module(
+        "livespec_orchestrator_beads_fabro.commands._dispatcher_cycle_timestamps"
+    )
+    elapsed_seconds = timestamps.elapsed_seconds
+    assert elapsed_seconds(red_at="2026-11-23T10:00:00Z", green_at="2026-11-23T10:01:00Z") == (
+        60,
+        None,
+    )
+
+
+def test_completed_cycle_timestamp_derivations_reject_invalid_and_reversed_values() -> None:
+    """Preserved provenance is the sole source of elapsed-cycle duration."""
+    timestamps = import_module(
+        "livespec_orchestrator_beads_fabro.commands._dispatcher_cycle_timestamps"
+    )
+    elapsed_seconds = timestamps.elapsed_seconds
+    assert elapsed_seconds(red_at="not-a-time", green_at="2026-11-23T10:01:00Z") == (None, True)
+    assert elapsed_seconds(red_at="2026-11-23T10:01:00Z", green_at="2026-11-23T10:00:00Z") == (
+        None,
+        True,
     )

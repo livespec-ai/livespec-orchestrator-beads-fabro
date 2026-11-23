@@ -50,7 +50,6 @@ anything: `diff-tree`, `ls-tree` and `show` are the whole vocabulary.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import cast
 
@@ -61,6 +60,12 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_cycle_measure import
     changed_product_logical_lines,
     is_product_path,
     product_source_prefixes,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_cycle_timestamps import (
+    elapsed_seconds as _elapsed_seconds,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_cycle_timestamps import (
+    red_order as _red_timestamp_order,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import CommandRunner
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import ShellCommandRunner
@@ -328,7 +333,7 @@ def _completed_cycle(
     *, ordinal: int, source: CycleSource, product_lloc: tuple[int | None, str | None]
 ) -> CompletedCycle:
     """Combine independently-observed size and elapsed measurements for one pair."""
-    elapsed, elapsed_reason = _elapsed_seconds(
+    elapsed, timestamps_unobserved = _elapsed_seconds(
         red_at=source.red_captured_at, green_at=source.green_verified_at
     )
     return CompletedCycle(
@@ -338,30 +343,13 @@ def _completed_cycle(
         product_lloc_changed=product_lloc[0],
         product_lloc_unobserved_reason=product_lloc[1],
         elapsed_seconds=elapsed,
-        elapsed_unobserved_reason=elapsed_reason,
+        elapsed_unobserved_reason=UNOBSERVED_TIMESTAMPS if timestamps_unobserved else None,
     )
 
 
 def _red_order(*, source: CycleSource) -> tuple[int, float]:
     """Sort readable Red timestamps first, without dropping unreadable pairs."""
-    instant = _instant(value=source.red_captured_at)
-    return (1, 0.0) if instant is None else (0, instant.timestamp())
-
-
-def _elapsed_seconds(*, red_at: str, green_at: str) -> tuple[int | None, str | None]:
-    """Use preserved Red-to-Green provenance, never a merge timestamp."""
-    red = _instant(value=red_at)
-    green = _instant(value=green_at)
-    if red is None or green is None or green < red:
-        return (None, UNOBSERVED_TIMESTAMPS)
-    return (round((green - red).total_seconds()), None)
-
-
-def _instant(*, value: str) -> datetime | None:
-    """Parse this trailer's UTC spelling, returning None for invalid provenance."""
-    normalized = value.removesuffix("Z") + "+00:00" if value.endswith("Z") else value
-    parsed = attempt(action=lambda: datetime.fromisoformat(normalized), exceptions=(ValueError,))
-    return None if isinstance(parsed, AttemptFailure) else parsed
+    return _red_timestamp_order(red_at=source.red_captured_at)
 
 
 def _changed_paths(*, repo: Path, commit: str, runner: CommandRunner) -> tuple[str, ...] | None:
