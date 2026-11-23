@@ -57,6 +57,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import Dispatch
 from livespec_orchestrator_beads_fabro.commands._dispatcher_preserve_reference_body import (
     PRESERVE_POINTER_MARKER,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_preserved_tree_publish import (
+    PreservedTree,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_cancel_anchor import (
     SOURCE_BUDGET_CANCEL_RECORD,
     SOURCE_CANCEL_RECORD,
@@ -65,6 +68,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_resume_observation i
     gather_resume,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget import RunWallBudget
+from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_publish import (
+    BudgetPublisher,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_records import (
     RUN_WALL_BUDGET_EXCEEDED_STAGE,
     run_wall_budget_exceeded_record,
@@ -111,10 +117,27 @@ _INSPECT_RUNNING = f'[{{"run_id": "{_RUN_ID}", "status": {{"kind": "running"}}}}
 _INSPECT_RUNNABLE = f'[{{"run_id": "{_RUN_ID}", "status": {{"kind": "runnable"}}}}]'
 
 
+def _published_tree(
+    self: BudgetPublisher, *, plan: object, runner: object, journal: object, run_id: str
+) -> PreservedTree:
+    """A publication that always lands, so the journey grades the loop alone."""
+    _ = (self, plan, runner, journal, run_id)
+    return PreservedTree(
+        ref=f"refs/livespec/preserved-publish/{_ITEM_ID}/{'c' * 40}",
+        commit="c" * 40,
+        file_count=1,
+        scope="committed",
+        source="run",
+    )
+
+
 @pytest.fixture(autouse=True)
 def _fresh_tenant(monkeypatch: pytest.MonkeyPatch) -> object:
     """The hermetic in-memory tenant, flipped on through its one env seam."""
     monkeypatch.setenv("LIVESPEC_BEADS_FAKE", "1")
+    # The publication itself is graded by `test_dispatcher_run_wall_budget_publish*`;
+    # this journey grades the loop, so the publisher answers a landed tree.
+    monkeypatch.setattr(BudgetPublisher, "publish", _published_tree)
     reset_fake_singleton()
     yield
     reset_fake_singleton()
@@ -169,6 +192,9 @@ class _ScriptedFabro:
             if self._polls >= self.polls_before_run_returns:
                 self.run_done.set()
             return CommandResult(exit_code=0, stdout=self._record(), stderr="")
+        if verb == "ls-remote":
+            # An answered listing holding no ref: the publication releases the cancel.
+            return CommandResult(exit_code=0, stdout="", stderr="")
         assert verb == "events", verb
         return CommandResult(exit_code=0, stdout=self.events, stderr="")
 
@@ -307,9 +333,10 @@ def test_scenario175_the_pointer_is_exported_and_read_back_before_the_cancel(
     _, journal, fabro = _launch(repo=tmp_path, events=_OPEN_COMMAND_NODE_EVENTS)
     assert "rm" in fabro.verbs
     rows = _exceeded_rows(journal=journal)
-    pointer = rows[0]["preserved_pointer"]
-    assert isinstance(pointer, str)
-    assert pointer
+    # The cancel is released by the published tree, so the record names its ref.
+    ref = rows[0]["preserved_ref"]
+    assert isinstance(ref, str)
+    assert ref.startswith("refs/livespec/preserved-publish/")
     # The pointer is read back off the tenant's OWN comment surface, indexed on
     # `text`: `bd show --json` carries no bodies at all, so a read through it
     # reports every landed write as lost. A pointer in the journal alone would

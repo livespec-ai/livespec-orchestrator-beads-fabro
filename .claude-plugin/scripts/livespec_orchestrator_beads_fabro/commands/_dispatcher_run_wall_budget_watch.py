@@ -58,6 +58,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
     JournalWriter,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import DispatchPlan
+from livespec_orchestrator_beads_fabro.commands._dispatcher_preserved_tree_publish import (
+    PublishFailure,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_reconcile_runs_export import (
     LedgerComments,
 )
@@ -67,6 +70,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_hold
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_preserve import (
     preserved_pointer,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_publish import (
+    BudgetPublisher,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_records import (
     run_wall_budget_exceeded_record,
@@ -156,6 +162,7 @@ def cancel_run_past_budget(  # noqa: PLR0913 — kw-only per-poll decision; the 
     now_epoch: float,
     ledger: LedgerComments | None,
     hold: RunWallHoldState | None = None,
+    publisher: BudgetPublisher | None = None,
 ) -> RunWallVerdictValue:
     """Export, cancel and journal a run past its budget; hold it when it cannot.
 
@@ -169,6 +176,12 @@ def cancel_run_past_budget(  # noqa: PLR0913 — kw-only per-poll decision; the 
     a ref listing that could not be taken is one of them, and is never read as
     "origin holds no ref". `hold` is the per-run count the third consecutive
     held poll escalates on; a caller passing none can never escalate.
+
+    With a `publisher`, the pointer alone never releases the cancel: its stage
+    diffs can be all empty while the committed tree is the only copy of the
+    run's work. The run's tree is published BEFORE the cancel, and the ref it
+    lands on releases the cancel through the same verified-ref route; a failed
+    publication holds the run with the failed step named.
     """
     elapsed = slot_holding_seconds(start=start, now_epoch=now_epoch)
     if (
@@ -200,7 +213,7 @@ def cancel_run_past_budget(  # noqa: PLR0913 — kw-only per-poll decision; the 
         )
         return RunWallVerdict.CANCELLED
 
-    if preserved.pointer is not None:
+    if publisher is None and preserved.pointer is not None:
         return cancel(pointer=preserved.pointer, verified_ref=None)
     located = verified_preservation_ref(
         runner=runner,
@@ -210,7 +223,16 @@ def cancel_run_past_budget(  # noqa: PLR0913 — kw-only per-poll decision; the 
         tip_commit=committed_tip(record=reading.record),
     )
     if isinstance(located, VerifiedPreservationRef):
-        return cancel(pointer=None, verified_ref=located)
+        return cancel(pointer=preserved.pointer, verified_ref=located)
+    publication_failure = ""
+    if publisher is not None:
+        outcome = publisher.publish(plan=plan, runner=runner, journal=journal, run_id=run_id)
+        if not isinstance(outcome, PublishFailure):
+            return cancel(
+                pointer=preserved.pointer,
+                verified_ref=VerifiedPreservationRef(ref=outcome.ref, commit=outcome.commit),
+            )
+        publication_failure = f"publication step {outcome.step} failed: {outcome.detail}"
     hold_run(
         state=RunWallHoldState() if hold is None else hold,
         plan=plan,
@@ -219,17 +241,24 @@ def cancel_run_past_budget(  # noqa: PLR0913 — kw-only per-poll decision; the 
         run_id=run_id,
         elapsed_seconds=elapsed,
         failed_measurement=_failed_measurement(
-            export=preserved.failed_measurement, located=located
+            export=preserved.failed_measurement,
+            located=located,
+            publication_failure=publication_failure,
         ),
     )
     return RunWallVerdict.HELD
 
 
-def _failed_measurement(*, export: str, located: PreservationRefsUnobservable | None) -> str:
-    """The export's failure, with the ref listing's when it also could not be taken."""
+def _failed_measurement(
+    *, export: str, located: PreservationRefsUnobservable | None, publication_failure: str
+) -> str:
+    """The export's failure, with the ref listing's and the publication's when taken."""
+    measurements = [export]
     if isinstance(located, PreservationRefsUnobservable):
-        return f"{export}; {located.detail}"
-    return export
+        measurements.append(located.detail)
+    if publication_failure:
+        measurements.append(publication_failure)
+    return "; ".join(measurements)
 
 
 def _cancel(  # noqa: PLR0913 — kw-only cancel; the dispatch, the two seams, the run and the two measured figures are independent inputs.
@@ -305,6 +334,7 @@ class RunWallBudgetWatch:
     ledger: LedgerComments | None
     start: RunWallStart | None = None
     hold: RunWallHoldState = field(default_factory=RunWallHoldState)
+    publisher: BudgetPublisher | None = None
 
     def verdict(  # noqa: PLR0913 — kw-only per-poll decision; the dispatch, the three seams, the run and the two clock readings are independent inputs.
         self,
@@ -347,4 +377,5 @@ class RunWallBudgetWatch:
             now_epoch=now_epoch,
             ledger=self.ledger,
             hold=self.hold,
+            publisher=self.publisher,
         )

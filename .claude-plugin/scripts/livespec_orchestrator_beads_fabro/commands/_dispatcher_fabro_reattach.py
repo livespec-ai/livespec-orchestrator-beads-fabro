@@ -260,12 +260,17 @@ def _fresh_run_watch(*, plan: DispatchPlan, timing: ReattachTiming) -> RunWatchS
     from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_preserve import (
         run_wall_ledger,
     )
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_publish import (
+        BudgetPublisher,
+    )
     from livespec_orchestrator_beads_fabro.commands._dispatcher_run_wall_budget_watch import (
         RunWallBudgetWatch,
     )
 
     return RunWatchState(
-        budget=RunWallBudgetWatch(ledger=run_wall_ledger(repo=plan.repo)),
+        budget=RunWallBudgetWatch(
+            ledger=run_wall_ledger(repo=plan.repo), publisher=BudgetPublisher()
+        ),
         dispatch_id=None,
         liveness_state=LivenessState(),
         sample_liveness=liveness_sample,
