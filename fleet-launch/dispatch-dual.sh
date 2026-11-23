@@ -945,6 +945,9 @@ last_ahead=""
 # drive exits. A hold set while the item still reads something other than active stops the drive.
 drive_admitted=0
 drive_stopped=0
+# This is captured at invocation rather than re-derived at admission: the grant releases this
+# drive when the hold exists at LAUNCH, even if an operator removes that hold before admission.
+allowlist_grant_at_launch=0
 descendant_pids() {
   local child
   for child in $(pgrep -P "$1" 2>/dev/null); do descendant_pids "$child"; echo "$child"; done
@@ -960,13 +963,23 @@ stop_drive() {
   kill -KILL $pids 2>/dev/null
   wait "$drive_pid" 2>/dev/null
 }
+# admit_drive records the first admission observation.  The one-shot line remains available while
+# the drive is pre-admission, so every gmktec hold re-read continues to honour this launch's grant.
+admit_drive() {
+  [ "$drive_admitted" = 1 ] && return 0
+  drive_admitted=1
+  [ "$allowlist_grant_at_launch" = 1 ] || return 0
+  # LAUNCH identifies the impl-launch release in the one-shot audit record; this call itself is
+  # deliberately deferred until admission.
+  consume_allowlist_line LAUNCH after-admission
+}
 # drive_hold_poll: one poll. Returns 10 after it stopped the drive for a hold; otherwise 0.
 drive_hold_poll() {
   local status
   [ "$drive_admitted" = 1 ] && return 0
-  launch_hold_applies || return 0
   status=$(item_status)
-  if [ "$status" = active ]; then drive_admitted=1; return 0; fi
+  if [ "$status" = active ]; then admit_drive; return 0; fi
+  launch_hold_applies || return 0
   stop_drive
   rm -f "$marker"; marker=""; release_lock
   status=$(item_status) || status=active
@@ -1210,9 +1223,13 @@ while :; do
   fi
   echo "$(date -u +%FT%TZ) acp overrides: $(( ${#ACP_ARGS[@]} / 2 )) --acp-node arguments from $FLEET_LAUNCH_ACP_OVERRIDES_FILE"
   echo "$(date -u +%FT%TZ) LAUNCH target=$target head=$(git -C "$REPO" rev-parse --short HEAD) build=$build build-source=$(build_source) version=${build_version:-?}"
-  # One-shot: this item's freeze-allowlist line is consumed at LAUNCH, so a pre-listing re-ticket
-  # waits behind the hold like any other ticket.
-  [ "$target" = mi-homelab ] || [ "$target" = homelab-worker-arm64 ] || consume_allowlist_line LAUNCH
+  # Capture the release at LAUNCH, but consume it only when this drive is admitted.  A pre-admission
+  # stop therefore leaves the line available for the same ticket's next launch.
+  allowlist_grant_at_launch=0
+  if [ "$target" != mi-homelab ] && [ "$target" != homelab-worker-arm64 ] \
+    && [ -e "$GMK_HOLD_FILE" ] && allowlisted "$ITEM"; then
+    allowlist_grant_at_launch=1
+  fi
   # The drive is EXEC'd in its subshell so the wrapper chain is this launcher's direct child and
   # `wait "$drive_pid"` reaps it. A subshell that ends in the `wrap` function instead leaves the
   # chain a grandchild: when stop_drive kills both, the chain is re-parented to PID 1 (or a
@@ -1249,7 +1266,7 @@ while :; do
   run_row=""
   while [ "$drive_stopped" = 0 ]; do
     run_row=$(board_rows "$FABRO" "$tserver" | awk -v it="$ITEM" '$4==it {print; exit}')
-    if [ -n "$run_row" ]; then run_listed=1; echo "$(date -u +%FT%TZ) LISTED on $target: $run_row"; break; fi
+    if [ -n "$run_row" ]; then admit_drive; run_listed=1; echo "$(date -u +%FT%TZ) LISTED on $target: $run_row"; break; fi
     if ! kill -0 "$drive_pid" 2>/dev/null; then echo "$(date -u +%FT%TZ) drive exited before listing"; break; fi
     drive_hold_poll || break
     if [ -n "$lock" ] && [ $(( $(date +%s) - taken )) -ge "$FLEET_LAUNCH_MUTEX_HOLD_S" ]; then echo "$(date -u +%FT%TZ) mutex hold elapsed: release (marker kept until listing or drive exit)"; release_lock; fi
@@ -1309,6 +1326,7 @@ print(details or (("JSON refusal reason: "+reason) if "refus" in reason.lower() 
   if [ "$rc" -eq 0 ]; then
     exit_item_status=$(item_status) || exit_item_status=unreadable
     if [ "$exit_item_status" != ready ]; then
+      [ "$exit_item_status" != active ] || admit_drive
       write_terminal "drive-exit-early drive-exit=0 item-status=$exit_item_status"
       exit 0
     fi
