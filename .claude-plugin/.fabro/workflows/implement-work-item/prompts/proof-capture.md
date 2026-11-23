@@ -215,6 +215,79 @@ Parallel tool calls that start check aggregates also break this rule.
 Wait for each aggregate to finish before starting the next one, even when the
 checks target separate copies of the repository.
 
+## Brokered forge writes
+
+This stage's token is read-only. The broker, rather than this turn's ambient
+`gh` client, performs the two forge writes this stage requires: proof-asset
+uploads and the new record comment. Forge reads stay ordinary `gh` reads. Before
+Step 4 uploads anything, resolve the draft pull request number with
+`gh pr list --head <publish branch> --state open --json number`, then
+initialise this stage's broker request directory. The directory is scratch
+space, never a repository path; do not print the credential file or its
+contents.
+
+    broker="${LIVESPEC_SANDBOX_GH_REFRESH_ROOT:-${LIVESPEC_SANDBOX_CLAUDE_PLUGINS_ROOT:-$HOME/.claude/plugins}/livespec-gh-refresh}/bin/publication_broker.py"
+    mkdir -p "${TMPDIR:-/tmp}/proof-capture"
+    broker_dir="$(mktemp -d "${TMPDIR:-/tmp}/proof-capture/broker.XXXXXX")"
+    broker_launch="$broker_dir/launch.json"
+    broker_credential="$broker_dir/credential"
+    broker_request="$broker_dir/request.json"
+    chmod 700 "$broker_dir"
+    printf %s "$GITHUB_TOKEN" > "$broker_credential"
+    chmod 600 "$broker_credential"
+    python3 - "$broker_launch" "<number>" "$LIVESPEC_PROOF_ASSETS_RELEASE_TAG" "$broker_dir" <<'PY'
+    import json
+    import sys
+
+    path, number, store, request_directory = sys.argv[1:]
+    with open(path, "w", encoding="utf-8") as stream:
+        json.dump(
+            {
+                "stage": "proof_capture",
+                "pull_request_number": int(number),
+                "proof_asset_store": store,
+                "request_directory": request_directory,
+            },
+            stream,
+        )
+    PY
+    chmod 600 "$broker_launch"
+
+For every broker operation, first copy the body or asset into `$broker_dir`,
+then write exactly one JSON request to `$broker_request` and invoke the
+executable in the foreground. The operation is `comment` with `comment_body`
+for a record, or `proof_asset` with `proof_asset`, `proof_asset_name`, and
+`proof_asset_store` for an upload. Every request also carries
+`claimed_stage: "proof_capture"` and `pull_request_number: <number>`. For
+example, this is the complete request-and-reply shape for a staged file:
+
+    python3 - "$broker_request" <<'PY'
+    import json
+    import sys
+
+    json.dump(
+        {
+            "operation": "<comment or proof_asset>",
+            "claimed_stage": "proof_capture",
+            "pull_request_number": <number>,
+            "comment_body": "<staged body path or null>",
+            "proof_asset": "<staged asset path or null>",
+            "proof_asset_name": "<asset name or null>",
+            "proof_asset_store": "<proof-assets tag or null>",
+        },
+        sys.stdout,
+    )
+    print()
+    PY
+    "$broker" --launch-file "$broker_launch" --credential-file "$broker_credential" \
+      < "$broker_request"
+
+The reply is one JSON object. Treat a non-null `refusal` or a non-zero
+`exit_code` as a blocked broker request; otherwise its `stdout` is the forge
+output. Keep the upload URL from that output for the record. Do not launch
+the broker in the background, do not call it as a Python module, and do not
+substitute a direct write with `gh`.
+
 ## Step 4 — capture the proof
 
 ### Exercise the behaviour, not the test suite
@@ -294,11 +367,12 @@ sandbox can read. If it answers nothing, STOP and end with the needs-human
 protocol rather than inventing one.
 
 Upload each image to the repository's standing proof-assets prerelease —
-the Dispatcher created it before this dispatch — and keep the URL it
-returns:
-
-    gh release upload "$LIVESPEC_PROOF_ASSETS_RELEASE_TAG" \
-      "${TMPDIR:-/tmp}/proof-capture/<asset-name>" --clobber
+the Dispatcher created it before this dispatch — through the broker, and keep
+the URL it returns. Copy the image to `$broker_dir/<asset-name>` first, then
+send the `proof_asset` request described in **Brokered forge writes**, with
+that staged path, `<asset-name>`, and `$LIVESPEC_PROOF_ASSETS_RELEASE_TAG`. The
+broker adds the required clobber behaviour; do not invoke the release upload
+yourself.
 
 Proof binaries **MUST NOT be committed** to the repository tree; the
 release asset store is the only place they live.
@@ -430,9 +504,9 @@ you uploaded fails the assertion as surely as no proof at all.
 ## Step 5 — publish the record
 
 Post exactly **one NEW comment** on the draft pull request for this item's
-publish branch. Find it with `gh pr list --head <publish branch> --state
-open --json number`, and post with `gh pr comment <number> --body-file
-<file>`.
+publish branch. You resolved its `<number>` before Step 4; post the record
+as a `comment` request through the broker with the staged body file, as
+**Brokered forge writes** describes, never directly through `gh`.
 
 **MEASURE THE BODY FILE BEFORE YOU POST IT, and refuse to post it over
 budget:**
@@ -519,7 +593,7 @@ That first forge read is **provisional** until the posting boundary. This is
 especially important when this visit is **including a recapture after
 `review_fix`**: that stage can commit and `publish_draft` can move the pull
 request after the earlier read, while this capture is still composing its
-record. **Immediately before `gh pr comment`, read `headRefOid` from the
+record. **Immediately before the broker `comment` request, read `headRefOid` from the
 forge again** for the same pull request. **If that fresh sha differs from the
 provisional one, replace the one `Publish-branch head:` declaration** in the
 unposted body with the fresh full sha, then **re-run `git fetch --quiet origin
@@ -529,7 +603,7 @@ pull-request head has the tree your steps ran on; otherwise do not declare a
 head and take the no-declaration route above. Because replacing the declaration
 changes the body, measure it again against the Step 5 budget before posting.
 The final forge read, any needed replacement and repeat tree check, final
-measurement, and `gh pr comment` are one posting sequence — do not insert
+measurement, and the broker `comment` request are one posting sequence — do not insert
 another action that could let a newly republished reviewed tree go unread.
 
 Then, **ahead of every numbered step in the body**, declare the directory
