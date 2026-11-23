@@ -25,7 +25,8 @@
 #   §"Toolchain pins" — `run:` fields MUST delegate to `just <target>`
 #   and MUST NOT shell out to underlying tools directly (the spec's
 #   lefthook-must-delegate-to-just rule, enforced by
-#   dev-tooling/checks/no_direct_tool_invocation.py).
+#   livespec_dev_tooling/checks/no_direct_tool_invocation.py, shipped in the
+#   pinned livespec-dev-tooling wheel).
 #
 # Activation: `just bootstrap` installs the structural commit-refuse
 # wrapper into .git/hooks/pre-commit, .git/hooks/pre-push, and
