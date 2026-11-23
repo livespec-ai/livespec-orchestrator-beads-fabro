@@ -38,6 +38,16 @@ FAILED tests/test_dispatcher.py::test_the_preview_records_pytest_failures - Asse
 FAILED tests/test_dispatcher.py::test_the_handoff_compares_pytest_failures - AssertionError
 ======================== 2 failed, 15 passed in 0.42s =========================
 """
+_SPACED_PYTEST_FAILURE_TARGET = "tests/test_dispatcher.py::test_the_preview_keeps_spaced_ids[a b]"
+_RECORDED_SPACED_ID_PYTEST_FAILURE_OUTPUT = f"""============================= test session starts ==============================
+collected 3 items
+
+{_SPACED_PYTEST_FAILURE_TARGET} FAILED [ 66%]
+
+=================================== FAILURES ===================================
+FAILED {_SPACED_PYTEST_FAILURE_TARGET} - AssertionError
+======================== 1 failed, 2 passed in 0.42s ==========================
+"""
 
 
 def _run(
@@ -221,6 +231,35 @@ def test_gate_preview_records_pytest_node_ids_from_a_full_suite_failure_without_
             encoding="utf-8"
         )
     )["failed_targets"] == list(_PYTEST_FAILURE_TARGETS)
+
+
+def test_gate_preview_records_a_parametrized_pytest_node_id_that_contains_a_space(
+    tmp_path: Path,
+) -> None:
+    """A parametrize id with a space is recorded whole, not dropped or truncated."""
+    preview = importlib.import_module(_MODULE)
+    repo, runner, env = _preview_repository(tmp_path=tmp_path, preview=preview)
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text(
+        "#!/bin/sh\n"
+        "cat <<'PYTEST_OUTPUT'\n"
+        f"{_RECORDED_SPACED_ID_PYTEST_FAILURE_OUTPUT}"
+        "PYTEST_OUTPUT\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+
+    completed = _run(
+        repo=repo,
+        env=env,
+        argv=[sys.executable, str(runner), "green"],
+        check=False,
+    )
+
+    report = cast("dict[str, Any]", json.loads(completed.stdout.splitlines()[-1]))
+    assert completed.returncode == 1
+    assert report["failed_targets"] == [_SPACED_PYTEST_FAILURE_TARGET]
 
 
 def test_gate_preview_records_an_empty_output_tail_when_the_failing_hook_wrote_nothing(
