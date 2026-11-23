@@ -608,3 +608,91 @@ def test_gathered_signals_use_the_selected_implement_candidate_or_primary_fallba
     assert journal["livespec.implement.selected_index"] == 1
     assert attributes["livespec.implement.adapter"] == {"stringValue": CODEX_AGENT_ID}
     assert attributes["livespec.implement.selected_index"] == {"intValue": "1"}
+
+
+def test_calibration_reports_only_this_dispatchs_distinct_verified_red_green_pairs(
+    tmp_path: Path,
+) -> None:
+    """Scenario 165 reports completed pairs without counting their observations twice."""
+    module = _module()
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_tdd_order_sink import TddOrderSink
+    from livespec_orchestrator_beads_fabro.commands._dispatcher_tdd_signals import (
+        tdd_signal_fields,
+    )
+
+    def body(
+        *,
+        run_id: str = _DISPATCH_ID,
+        checksum: str | None = None,
+        red: str | None = None,
+        green: str | None = None,
+        suite_green: str | None = None,
+    ) -> str:
+        trailers = ["Body prose."]
+        if checksum is not None:
+            trailers.append(f"TDD-Red-Test-File-Checksum: {checksum}")
+        if red is not None:
+            trailers.append(f"TDD-Red-Captured-At: {red}")
+        if suite_green is not None:
+            trailers.append(f"TDD-Suite-Green-Captured-At: {suite_green}")
+        trailers.append(f"Factory-Run-Id: {run_id}")
+        if green is not None:
+            trailers.append(f"TDD-Green-Verified-At: {green}")
+        return "\n".join(trailers)
+
+    signals = module.gather_tdd_signals(
+        repo=Path("/repo"),
+        item=_item(),
+        outcome=_outcome(),
+        records=(_dispatch_id_record(),),
+        sink=TddOrderSink(path=tmp_path / "tdd-order.json"),
+        runner=_Runner(
+            stdout=_commits_payload(
+                commits=[
+                    (
+                        "feat: first completed pair",
+                        body(
+                            checksum="sha256:first",
+                            red="2026-10-01T20:00:00Z",
+                            green="2026-10-01T20:04:00Z",
+                        ),
+                    ),
+                    (
+                        "feat: duplicate observation",
+                        body(
+                            checksum="sha256:first",
+                            red="2026-10-01T20:00:00Z",
+                            green="2026-10-01T20:09:00Z",
+                        ),
+                    ),
+                    (
+                        "feat: second completed pair",
+                        body(
+                            checksum="sha256:second",
+                            red="2026-10-01T20:10:00Z",
+                            green="2026-10-01T20:14:00Z",
+                        ),
+                    ),
+                    ("feat: open Red", body(checksum="sha256:open", red="2026-10-01T20:20:00Z")),
+                    ("refactor: suite-green only", body(suite_green="2026-10-01T20:30:00Z")),
+                    ("docs: unrelated", body()),
+                    (
+                        "feat: another dispatch",
+                        body(
+                            run_id=_OTHER_DISPATCH_ID,
+                            checksum="sha256:other",
+                            red="2026-09-01T20:00:00Z",
+                            green="2026-09-01T20:05:00Z",
+                        ),
+                    ),
+                ]
+            )
+        ),
+    )
+
+    fields = tdd_signal_fields(signals=signals)
+
+    assert (
+        fields.get("tdd.verified_pair_count"),
+        fields.get("tdd.verified_pair_unobserved_reason"),
+    ) == (2, None)
