@@ -356,7 +356,7 @@ def test_the_gate_projects_once_per_credential_and_spends_one_usage_request(
 def test_an_empty_checkout_journal_uses_its_hosts_credential_baseline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A new checkout inherits a same-host rate without treating it as unavailable."""
+    """A new checkout inherits a same-host rate with one eligibility decision."""
     monkeypatch.setenv(CLAUDE_OAUTH_TOKEN_ENV, _TOKEN)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "host-state"))
     attempts: list[headroom.SessionHeadroomReading] = []
