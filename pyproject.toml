@@ -436,8 +436,11 @@ delegated_gate = true
 # measurements, not itself measured. REVERT: restore gate_parallelism = 12 and
 # drop gate_cpu, if any node stays under 5% idle with BestEffort full avg60 over
 # 30 across two 10-minute windows and is no better than its 2026-11-15 ~06:58Z
-# baseline (research note 004), or if any gates-cq workload waits more than
-# 10 minutes for admission.
+# baseline (research note 004), or if the p90 of gates-cq admission waits (Job
+# creation to start) over any 24 h window of at least 20 Jobs exceeds 10
+# minutes, or any single wait exceeds 30 minutes. (Amended 2026-11-23: the
+# earlier "any workload waits more than 10 minutes" had no outlier rule, and one
+# 18.7 min wait behind a long poweredge gate fired it with a day p90 near 0.)
 # Source: livespec-dev-tooling plan gate-job-resources, research notes 003 and
 # 004, epic livespec-dev-tooling-ukoeah, item (i).
 gate_cpu = 10
