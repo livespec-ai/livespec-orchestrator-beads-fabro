@@ -14729,6 +14729,31 @@ Feature: The release branch advances only at the roll step, after its canary pas
     When an operator runs `gh workflow run fast-forward-release-branch.yml -f tag=v1.0.1`
     Then the run fails naming v1.0.1 and the missing `canary-coverage.json` asset
     And the `release` branch still names the commit of v1.0.0
+
+  Scenario: the roll step refuses a tag that holds a revert whose reland is outside the tag
+    Given the `release` branch names the commit of release tag v1.0.0
+    And release v1.1.0's commit descends from v1.0.0's commit
+    And a commit in v1.0.0..v1.1.0 reverts the broker commit B
+    And a commit on `master` that is not an ancestor of v1.1.0's commit relands B
+    And release v1.1.0's `canary-coverage.json` asset lists no split pair
+    When an operator runs `gh workflow run fast-forward-release-branch.yml -f tag=v1.1.0`
+    Then the run fails naming v1.1.0 and the split pair for B
+    And the `release` branch still names the commit of v1.0.0
+
+  Scenario: a split pair covered by a canary traversal of the reverted paths lets the roll proceed
+    Given the `release` branch names the commit of release tag v1.0.0
+    And a commit in v1.0.0..v1.1.0 reverts the broker commit B and its reland on `master` is not an ancestor of v1.1.0's commit
+    And release v1.1.0's `canary-coverage.json` asset lists the split pair and embeds a journal row of a v1.1.0 sample completing every node B changed through its success edge
+    And release v1.1.0's canary samples were judged to pass
+    When an operator runs `gh workflow run fast-forward-release-branch.yml -f tag=v1.1.0`
+    Then the `release` branch names the commit of v1.1.0 when the run ends
+
+  Scenario: a tag that holds both halves of a revert-and-reland pair holds no split pair
+    Given a commit in v1.0.0..v1.1.0 reverts the broker commit B
+    And a later commit that is an ancestor of v1.1.0's commit relands B
+    And release v1.1.0's `canary-coverage.json` asset lists an empty list of split pairs
+    When an operator runs `gh workflow run fast-forward-release-branch.yml -f tag=v1.1.0`
+    Then the run does not fail on a split pair
 ```
 
 ## Scenario 332 — A host Claude judgement's spend journal ends with the closing result event's final usage

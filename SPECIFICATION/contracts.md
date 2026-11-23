@@ -3219,6 +3219,35 @@ pass judgement, not from this record: each path it changes is covered by
 a journal citation from a canary sample on its build or by a routing
 test.
 
+**Revert and reland coverage.** A *revert commit* is a commit between
+the base and the named tag's commit, the tag's commit included, that
+reverts an earlier commit of this repository, identified by the `This
+reverts commit <sha>` line `git revert` writes or by a subject that
+names the commit it reverts. A *reland* of the reverted change is a
+commit reachable from `master` whose `Relands:` trailer names the
+reverted commit's sha or whose patch restores the reverted commit's
+diff. A *split pair* is a revert commit whose reland is reachable from
+`master` but is not an ancestor of the tag's commit. A tag that contains
+both halves of a pair, and a tag that contains neither, holds no split
+pair. Before the workflow moves `release`, at the roll step or in a
+corrective roll-forward, it MUST find every split pair for the named
+tag. The tag's `canary-coverage.json` MUST list every split pair it
+finds, naming the revert commit, the reverted commit and the reland
+commit, and MUST cover each split pair by a journal citation, in the
+form **Canary coverage.** defines, of a canary sample on the tag's
+commit that completed, with a successful outcome through its success
+edge, every workflow node the reverted commit changed. A split pair
+whose reverted commit changed no path in the workflow scope is covered
+by a journal citation of any canary sample on the tag's commit that
+completed `proof_capture` successfully. The run MUST fail, naming the
+tag and each uncovered split pair, and `release` MUST keep its commit,
+when a split pair is absent from the record, is listed without a
+covering citation, or is covered by a citation that names a build commit
+other than the tag's commit. When the tag holds no split pair, the
+record MUST still carry an empty list of split pairs. A corrective
+roll-forward is excepted from the canary's pass judgement, not from this
+record.
+
 Scenario 331 in `scenarios.md` exercises **The release channel.** and
 **Canary coverage.**
 
