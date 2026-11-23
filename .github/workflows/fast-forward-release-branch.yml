@@ -77,6 +77,173 @@ jobs:
           git checkout --detach "refs/tags/${ROLL_TAG}"
           echo "Roll tag ${ROLL_TAG} = $(git rev-parse HEAD)"
 
+      # SPLIT-PAIR GATE (bd-ib-ozxhs4; spec v400, contracts.md "Revert and
+      # reland coverage"). A tag can end between a revert and its reland: the
+      # revert is in the tag, the reland is on master but not in the tag (the
+      # 0.346.1 credential withdrawal shipped without the broker reland and
+      # every proof comment failed). Before `release` moves, find each such
+      # split pair and require the release's `canary-coverage.json` asset to
+      # list it and to cover it with a successful journal citation of a canary
+      # sample on the tag's commit. A tag holding both halves, or neither,
+      # passes with no record. The step only adds a refusal: it never moves
+      # `release` and never relaxes another check.
+      - name: Refuse a tag that splits a revert from its reland without coverage
+        env:
+          ROLL_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          record="${RUNNER_TEMP}/canary-coverage.json"
+          rm -f "$record"
+          gh release download "$ROLL_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern canary-coverage.json --output "$record" \
+            || echo "release ${ROLL_TAG} has no canary-coverage.json asset" >&2
+          BASE_REF=origin/release MASTER_REF=origin/master COVERAGE_RECORD="$record" python3 - <<'SPLIT_PAIR_PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+
+          SCOPE = ".claude-plugin/.fabro/workflows/"
+
+
+          def git(*args, stdin=None, check=True):
+              result = subprocess.run(
+                  ["git", *args], capture_output=True, text=True, input=stdin, check=check
+              )
+              return result.stdout
+
+
+          def commits(rng):
+              for record in git("log", "--format=%H%x00%s%x00%B%x01", rng).split("\x01"):
+                  record = record.strip("\n")
+                  if record:
+                      sha, subject, body = record.split("\x00", 2)
+                      yield sha.strip(), subject, body
+
+
+          def resolve(ref):
+              out = subprocess.run(
+                  ["git", "rev-parse", "--verify", "--quiet", ref + "^{commit}"],
+                  capture_output=True,
+                  text=True,
+              )
+              return out.stdout.strip()
+
+
+          def patch_id(sha):
+              out = git("patch-id", "--stable", stdin=git("show", sha)).split()
+              return out[0] if out else ""
+
+
+          def nodes_of(text):
+              nodes, cur, buf = {}, None, []
+              for line in text.splitlines():
+                  if cur is None:
+                      match = re.match(r"^    ([A-Za-z_]\w*) \[\s*$", line)
+                      if match:
+                          cur, buf = match.group(1), [line]
+                  else:
+                      buf.append(line)
+                      if re.match(r"^    \]\s*$", line):
+                          nodes[cur] = "\n".join(buf)
+                          cur = None
+              return nodes
+
+
+          def required_nodes(reverted):
+              """Nodes the reverted commit changed; proof_capture when it names none."""
+              parent = reverted + "^"
+              names = git("diff", "--name-only", parent, reverted, "--", SCOPE, check=False).split()
+              required = set()
+              for path in names:
+                  if path.endswith("/workflow.fabro"):
+                      old = nodes_of(git("show", parent + ":" + path, check=False))
+                      new = nodes_of(git("show", reverted + ":" + path, check=False))
+                      required |= {n for n in set(old) | set(new) if old.get(n) != new.get(n)}
+                  else:
+                      required.add("proof_capture")
+              return required or {"proof_capture"}
+
+
+          tag = os.environ["ROLL_TAG"]
+          tip = git("rev-parse", "HEAD").strip()
+          base = resolve(os.environ["BASE_REF"])
+          master = resolve(os.environ["MASTER_REF"])
+          reverts = []
+          for sha, subject, body in commits(f"{base}..{tip}" if base else tip):
+              match = re.search(r"^This reverts commit ([0-9a-f]{7,40})", body, re.M)
+              match = match or re.match(r"^Revert\b.*?\b([0-9a-f]{12,40})\b", subject)
+              reverted = resolve(match.group(1)) if match else ""
+              if reverted:
+                  reverts.append((sha, reverted))
+          candidates = list(commits(f"{tip}..{master}")) if master else []
+
+
+          def find_reland(reverted):
+              for sha, _subject, body in candidates:
+                  for found in re.finditer(r"^Relands:\s*([0-9a-f]{7,40})", body, re.M):
+                      if reverted.startswith(found.group(1)) or found.group(1).startswith(reverted):
+                          return sha
+              pid = patch_id(reverted)
+              for sha, _subject, _body in candidates:
+                  if pid and patch_id(sha) == pid:
+                      return sha
+              return ""
+
+
+          pairs = []
+          for revert, reverted in reverts:
+              reland = find_reland(reverted)
+              if reland:
+                  pairs.append(
+                      {"revert": revert, "reverted": reverted, "reland": reland,
+                       "required": sorted(required_nodes(reverted))}
+                  )
+          if not pairs:
+              print(f"{tag}: no split revert/reland pair; nothing to cover")
+              sys.exit(0)
+          try:
+              with open(os.environ["COVERAGE_RECORD"], encoding="utf-8") as handle:
+                  record = json.load(handle)
+          except (OSError, ValueError):
+              record = {}
+          listed = {
+              p.get("revert"): p for p in record.get("split_pairs", []) if isinstance(p, dict)
+          }
+          uncovered = []
+          for pair in pairs:
+              entry = listed.get(pair["revert"])
+              if entry is None:
+                  uncovered.append((pair, "absent from canary-coverage.json"))
+                  continue
+              if (entry.get("reverted"), entry.get("reland")) != (pair["reverted"], pair["reland"]):
+                  uncovered.append((pair, "the record names a different reverted or reland commit"))
+                  continue
+              done = {
+                  c.get("node")
+                  for c in entry.get("citations", [])
+                  if isinstance(c, dict)
+                  and c.get("build_commit") == tip
+                  and c.get("outcome") == "success"
+              }
+              missing = [n for n in pair["required"] if n not in done]
+              if missing:
+                  uncovered.append(
+                      (pair, "no successful citation on " + tip[:12] + " for " + ", ".join(missing))
+                  )
+          for pair, why in uncovered:
+              print(
+                  f"::error::{tag}: uncovered split pair, revert {pair['revert'][:12]} of "
+                  f"{pair['reverted'][:12]} relanded by {pair['reland'][:12]}: {why}",
+                  file=sys.stderr,
+              )
+          if uncovered:
+              sys.exit(1)
+          print(f"{tag}: {len(pairs)} split pair(s), each covered by a successful citation")
+          SPLIT_PAIR_PY
+
       - name: Fast-forward the release branch to the released commit
         run: |
           set -euo pipefail
