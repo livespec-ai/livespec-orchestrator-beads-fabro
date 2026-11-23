@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import tomli
 from livespec_orchestrator_beads_fabro.commands._config import resolve_fabro_factory
 from livespec_orchestrator_beads_fabro.commands._dispatcher_overlay import (
     render_run_config_overlay,
@@ -56,14 +55,8 @@ def _render(*, plan: DispatchPlan, repo: Path) -> str:
     return rendered
 
 
-def test_factory_github_app_is_projected_only_when_declared(tmp_path: Path) -> None:
-    """The resolved factory declaration selects the run's App source.
-
-    The no-declaration control compares the overlay to the historical direct
-    rendering.  It prevents an empty table from reaching an engine that rejects
-    unknown run-integration configuration, while the positive arm proves the
-    selected factory's secret *names* reach the engine verbatim.
-    """
+def test_factory_github_app_is_never_projected_into_agent_run(tmp_path: Path) -> None:
+    """A factory declaration never becomes an agent-readable App input."""
     _write_config(
         repo=tmp_path,
         factory={
@@ -78,11 +71,7 @@ def test_factory_github_app_is_projected_only_when_declared(tmp_path: Path) -> N
     assert hasattr(target, "github_app")
 
     selected = _render(plan=_plan_for(repo=tmp_path, github_app=target.github_app), repo=tmp_path)
-    selected_app = tomli.loads(selected)["run"]["integrations"]["github"]["app"]
-    assert selected_app == {
-        "app_id_secret": "PETRI_GITHUB_APP_ID",
-        "private_key_secret": "PETRI_GITHUB_APP_PRIVATE_KEY",
-    }
+    assert "[run.integrations.github.app]" not in selected
 
     _write_config(repo=tmp_path, factory={})
     absent_target = resolve_fabro_factory(cwd=tmp_path, factory="petri")

@@ -51,16 +51,11 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_driver_hooks import 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_provenance import (
     factory_run_id_prepare_steps_block,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_gh_refresh import github_app_env_present
 from livespec_orchestrator_beads_fabro.commands._dispatcher_git_author import (
     GitAuthor,
     git_author_env_lines,
     git_identity_prepare_steps_block,
     resolve_workflow_git_author,
-)
-from livespec_orchestrator_beads_fabro.commands._dispatcher_git_credential_helper import (
-    git_credential_helper_env_lines,
-    git_credential_helper_prepare_steps_block,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_harness_shell_policy import (
     harness_settings_prepare_steps_block,
@@ -119,7 +114,6 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_toml_read import tom
 from livespec_orchestrator_beads_fabro.commands._factory_github_app import (
     NO_FACTORY_GITHUB_APP,
     FactoryGithubApp,
-    github_app_table,
 )
 
 # `codex_fragments` includes `codex_driver_hooks_prepare_steps_block` after
@@ -289,7 +283,7 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
     # The dispatch caller still owns and supplies the publication token for the
     # broker and scripted publication stages.  This agent-stage overlay must
     # deliberately not project it.
-    _ = github_token
+    _ = (github_token, github_app)
     if codex_auth_snapshot is not None and not isinstance(credential_use, CredentialUseProjection):
         return None
     graph_value = toml_section_string(text=committed_text, section="workflow", key="graph")
@@ -335,10 +329,6 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
     # repository's committed project settings, whose `env` overrides the process
     # environment it inherits (bd-ib-rv2jk4).
     harness_settings_steps = harness_settings_prepare_steps_block()
-    # Rendered immediately after the wrapper it routes to, and unconditionally:
-    # the Petri-era runner performs no Git operations of its own, so without this
-    # every in-sandbox push reaches origin with no credential (bd-ib-52zt3o).
-    git_credential_helper_steps = git_credential_helper_prepare_steps_block()
     codex_steps, codex_environment = codex_fragments(
         codex_auth_snapshot=codex_auth_snapshot,
         codex_otel_config=codex_otel_config,
@@ -363,12 +353,6 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
     helper_fetch_steps = helper_fetch_prepare_steps_block(source=helper_source)
     if helper_fetch_steps is None:
         return None
-    # A local App input means this run can mint a publication credential.  Do
-    # not give the engine its integration projection: every agent node inherits
-    # the run integration, so that table is itself an agent-readable minting
-    # path.  The no-local-input shape remains useful to the availability probe,
-    # which validates a factory declaration without opening a credential path.
-    app_integration = "" if github_app_env_present() else github_app_table(github_app=github_app)
     factory_provenance_steps = factory_run_id_prepare_steps_block(dispatch_id=dispatch_id)
     # Rendered immediately after the helper fetch, ahead of every other
     # Dispatcher-materialized step, which keeps it right behind the committed
@@ -409,7 +393,6 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
     # uses for the needs_human node's emergency commit (S5 / bd-ib-b4u6b7).
     return (
         rewritten
-        + app_integration
         + helper_fetch_steps
         + dispatch_base_steps
         + git_identity_steps
@@ -418,7 +401,6 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
         + clones.steps
         + tmux_steps
         + harness_settings_steps
-        + git_credential_helper_steps
         + codex_steps
         + claude_driver_hooks_prepare_steps_block()
         + plugin_cache_steps
@@ -435,10 +417,6 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
         + "\n# --- (UNCOMMITTED; mode 600; deleted when the run returns) ---\n"
         + f"[environments.{env_environment_id}.env]\n"
         + f"CLAUDE_CODE_OAUTH_TOKEN = {token_literal}\n"
-        # Process-level github.com helper, so a fetch GitHub refuses anonymously
-        # is retried authenticated from ANY git process, the committed chain's
-        # `uv sync` included (bd-ib-awv2iu).
-        + git_credential_helper_env_lines()
         + author_env_lines
         + tmux_env_line
         + harness_shell_env
