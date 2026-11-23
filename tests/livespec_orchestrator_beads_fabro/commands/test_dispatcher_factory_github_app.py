@@ -98,3 +98,34 @@ def test_factory_github_app_is_projected_only_when_declared(tmp_path: Path) -> N
     )
     assert absent == historical
     assert "[run.integrations.github.app]" not in absent
+
+
+def test_agent_stages_receive_no_github_app_input_or_minting_file(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Scenario 202 keeps GitHub App inputs outside every agent-readable run surface."""
+    _write_config(
+        repo=tmp_path,
+        factory={
+            "github_app": {
+                "app_id_secret": "PETRI_GITHUB_APP_ID",
+                "private_key_secret": "PETRI_GITHUB_APP_PRIVATE_KEY",
+            }
+        },
+    )
+    for name, value in {
+        "GITHUB_APP_ID": "42",
+        "GITHUB_PRIVATE_KEY": "test-private-key",
+        "GITHUB_APP_INSTALLATION_ID": "7",
+        "GITHUB_API_URL": "https://api.github.com",
+    }.items():
+        monkeypatch.setenv(name, value)
+
+    factory = resolve_fabro_factory(cwd=tmp_path, factory="petri")
+    rendered = _render(plan=_plan_for(repo=tmp_path, github_app=factory.github_app), repo=tmp_path)
+
+    assert "[run.integrations.github.app]" not in rendered
+    assert "GITHUB_APP_ID = " not in rendered
+    assert "GITHUB_PRIVATE_KEY = " not in rendered
+    assert "GITHUB_APP_INSTALLATION_ID = " not in rendered
+    assert "app-inputs.env" not in rendered
