@@ -37,3 +37,12 @@ def test_counter_helpers_reject_non_product_paths_and_non_table_walks() -> None:
     assert _walk(table={"tool": 1}, path=("tool", "nested")) is None
     assert _docstring_lines(source="") == frozenset()
     assert _docstring_lines(source="1\n") == frozenset()
+
+
+def test_a_sibling_tree_sharing_a_declared_trees_name_is_not_product() -> None:
+    declared = product_source_prefixes(
+        pyproject_text='[tool.livespec_dev_tooling]\nsource_trees = ["src/pkg"]\n'
+    )
+    assert is_product_path(path="src/pkg/module.py", prefixes=declared)
+    assert not is_product_path(path="src/pkg_extra/module.py", prefixes=declared)
+    assert not is_product_path(path="src/pkg_extra/module.py", prefixes=("src/pkg",))
