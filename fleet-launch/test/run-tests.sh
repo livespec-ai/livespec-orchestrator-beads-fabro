@@ -4526,6 +4526,57 @@ fi
 
 if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = probe-stderr ]; then
 
+scenario "a wrapper that strips the installed plugin root refuses before it takes a launch slot"
+new_case tenant-wrapper-scrubs-installed-plugin-root
+open_boards
+unset WRAPPER
+SCRUBBING_TENANT_WRAPPER="$STUB/scrubbing-tenant-wrapper"
+cat > "$SCRUBBING_TENANT_WRAPPER" <<'SCRUBBING_TENANT_WRAPPER_STUB'
+#!/usr/bin/env bash
+# This target repository's credential wrapper drops a value the launcher needs
+# to identify the installed plugin build it will dispatch.
+set -u
+[ "${1:-}" = -- ] && shift
+unset LIVESPEC_INSTALLED_PLUGIN_ROOT
+exec "$@"
+SCRUBBING_TENANT_WRAPPER_STUB
+chmod +x "$SCRUBBING_TENANT_WRAPPER"
+printf '{"credential_wrapper": ["%s", "--"]}\n' "$SCRUBBING_TENANT_WRAPPER" > "$TENANT/.livespec.jsonc"
+export LIVESPEC_INSTALLED_PLUGIN_ROOT="$PLUGIN_CACHE/$PLUGIN_BUILD"
+parent_out=$(ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-scrubbed-installed-root 2>&1)
+parent_rc=$?
+rm -f "$TENANT/.livespec.jsonc"
+unset LIVESPEC_INSTALLED_PLUGIN_ROOT
+if [ "$parent_rc" = 75 ] \
+    && [[ "$parent_out" == *"scrubbing-tenant-wrapper"* ]] \
+    && [[ "$parent_out" != *"gmktec FIFO ticket taken"* ]] \
+    && [[ "$parent_out" != *"LAUNCH target="* ]] \
+    && [ ! -s "$DRIVE_LOG" ]; then
+    pass "a target credential wrapper that strips LIVESPEC_INSTALLED_PLUGIN_ROOT is named by a preflight refusal before it takes a slot or prints LAUNCH"
+else
+    fail "a wrapper that stripped LIVESPEC_INSTALLED_PLUGIN_ROOT took a slot, launched, or was not named (rc=$parent_rc): $(printf '%s' "$parent_out" | tail -5)"
+fi
+
+new_case dispatcher-json-refusal-after-launch
+open_boards
+export FLEET_LAUNCH_MAX_WAIT_S=120
+export STUB_DRIVE_FAIL_TIMES=1
+export STUB_DRIVE_FAIL_RC=3
+dispatcher_refusal='refusing dispatch: the installed plugin build records no commit'
+export STUB_DRIVE_FAIL_STDOUT="{\"dispatcher\": {\"exit_code\": 3, \"stderr\": \"$dispatcher_refusal\", \"stdout_json\": null}}"
+ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-dispatcher-json-refusal > "$CASE_LOG" 2>&1
+dispatcher_refusal_rc=$?
+if [ "$dispatcher_refusal_rc" = 3 ] \
+    && [ "$(drive_log_items)" = bd-ib-dispatcher-json-refusal ] \
+    && grep -qF 'LAUNCH target=' "$CASE_LOG" \
+    && grep -qF "JSON refusal reason: $dispatcher_refusal" "$CASE_LOG" \
+    && ! grep -qF 'no stdout_json detail' "$CASE_LOG" \
+    && grep -qF 'terminal: item=bd-ib-dispatcher-json-refusal ticket=100 cause=refused' "$CASE_LOG"; then
+    pass "a dispatcher refusal after LAUNCH records its JSON refusal reason instead of no stdout_json detail"
+else
+    fail "a dispatcher JSON refusal after LAUNCH was not logged or classified (rc=$dispatcher_refusal_rc): $(tail -8 "$CASE_LOG")"
+fi
+
 new_case probe-stderr
 open_boards
 export FLEET_LAUNCH_MAX_WAIT_S=120
