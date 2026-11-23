@@ -63,6 +63,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dot_graph import (
     DotGraph,
     parse_dot_graph,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_gh_refresh import withdrawn_script
 from livespec_orchestrator_beads_fabro.commands._dispatcher_minijinja_escape import (
     escape_minijinja_literal,
 )
@@ -102,12 +103,14 @@ SETUP_FAILURE_NODE = "setup_failed"
 # the newest of them when this node starts is the step that failed -- the same
 # source the Definition-of-Done guard reads its starting commit from. A graph whose
 # checkpoints cannot be read still ends the run, naming the shape instead.
-SETUP_FAILURE_SCRIPT = (
-    "step=$(git log -n 1 --format=%s 2>/dev/null"
-    " | sed -n 's/^fabro([^)]*): \\(run_prepare_[0-9][0-9]*\\) (.*$/\\1/p');"
-    ' echo "LIVESPEC_SETUP_STEP_FAILED: ${step:-an unidentified run_prepare_<N> step}'
-    ' failed, so the run ends before any stage that needs the sandbox" >&2;'
-    " exit 1"
+SETUP_FAILURE_SCRIPT = withdrawn_script(
+    script=(
+        "step=$(git log -n 1 --format=%s 2>/dev/null"
+        " | sed -n 's/^fabro([^)]*): \\(run_prepare_[0-9][0-9]*\\) (.*$/\\1/p');"
+        ' echo "LIVESPEC_SETUP_STEP_FAILED: ${step:-an unidentified run_prepare_<N> step}'
+        ' failed, so the run ends before any stage that needs the sandbox" >&2;'
+        " exit 1"
+    )
 )
 
 _SETUP_NODE_RE = re.compile(r"^run_prepare_(?P<index>[0-9]+)$")
@@ -388,13 +391,12 @@ def _quoted(*, value: str) -> str:
 
 def _node_block(*, name: str, step: PrepareStep, seconds: int, indent: str) -> str:
     """One setup node's declaration; `timeout` precedes the long values, as the renderer expects."""
-    index = name.removeprefix(SETUP_NODE_PREFIX)
     return (
         f"{indent}{name} [\n"
-        f'{indent}    label="Setup step {index}"\n'
+        f'{indent}    label="Setup step {name.removeprefix(SETUP_NODE_PREFIX)}"\n'
         f"{indent}    shape=parallelogram\n"
         f'{indent}    timeout="{seconds}s"\n'
-        f"{indent}    script={_quoted(value=step.script)}\n"
+        f"{indent}    script={_quoted(value=withdrawn_script(script=step.script))}\n"
         f"{indent}]"
     )
 

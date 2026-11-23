@@ -31,6 +31,9 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dot_graph import (
     DotGraph,
     parse_dot_graph,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_gh_refresh import (
+    CREDENTIAL_WITHDRAWAL_STATEMENT,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_git_author import GitAuthor
 from livespec_orchestrator_beads_fabro.commands._node_timeouts import (
     WORKFLOW_DEFAULT_LAYER,
@@ -245,7 +248,9 @@ def test_a_committed_step_still_in_the_run_config_comes_first(
         committed_toml=_COMMITTED_TOML + _LEGACY_STEP,
     )
     assert "committed-step" not in written
-    assert _graph(text=graph_text).nodes["run_prepare_1"]["script"] == "echo committed-step"
+    assert _graph(text=graph_text).nodes["run_prepare_1"]["script"] == (
+        CREDENTIAL_WITHDRAWAL_STATEMENT + "echo committed-step"
+    )
 
 
 def test_a_resolved_node_timeout_for_a_setup_node_reaches_the_node(

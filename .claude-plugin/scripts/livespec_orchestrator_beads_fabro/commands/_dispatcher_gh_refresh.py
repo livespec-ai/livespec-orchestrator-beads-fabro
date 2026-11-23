@@ -18,12 +18,18 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_prepare_payload impo
     PrepareStep,
     render_prepare_step,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_sandbox_worktree_exclude import (
+    worktree_exclude_script,
+)
 
 __all__: list[str] = [
+    "CREDENTIAL_WITHDRAWAL_STATEMENT",
     "DEFAULT_SANDBOX_GH_REFRESH_ROOT",
+    "GH_APP_INPUTS_RELPATH",
     "GH_MINT_HELPER_RELPATH",
     "GH_PUSH_HELPER_RELPATH",
     "GH_WRAPPER_TAIL_RELPATH",
+    "INPUTS_WRITER_MARKER",
     "SANDBOX_GH_REFRESH_ROOT_ENV_VAR",
     "gh_mint_helper_source",
     "gh_wrapper_tail_source",
@@ -31,6 +37,7 @@ __all__: list[str] = [
     "refreshing_gh_env_lines",
     "refreshing_gh_prepare_steps_block",
     "resolve_sandbox_gh_refresh_root",
+    "withdrawn_script",
 ]
 
 _GITHUB_APP_ENV_KEYS = (
@@ -60,6 +67,15 @@ DEFAULT_SANDBOX_GH_REFRESH_ROOT = (
 GH_MINT_HELPER_RELPATH = "bin/mint_app_token.py"
 GH_PUSH_HELPER_RELPATH = "bin/push_origin"
 GH_WRAPPER_TAIL_RELPATH = "bin/gh-wrapper-tail.sh"
+# INTERIM (bd-ib-zf2kdh): the owner-only file a reader node mints its read-only token from.
+GH_APP_INPUTS_RELPATH = "app-inputs.env"
+# The first statement every node that does not hold the credential carries, and the line that marks
+# the one setup step that must still hold the inputs because it writes the file above.
+CREDENTIAL_WITHDRAWAL_STATEMENT = (
+    "unset GITHUB_TOKEN GH_TOKEN GITHUB_APP_ID GITHUB_PRIVATE_KEY"
+    " GITHUB_APP_INSTALLATION_ID LIVESPEC_PUSH_TOKEN; "
+)
+INPUTS_WRITER_MARKER = "# livespec-gh-app-inputs-writer"
 
 
 def resolve_sandbox_gh_refresh_root(*, environ: Mapping[str, str]) -> str:
@@ -328,6 +344,16 @@ case "$agent_stage" in
     ''|publish_draft|pr_refresh|pr) ;;
     *) mint_scope=read ;;
 esac
+
+# INTERIM (coordinator ruling under R301, bd-ib-zf2kdh; bd-ib-w64kr3 removes it under the run-level
+# credential daemon). A node that carries no App input in its own environment is a reader: it mints
+# a READ-ONLY token from the owner-only inputs file the wrapper-install step wrote in the bundle
+# root. A node whose environment still carries the inputs is a publication node and is unchanged.
+mint_inputs=''
+if test -z "${GITHUB_APP_ID:-}" && test -r "$(dirname "$mint")/../app-inputs.env"; then
+    mint_inputs="$(dirname "$mint")/../app-inputs.env"
+    mint_scope=read
+fi
 """
 
 
@@ -352,6 +378,7 @@ _MINT_COMMAND = (
 _WRAPPER_TAIL = (
     _AGENT_PUBLICATION_GUARD_SOURCE
     + 'token="$('
+    + '{ test -z "$mint_inputs" || { set -a; . "$mint_inputs"; set +a; }; } && '
     + _MINT_COMMAND
     + ')"\n'
     + """export GH_TOKEN="$token"
@@ -376,30 +403,68 @@ def refreshing_gh_prepare_steps_block() -> str:
     if not github_app_env_present():
         return ""
     bundle_root = resolve_sandbox_gh_refresh_root(environ=os.environ)
-    step = PrepareStep(script=_install_script(bundle_root=bundle_root))
-    return "\n# --- Dispatcher-materialized livespec-refreshing-gh-wrapper ---\n" + (
-        render_prepare_step(step=step)
+    # The INTERIM inputs file is hidden from the run's worktree before it is written, like every
+    # other path the chain materializes inside a clone (bd-ib-zf2kdh).
+    hide = PrepareStep(
+        script=worktree_exclude_script(
+            paths=(f"{bundle_root}/{GH_APP_INPUTS_RELPATH}",), label="livespec-gh-app-inputs"
+        )
     )
+    step = PrepareStep(script=_install_script(bundle_root=bundle_root))
+    return (
+        "\n# --- Dispatcher-materialized livespec-refreshing-gh-wrapper ---\n"
+        + render_prepare_step(step=hide)
+        + render_prepare_step(step=step)
+    )
+
+
+_WRAPPER_HEAD_LINE = " ".join(
+    (
+        "printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail'",
+        '"mint=\\"$mint\\""',
+        '"real_gh=\\"$wrapped_gh\\""',
+        '> "$real_gh"',
+    )
+)
 
 
 def _install_script(*, bundle_root: str) -> str:
     """Move the real `gh` aside once and write the wrapper that mints before every call."""
-    return (
-        "set -eu\n"
-        f'mint="{bundle_root}/{GH_MINT_HELPER_RELPATH}"\n'
-        f'tail_file="{bundle_root}/{GH_WRAPPER_TAIL_RELPATH}"\n'
-        'real_gh="$(command -v gh)"\n'
-        'case "$real_gh" in\n'
-        "  /*) ;;\n"
-        '  *) echo "gh did not resolve to an absolute path" >&2; exit 1 ;;\n'
-        "esac\n"
-        'wrapped_gh="${real_gh}.livespec-real"\n'
-        'if [ ! -x "$wrapped_gh" ]; then mv "$real_gh" "$wrapped_gh"; fi\n'
-        "printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail'"
-        ' "mint=\\"$mint\\"" "real_gh=\\"$wrapped_gh\\"" > "$real_gh"\n'
-        'cat "$tail_file" >> "$real_gh"\n'
-        'chmod 755 "$real_gh"'
+    names = " ".join(_GITHUB_APP_ENV_KEYS)
+    lines = (
+        "set -eu",
+        f'mint="{bundle_root}/{GH_MINT_HELPER_RELPATH}"',
+        f'tail_file="{bundle_root}/{GH_WRAPPER_TAIL_RELPATH}"',
+        'real_gh="$(command -v gh)"',
+        'case "$real_gh" in',
+        "  /*) ;;",
+        '  *) echo "gh did not resolve to an absolute path" >&2; exit 1 ;;',
+        "esac",
+        'wrapped_gh="${real_gh}.livespec-real"',
+        'if [ ! -x "$wrapped_gh" ]; then mv "$real_gh" "$wrapped_gh"; fi',
+        _WRAPPER_HEAD_LINE,
+        'cat "$tail_file" >> "$real_gh"',
+        'chmod 755 "$real_gh"',
+        # INTERIM (coordinator ruling under R301, bd-ib-zf2kdh; bd-ib-w64kr3 removes it): the
+        # inputs a reader node mints from, owner-only, for the run's sandbox lifetime.
+        INPUTS_WRITER_MARKER,
+        f'inputs="{bundle_root}/{GH_APP_INPUTS_RELPATH}"',
+        '(umask 077; : > "$inputs.tmp")',
+        f"for name in {names}; do",
+        '  value="$(printenv "$name" || true)"',
+        '  if [ -n "$value" ]; then printf \'%s=%q\\n\' "$name" "$value" >> "$inputs.tmp"; fi',
+        "done",
+        'chmod 600 "$inputs.tmp"',
+        'mv "$inputs.tmp" "$inputs"',
     )
+    return "\n".join(lines)
+
+
+def withdrawn_script(*, script: str) -> str:
+    """A step script with the credential withdrawal first, unless it writes the inputs file."""
+    if INPUTS_WRITER_MARKER in script:
+        return script
+    return CREDENTIAL_WITHDRAWAL_STATEMENT + script
 
 
 def gh_mint_helper_source() -> str:

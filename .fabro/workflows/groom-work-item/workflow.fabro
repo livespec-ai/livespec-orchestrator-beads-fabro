@@ -167,7 +167,7 @@ digraph GroomWorkItem {
         label="Setup failed: a setup step exited non-zero, so the run ends here"
         shape=parallelogram
         timeout="600s"
-        script="step=$(git log -n 1 --format=%s 2>/dev/null | sed -n 's/^fabro([^)]*): \\(run_prepare_[0-9][0-9]*\\) (.*$/\\1/p'); echo \"LIVESPEC_SETUP_STEP_FAILED: ${step:-an unidentified run_prepare_<N> step} failed, so the run ends before any stage that needs the sandbox\" >&2; exit 1"
+        script="unset GITHUB_TOKEN GH_TOKEN GITHUB_APP_ID GITHUB_PRIVATE_KEY GITHUB_APP_INSTALLATION_ID LIVESPEC_PUSH_TOKEN; step=$(git log -n 1 --format=%s 2>/dev/null | sed -n 's/^fabro([^)]*): \\(run_prepare_[0-9][0-9]*\\) (.*$/\\1/p'); echo \"LIVESPEC_SETUP_STEP_FAILED: ${step:-an unidentified run_prepare_<N> step} failed, so the run ends before any stage that needs the sandbox\" >&2; exit 1"
     ]
 
     // DECLARED SO THE LAYERS RESOLVE, AND DELIBERATELY UNREACHED BY ANY EDGE --
