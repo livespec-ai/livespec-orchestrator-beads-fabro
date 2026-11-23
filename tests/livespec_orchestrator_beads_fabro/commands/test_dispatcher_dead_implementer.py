@@ -24,12 +24,16 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dead_implementer imp
     DEAD_IMPLEMENTER_TRUNCATION_STAGE,
     dead_implementer_condition_from_text,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import DispatchOutcome
+from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
+    CommandResult,
+    DispatchOutcome,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_fabro_terminal import (
     fabro_run_terminal_outcome,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import JournalFile
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plan import DispatchPlan
+from livespec_orchestrator_beads_fabro.commands._fabro_port import FabroInspectResult
 from livespec_orchestrator_beads_fabro.types import WorkItem
 
 _UNCHANGED_TREE_STDERR = (
@@ -41,6 +45,12 @@ _CHECK_FAILED_STDERR = (
     "failed; fail closed before review"
 )
 _ORDINARY_FAILURE_STDERR = "node `janitor` failed: just check exited 1"
+_MODEL_REFUSAL = "The 'gpt-6-sol' model is not supported when using Codex with a ChatGPT account."
+_MODEL_REFUSAL_RESPONSE = (
+    "Warning: Model metadata for `gpt-6-sol` not found.\n"
+    '{"type":"error","status":400,"error":{"type":"invalid_request_error",'
+    f'"message":"{_MODEL_REFUSAL}"}}'
+)
 
 
 def test_unchanged_tree_sentinel_names_its_own_governing_condition() -> None:
@@ -66,6 +76,55 @@ def test_ordinary_failure_text_carries_no_governing_condition() -> None:
     condition = dead_implementer_condition_from_text(text=_ORDINARY_FAILURE_STDERR)
 
     assert condition is None
+
+
+def test_a_structured_implement_model_refusal_surfaces_its_provider_message(
+    tmp_path: Path,
+) -> None:
+    """A successful ACP turn may still be a provider refusal, not a dead implementer."""
+    outcome = fabro_run_terminal_outcome(
+        outcome_type=DispatchOutcome,
+        plan=_plan(tmp_path=tmp_path),
+        run_id="01MODEL400",
+        inspect=FabroInspectResult(
+            command=CommandResult(exit_code=0, stdout="", stderr=""),
+            payload=[
+                {
+                    "run_id": "01MODEL400",
+                    "status": {"kind": "failed", "reason": "workflow_error"},
+                    "stages": {
+                        "implement@1": {
+                            "handler": "agent",
+                            "state": "succeeded",
+                            "response": _MODEL_REFUSAL_RESPONSE,
+                            "output": "",
+                        },
+                        "dead_implementer@1": {
+                            "handler": "command",
+                            "state": "failed",
+                            "response": "",
+                            "output": _UNCHANGED_TREE_STDERR,
+                        },
+                    },
+                    "checkpoint": {"current_node": "dead_implementer"},
+                    "conclusion": {
+                        "status": "failed",
+                        "failure": {
+                            "reason": "workflow_error",
+                            "detail": {"message": _UNCHANGED_TREE_STDERR},
+                        },
+                    },
+                }
+            ],
+            status_kind="failed",
+            failure=None,
+        ),
+        exit_code=1,
+        stderr="",
+    )
+
+    assert outcome is not None
+    assert outcome.detail == _MODEL_REFUSAL
 
 
 def test_dead_implementer_truncation_journals_the_id_and_governing_condition(
