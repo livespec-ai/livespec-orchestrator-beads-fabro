@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.346.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.345.4...v0.346.0) (2026-11-23)
+
+
+### Features
+
+* an abandoned or drill incident chain retires through one sanctioned action (livespec-dev-tooling-zhonwq) ([5802777](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/580277788374c52e449ba48950007a7509c34b24))
+* **incident:** the attempt authority record carries an optional workflow_paths list that only an attested receipt writes (bd-ib-apqwjc) ([01fa2c8](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/01fa2c8e36ab40d379f931668ae020e48a092b60))
+
+
+### Bug Fixes
+
+* a host Definition-of-Done judgement appends only its ending contract and subject to the unchanged dod_gate rubric (bd-ib-a4gjc5) ([b98651a](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/b98651a5820ae29009b7abb478c65361ee547407))
+* a release-spec-tier press records the pressed heading as the tier record's generalization target (bd-ib-ib5ows) ([7c8f335](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/7c8f335f4e6a25bc39e5d91e6aa6a12f60596875))
+* enter-repayment admits the first green master run descending from a landed commit whose own run was red only on another recorded incident's defect (bd-ib-ah5t7i) ([78b4197](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/78b41971f1f910596f38813cc0d767e9aef51740))
+* **incident:** a pre-swap genesis is read by stable repository id, and an unreadable chain still refuses (livespec-dev-tooling-vpuvdy, bd-ib-r4xzme) ([f2f0d9c](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/f2f0d9c84c158f4616884a7f05ed819313661e09))
+* key a Green-exempt completion to its commit rather than its message text ([f3f2b76](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/f3f2b767d6469ffa05f85a35fc5b622d6dccc72e))
+* limit the Green-exempt non-Python shape to the hook's implementation suffixes ([14af9f6](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/14af9f66b6109c2e9195f3984044365d55e2b414))
+* **orchestrator-image:** no pipe into an early-exit reader under pipefail (bd-ib-k3xswd) ([4a94121](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/4a94121e3a2f89136877283af9caf49e0f86a599))
+
 ## [0.345.4](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.345.3...v0.345.4) (2026-11-22)
 
 
