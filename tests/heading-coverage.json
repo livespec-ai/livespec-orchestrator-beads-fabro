@@ -3338,5 +3338,37 @@
     "spec_file": "scenarios.md",
     "test": "tests.integration.test_incident_item_only_history_scenario383.test_every_generation_of_every_attempt_is_returned_oldest_first",
     "reason": "Bound to an integration-tier test, per the heading taxonomy's pyramid-tier requirement: `tests/integration/test_incident_item_only_history_scenario383.py` drives the incident authority CLI's `main` with an item-only read-history against a retained chain in the in-memory tenant: five generations of two attempts oldest first, a closed head's read-time outstanding list on the last generation only and in no authority record, incident-authority-missing for an ordinary or unknown item, and the unchanged full-identity read."
+  },
+  {
+    "heading": "## Scenario 384 — Factory admission skips a managed account below the protection floor the role holder published",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-5vrm34",
+    "reason": "A real test at the integration tier or above is owed for this heading: the Dispatcher admission evaluation driven with a protection-floors record carrying anthropic-0 at floor_percent 10 and a covered ready item whose centrally selected slot has 8 percent seven-day remaining, asserting the skip line names anthropic-0 and the floor 10."
+  },
+  {
+    "heading": "## Scenario 385 — The bypass launcher reads the same protection floor and applies none of its own",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-5vrm34",
+    "reason": "A real test at the integration tier or above is owed for this heading: the bypass launcher's pre-launch credential check driven against the same record, asserting the refusal names anthropic-0 and the floor 10 and that no floor value of this repository's own is applied."
+  },
+  {
+    "heading": "## Scenario 386 — Judge and seat selection read the same protection floor and apply none of their own",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-5vrm34",
+    "reason": "A real test at the integration tier or above is owed for this heading: judge and seat selection (no implementation exists yet; bd-ib-5vrm34's Definition of Done owns building it) driven against the same record, asserting the refusal line and that an account with no entry is not refused for protection."
+  },
+  {
+    "heading": "## Scenario 387 — An absent protection floors record refuses selection of a managed account",
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "test": "TODO",
+    "work_item": "bd-ib-5vrm34",
+    "reason": "A real test at the integration tier or above is owed for this heading: admission, the bypass launcher and judge and seat selection each driven with no protection-floors record on the host, asserting each refuses with a line naming the account and none writes, repairs or replaces the record."
   }
 ]
