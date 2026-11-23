@@ -55,6 +55,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_paths import (
 from livespec_orchestrator_beads_fabro.commands._dispatcher_plugin_install_registry import (
     default_plugin_install_registry,
     installed_build_commit,
+    registered_plugin_root,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_shell_runner import ShellCommandRunner
 from livespec_orchestrator_beads_fabro.types import WorkItem
@@ -109,7 +110,12 @@ def read_helper_source(
     root = executing_payload_root() if payload_root is None else payload_root
     registry = default_plugin_install_registry() if install_record is None else install_record
     recorded = env.get(INSTALLED_ROOT_ENV, "").strip()
-    roots = (root, Path(recorded)) if recorded else (root,)
+    target_install = registered_plugin_root(repo=Path.cwd(), install_record=registry)
+    roots = tuple(
+        candidate
+        for candidate in (root, Path(recorded) if recorded else None, target_install)
+        if candidate is not None
+    )
     commit = installed_build_commit(install_roots=roots, install_record=registry)
     if commit is None:
         commit = _checkout_commit(root=root, runner=runner)
