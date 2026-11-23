@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.346.1](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.346.0...v0.346.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **incident:** every link of a pre-swap chain is read by stable repository id, not only its genesis (livespec-dev-tooling-vpuvdy, plan livespec-dev-tooling-bqnzcm) ([0340cea](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/0340cea35f83f7ced6d74f8111b99ab427e5d7e0))
+
 ## [0.346.0](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.345.4...v0.346.0) (2026-11-23)
 
 
