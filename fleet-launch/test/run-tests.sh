@@ -3748,6 +3748,8 @@ else
     fail "a failed origin read did not stop the launcher cleanly (rc=$RC)"
     tail -5 "$CASE_LOG" >&2
 fi
+
+scenario "30a. a failed fast-forward records git's diagnostic beside the checkout cause"
 git -C "$TENANT_DIVERGED" "${GIT_IDENTITY[@]}" commit --quiet --allow-empty --no-verify -m "local only"
 new_case origin-tip-diverged
 open_boards
@@ -3756,10 +3758,10 @@ git -C "$WORK/seed" "${GIT_IDENTITY[@]}" commit --quiet --allow-empty --no-verif
 git -C "$WORK/seed" "${GIT_IDENTITY[@]}" push --quiet "$ORIGIN" master
 run_launcher bd-ib-origin-diverged
 if [ "$RC" != 0 ] && [ ! -s "$DRIVE_LOG" ] && [ ! -s "$PREFLIGHT_LOG" ] \
-    && grep -qF 'cause=checkout-not-at-origin-tip step=fast-forward' "$CASE_LOG"; then
-    pass "a diverged checkout launches nothing and names the fast-forward step"
+    && line_has_all "$CASE_LOG" 'terminal:' 'cause=checkout-not-at-origin-tip' 'step=fast-forward' 'fatal: Not possible to fast-forward, aborting.'; then
+    pass "a diverged checkout launches nothing and records git's fast-forward failure"
 else
-    fail "a diverged checkout was not refused at the fast-forward (rc=$RC)"
+    fail "a diverged checkout did not record git's fast-forward failure (rc=$RC)"
     tail -5 "$CASE_LOG" >&2
 fi
 
