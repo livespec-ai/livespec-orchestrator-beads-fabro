@@ -38,8 +38,8 @@ from pathlib import Path
 
 FAILED_TARGETS_HEADER = re.compile(r"^Failed targets \(\d+\):\s*$", re.MULTILINE)
 FAILED_TARGET_LINE = re.compile(r"^\s+-\s+(\S+)\s*$")
-PYTEST_PROGRESS_FAILURE = re.compile(r"^(\S+::\S+)\s+FAILED(?:\s|$)", re.MULTILINE)
-PYTEST_FAILURE_SUMMARY = re.compile(r"^FAILED\s+(\S+::\S+)(?:\s|$)", re.MULTILINE)
+PYTEST_PROGRESS_FAILURE = re.compile(r"^(\S+::.+?)\s+FAILED(?:\s|$)", re.MULTILINE)
+PYTEST_FAILURE_SUMMARY = re.compile(r"^FAILED\s+(\S+::.+?)(?:\s+-\s|\s*$)", re.MULTILINE)
 SKIP_VARIABLE = re.compile(r"^LIVESPEC_.*(?:_SKIP|_RELAX|_DISABLE)(?:_|$)")
 CHECKPOINT_SUBJECT = re.compile(r"^fabro\([^)]*\): ")
 NO_MATCHING_STAGED_FILES = re.compile(r"\(skip\) no matching staged files")
