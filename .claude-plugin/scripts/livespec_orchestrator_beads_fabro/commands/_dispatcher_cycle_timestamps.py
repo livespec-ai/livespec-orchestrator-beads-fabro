@@ -6,6 +6,8 @@ from datetime import datetime
 
 from livespec_orchestrator_beads_fabro.effects import AttemptFailure, attempt
 
+__all__: list[str] = ["elapsed_seconds", "red_order"]
+
 
 def elapsed_seconds(*, red_at: str, green_at: str) -> tuple[int | None, bool | None]:
     """Use Red-to-Green provenance, never a merge timestamp."""

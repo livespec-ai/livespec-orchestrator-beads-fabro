@@ -33,3 +33,11 @@ def test_completed_cycle_timestamp_derivations_reject_invalid_and_reversed_value
         None,
         True,
     )
+
+
+def test_completed_cycle_timestamp_module_declares_its_public_surface() -> None:
+    """Keep the module's intended imports explicit for mechanical checks."""
+    timestamps = import_module(
+        "livespec_orchestrator_beads_fabro.commands._dispatcher_cycle_timestamps"
+    )
+    assert timestamps.__all__ == ["elapsed_seconds", "red_order"]
