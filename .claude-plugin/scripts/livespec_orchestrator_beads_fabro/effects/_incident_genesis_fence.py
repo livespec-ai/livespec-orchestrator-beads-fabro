@@ -19,6 +19,9 @@ from livespec_orchestrator_beads_fabro._incident_genesis import (
     GenesisFence,
     decode_genesis_fence,
 )
+from livespec_orchestrator_beads_fabro.effects._incident_repository_identity import (
+    same_repository,
+)
 
 if TYPE_CHECKING:
     from livespec_orchestrator_beads_fabro._beads_client import BeadsClient
@@ -44,7 +47,7 @@ def fenced_root_holds(*, client: BeadsClient, record: dict[str, Any], repository
         and fence is not None
         and fence.root_token_id == record["root_token_id"]
         and fence.item_id == record["item_id"]
-        and fence.repository == repository
+        and same_repository(recorded=fence.repository, caller=repository)
         and fence.expected_claim == claim_token_id
     )
 
