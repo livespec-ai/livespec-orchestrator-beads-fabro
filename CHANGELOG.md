@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.346.4](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.346.3...v0.346.4) (2026-11-23)
+
+
+### Bug Fixes
+
+* **dispatcher:** recover the target repository's installed build commit from the install registry without LIVESPEC_INSTALLED_PLUGIN_ROOT (bd-ib-iwhugc) ([6542dcc](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/6542dcc7b6a803c299ab0f283463a027c1dbfe50))
+
 ## [0.346.3](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.346.2...v0.346.3) (2026-11-23)
 
 
