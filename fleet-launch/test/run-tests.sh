@@ -2402,6 +2402,8 @@ wait_for_file() {
     done
 }
 inflight_empty() { [ -z "$(find "$FLEET_LAUNCH_INFLIGHT_DIR" -type f -print -quit)" ]; }
+allowlist_names() { grep -qxF -- "$1" "$FLEET_LAUNCH_FREEZE_ALLOWLIST_FILE"; }
+allowlist_no_longer_names() { ! allowlist_names "$1"; }
 
 # 20a. A hold set before admission stops the drive; the ticket survives; the
 # positive control (hold removed, gates opened) then launches and lists.
@@ -2436,6 +2438,44 @@ if wait_for_drive_invocations 1 "$stop_pid" "$STOP_LOG"; then
     fi
 else
     fail "the stub drive never started for the hold-before-admission case ($WAIT_FAILURE_DETAIL)"
+    stop_launcher "$stop_pid"
+    wait "$stop_pid" 2>/dev/null
+fi
+
+# 20a allowlist. The gmktec hold cannot stop an allowlisted drive while it
+# waits for admission, and its grant remains available until that admission.
+scenario "20a. an allowlist grant survives a gmktec hold until the drive is admitted"
+prepare_330_case allowlisted-hold-before-admission
+STOP_LOG="$CASE_DIR/launcher.log"
+: > "$HOLD_FILE"
+printf 'bd-ib-allowlisted-admission\n' > "$FLEET_LAUNCH_FREEZE_ALLOWLIST_FILE"
+ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-allowlisted-admission > "$STOP_LOG" 2>&1 &
+stop_pid=$!
+if wait_for_drive_invocations 1 "$stop_pid" "$STOP_LOG" \
+    && allowlist_names bd-ib-allowlisted-admission; then
+    : > "$STUB_DRIVE_ADMIT_GATE_FILE"
+    if wait_for_item_status active "$stop_pid" "$STOP_LOG" \
+        && wait_on_launcher allowlist-consume "$stop_pid" "$STOP_LOG" \
+            allowlist_no_longer_names bd-ib-allowlisted-admission; then
+        : > "$STUB_DRIVE_SUBMIT_GATE_FILE"
+        wait "$stop_pid"
+        stop_rc=$?
+        if [ "$stop_rc" = 0 ] && log_has "$STOP_LOG" "LISTED on petri" \
+            && ! log_has "$STOP_LOG" "stopped the drive" \
+            && [ "$(drive_log_items)" = bd-ib-allowlisted-admission ] \
+            && allowlist_no_longer_names bd-ib-allowlisted-admission; then
+            pass "an allowlisted drive survives the gmktec hold and consumes its grant at admission"
+        else
+            fail "an allowlisted drive did not list after admission under the gmktec hold (rc=$stop_rc)"
+            tail -n 8 "$STOP_LOG" >&2
+        fi
+    else
+        fail "the allowlist grant was not consumed when the allowlisted drive was admitted ($WAIT_FAILURE_DETAIL)"
+        stop_launcher "$stop_pid"
+        wait "$stop_pid" 2>/dev/null
+    fi
+else
+    fail "the allowlisted drive did not retain its grant before admission ($WAIT_FAILURE_DETAIL)"
     stop_launcher "$stop_pid"
     wait "$stop_pid" 2>/dev/null
 fi

@@ -274,10 +274,13 @@ gmk_held() {
   return 0
 }
 gmk_hold_text() { tr '\n' ' ' < "$GMK_HOLD_FILE" 2>/dev/null | cut -c1-300 | sed 's/ *$//'; }
-# consume_allowlist_line <LAUNCH|RESUME>: remove this item's one-shot line under the shared lock
-# and log the grant, when the hold exists and the line is present.
+# consume_allowlist_line <LAUNCH|RESUME|ADMISSION> [after-admission]: remove this item's one-shot
+# line under the shared lock and log the grant.  An impl launch that saw its grant while the hold
+# existed passes `after-admission`, so a hold removed while that drive waits does not preserve a
+# grant that has already released the drive.
 consume_allowlist_line() {
-  [ -e "$GMK_HOLD_FILE" ] && allowlisted "$ITEM" || return 0
+  [ "${2:-}" = after-admission ] || [ -e "$GMK_HOLD_FILE" ] || return 0
+  allowlisted "$ITEM" || return 0
   (
     flock -w 30 9 || exit 0
     { grep -vxF -- "$ITEM" "$FLEET_LAUNCH_FREEZE_ALLOWLIST_FILE" || true; } > "$FLEET_LAUNCH_FREEZE_ALLOWLIST_FILE.tmp.$$"
