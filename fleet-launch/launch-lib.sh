@@ -156,20 +156,10 @@ wrapper_description() {
 }
 
 # --- the installed plugin build ----------------------------------------------
-# FLEET_LAUNCH_BUILD_OVERRIDE=<build>: ONE launch runs on that candidate build instead of the registry's
-# (a canary beside band work on the launch build). It names a directory under FLEET_LAUNCH_PLUGIN_CACHE; an
-# override that is not materialized there, or that is not one path segment, refuses (empty output, rc=1)
-# naming it and NEVER falls back silently to the registry. Unset, the launch is unchanged.
-installed_build() {
-  local override=${FLEET_LAUNCH_BUILD_OVERRIDE:-}
-  if [ -n "$override" ]; then
-    case $override in
-      */*|.|..) echo "fleet-launch: build override '$override' is not a single build directory name: refusing" >&2; return 1 ;;
-    esac
-    [ -d "$FLEET_LAUNCH_PLUGIN_CACHE/$override" ] || { echo "fleet-launch: build override '$override' is not materialized in $FLEET_LAUNCH_PLUGIN_CACHE: refusing" >&2; return 1; }
-    printf '%s\n' "$override"
-    return 0
-  fi
+# installed_registry_build: resolve the target repository's installed plugin build.
+# This deliberately excludes FLEET_LAUNCH_BUILD_OVERRIDE: a canary hold guards an
+# installed registration, not an individual launcher's candidate override.
+installed_registry_build() {
   python3 - "$FLEET_LAUNCH_PLUGIN_REGISTRY" "$FLEET_LAUNCH_PLUGIN_KEY" "$REPO" <<'PY'
 import json
 import os
@@ -202,6 +192,23 @@ else:
 print(f"fleet-launch: installed build refusal: registry '{registry}' plugin key '{plugin_key}' has {match_count} {match_kind} match(es) for REPO '{repo}' (looked up realpath '{repo_realpath}'): refusing", file=sys.stderr)
 raise SystemExit(1)
 PY
+}
+
+# FLEET_LAUNCH_BUILD_OVERRIDE=<build>: ONE launch runs on that candidate build instead of the registry's
+# (a canary beside band work on the launch build). It names a directory under FLEET_LAUNCH_PLUGIN_CACHE; an
+# override that is not materialized there, or that is not one path segment, refuses (empty output, rc=1)
+# naming it and NEVER falls back silently to the registry. Unset, the launch is unchanged.
+installed_build() {
+  local override=${FLEET_LAUNCH_BUILD_OVERRIDE:-}
+  if [ -n "$override" ]; then
+    case $override in
+      */*|.|..) echo "fleet-launch: build override '$override' is not a single build directory name: refusing" >&2; return 1 ;;
+    esac
+    [ -d "$FLEET_LAUNCH_PLUGIN_CACHE/$override" ] || { echo "fleet-launch: build override '$override' is not materialized in $FLEET_LAUNCH_PLUGIN_CACHE: refusing" >&2; return 1; }
+    printf '%s\n' "$override"
+    return 0
+  fi
+  installed_registry_build
 }
 
 # The one guard every launcher uses before handing a plugin directory to a
@@ -272,12 +279,35 @@ consume_allowlist_line() {
   echo "$(date -u +%FT%TZ) ONE-SHOT: freeze-allowlist line for $ITEM consumed at $1 ($(date -u +%FT%TZ))"
 }
 CANARY_HOLD_FILE="$FLEET_LAUNCH_CANARY_HOLD_DIR/canary-hold-repo-${REPO##*/}"
+# canary_hold_build: print the identity only when the hold's first non-blank
+# line is exactly `build: <identifier>`.  Any other first line preserves the
+# legacy hold-all behaviour.
+canary_hold_build() {
+  awk '
+    NF {
+      if ($0 ~ /^[[:space:]]*build:[[:space:]]+[^[:space:]]+[[:space:]]*$/) {
+        sub(/^[[:space:]]*build:[[:space:]]*/, "")
+        sub(/[[:space:]]*$/, "")
+        print
+      }
+      exit
+    }
+  ' "$CANARY_HOLD_FILE" 2>/dev/null
+}
 # canary_held: the target repository's canary hold exists and the exemption list does not name
-# the item. The list is read at every check; an absent or unreadable list exempts no item.
+# the item. A build-qualified hold applies only to its target's installed-registry build. A missing
+# identity, or an installed build that cannot be resolved, fails closed and holds every launch.
+# The list is read at every check; an absent or unreadable list exempts no item.
 canary_held() {
+  local held_build resolved_build
   [ -e "$CANARY_HOLD_FILE" ] || return 1
   grep -qxF -- "$ITEM" "$FLEET_LAUNCH_CANARY_EXEMPT_FILE" 2>/dev/null && return 1
-  return 0
+  held_build=$(canary_hold_build)
+  [ -n "$held_build" ] || return 0
+  resolved_build=$(installed_registry_build 2>/dev/null) || return 0
+  [ "$resolved_build" = "$held_build" ] && return 0
+  echo "$(date -u +%FT%TZ) canary repository hold names another build ($CANARY_HOLD_FILE): held=$held_build resolved=$resolved_build; proceed"
+  return 1
 }
 canary_hold_text() { head -c 300 "$CANARY_HOLD_FILE" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//'; }
 
