@@ -547,7 +547,7 @@ def test_green_preview_grades_its_latest_checkpoint_tree(tmp_path: Path) -> None
     hook = repo / ".git" / "hooks" / "pre-commit"
     hook.write_text(
         "#!/bin/sh\n"
-        f'if test "$(git rev-parse HEAD^{{tree}})" != "{checkpoint_tree}"; then\n'
+        f'if test "$(git write-tree)" != "{checkpoint_tree}"; then\n'
         f"  printf 'Failed targets (1):\\n  - {_FAILED_TARGET}\\n'\n"
         "  exit 1\n"
         "fi\n",

@@ -44,6 +44,11 @@ PYTEST_PROGRESS_FAILURE = re.compile(r"^(\S+::.+?)\s+FAILED(?:\s|$)", re.MULTILI
 PYTEST_FAILURE_SUMMARY = re.compile(
     r"^FAILED\s+([^\s\[]+::[^\s\[]*(?:\[.*?\])?)(?=\s+-\s|\s*$)", re.MULTILINE
 )
+# lefthook's step summary, printed when a hook step fails and no target header exists
+# (the implement-turn `check-changed` path): a failure mark, the step name, its duration.
+LEFTHOOK_FAILED_STEP = re.compile(
+    r"^\s*(?:\u2717|\u2718|\U0001F94A)\s+(\S+)\s+\(\d+(?:\.\d+)? seconds\)\s*$", re.MULTILINE
+)
 SKIP_VARIABLE = re.compile(r"^LIVESPEC_.*(?:_SKIP|_RELAX|_DISABLE)(?:_|$)")
 CHECKPOINT_SUBJECT = re.compile(r"^fabro\([^)]*\): ")
 NO_MATCHING_STAGED_FILES = re.compile(r"\(skip\) no matching staged files")
@@ -178,7 +183,7 @@ def failed_targets(output):
         target = match.group(1)
         if target not in targets:
             targets.append(target)
-    return targets
+    return targets or LEFTHOOK_FAILED_STEP.findall(output)
 
 
 def output_tail(output):
@@ -268,13 +273,16 @@ def preview(stage, test_file, hook_log):
         if checkpoint is None:
             git("add", "--all", "--", *paths, cwd=preview_root)
         else:
-            # The hook must see the same affected-path scope that commit_green
-            # gets after folding checkpoint commits, while its HEAD must remain
-            # the latest checkpoint tree.  Seed the disposable index with the
-            # pre-checkpoint base, which makes checkpoint-carried paths visible
-            # to hook selectors without moving HEAD.  Only post-checkpoint
-            # edits need ordinary staging on top of that index.
-            git("read-tree", base, cwd=preview_root)
+            # The index carries the latest checkpoint's tree, as the worktree does, so
+            # nothing is unstaged and the hook grades the tree this run's checkpoint
+            # carries (bd-ib-rs72og).  HEAD is moved, soft, onto the pre-checkpoint base
+            # (the Red commit): commit_green amends that commit, so the hook sees the
+            # same staged diff against the same HEAD, and a gate keyed on the Red
+            # commit's trailers (02-commit-pairs-source-and-test skips a Green amend by
+            # them) grades the preview as it grades the real amend (bd-ib-jujcv7).
+            # Only post-checkpoint edits need ordinary staging on top.
+            base_commit = git("rev-parse", base, cwd=root).stdout.strip()
+            git("reset", "--soft", base_commit, cwd=preview_root)
             after_checkpoint = changed_paths(root, checkpoint)
             if after_checkpoint:
                 git("add", "--all", "--", *after_checkpoint, cwd=preview_root)
