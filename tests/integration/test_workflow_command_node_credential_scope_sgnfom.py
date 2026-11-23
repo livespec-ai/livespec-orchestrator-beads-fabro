@@ -21,13 +21,13 @@ is withdrawn by default: a node that is neither a named holder nor a named
 reader must carry the withdrawal. The two named sets are asserted exactly, so
 moving a node between them is a visible change to this file.
 
-THE READERS ARE A NAMED RESIDUAL. The setup chain, `janitor`, `proof_grade`,
-`pr_refresh_head`, `verify_pr`, `recapture_route` and `non_converged` read the
-forge (`git fetch`, `git ls-remote`, `gh pr list`, `gh pr view`) through the
-refreshing `gh` wrapper, which mints from the App inputs it finds in its
-environment. They cannot lose the inputs until the wrapper can read the forge
-with a read-only credential; they are listed so that the day it can, this file
-is where they move.
+THE READERS NO LONGER HOLD THE INPUTS (bd-ib-zf2kdh, INTERIM). The setup chain, `janitor`,
+`proof_grade`, `pr_refresh_head`, `verify_pr`, `recapture_route` and `non_converged` read the forge
+(`git fetch`, `git ls-remote`, `gh pr list`, `gh pr view`) through the refreshing `gh` wrapper. Each
+now carries the same withdrawal as every other non-holder, and the wrapper mints their READ-ONLY
+token from an owner-only inputs file the wrapper-install step wrote in the bundle root, a
+coordinator ruling under R301 (2026-11-23) because the workflow launches no credential daemon yet.
+`bd-ib-w64kr3` removes that file under the run-level daemon.
 
 THE EXECUTION CASES RUN THE GRAPH'S OWN FIRST STATEMENT under real bash with the
 real credential names in the environment and read the environment the next
@@ -69,19 +69,8 @@ _HOLDERS = frozenset(
         "review_fix_commit_settle",
     }
 )
-# Command nodes that read the forge and so still carry the credential (named residual).
-_READERS = frozenset(
-    {f"run_prepare_{index}" for index in range(1, 10)}
-    | {
-        "setup_failed",
-        "janitor",
-        "proof_grade",
-        "pr_refresh_head",
-        "verify_pr",
-        "recapture_route",
-        "non_converged",
-    }
-)
+# Reader nodes are withdrawn like every other non-holder (bd-ib-zf2kdh, INTERIM); none is named.
+_READERS: frozenset[str] = frozenset()
 _CREDENTIAL_NAMES = frozenset(
     {
         "GITHUB_TOKEN",
@@ -128,7 +117,14 @@ def test_the_graph_names_every_holder_and_reader_it_derives_from() -> None:
     scripts = _command_scripts()
 
     assert set(scripts) >= _HOLDERS
-    assert set(scripts) | {"run_prepare_5"} >= _READERS
+    assert set(scripts) >= {f"run_prepare_{index}" for index in range(1, 10) if index != 5}
+    assert set(scripts) >= {"setup_failed", "janitor", "proof_grade", "pr_refresh_head"}
+    assert set(scripts) >= {"verify_pr", "recapture_route", "non_converged"}
+    # run_prepare_5 writes a heredoc, which the one-line script reader skips; read its text.
+    assert (
+        'script="' + _first_statement(script=next(iter(_withdrawn(scripts=scripts).values())))
+        in _GRAPH.read_text(encoding="utf-8").split("run_prepare_5 [", 1)[1].split("]\n", 1)[0]
+    )
     assert len(_withdrawn(scripts=scripts)) >= 30
 
 

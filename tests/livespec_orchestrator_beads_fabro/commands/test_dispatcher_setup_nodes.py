@@ -17,6 +17,10 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_dot_graph import (
     DotGraph,
     parse_dot_graph,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_gh_refresh import (
+    CREDENTIAL_WITHDRAWAL_STATEMENT,
+    INPUTS_WRITER_MARKER,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_minijinja_escape import (
     escape_minijinja_literal,
 )
@@ -34,6 +38,9 @@ from livespec_orchestrator_beads_fabro.commands._node_timeouts import (
     WORKFLOW_DEFAULT_LAYER,
     NodeTimeouts,
 )
+
+# INTERIM (bd-ib-zf2kdh): every generated setup node starts by withdrawing the credentials.
+_WITHDRAWN = CREDENTIAL_WITHDRAWAL_STATEMENT
 
 _GRAPH = """digraph G {
     graph [goal="g", default_max_retries=0, stall_timeout="7200s"]
@@ -103,8 +110,8 @@ def test_the_new_nodes_run_between_start_and_the_old_destination_in_step_order()
     assert _unconditional(graph=graph, source="start") == ["run_prepare_1"]
     assert _unconditional(graph=graph, source="run_prepare_1") == ["run_prepare_2"]
     assert _unconditional(graph=graph, source="run_prepare_2") == ["dod_gate"]
-    assert graph.nodes["run_prepare_1"]["script"] == "one"
-    assert graph.nodes["run_prepare_2"]["script"] == "two"
+    assert graph.nodes["run_prepare_1"]["script"] == _WITHDRAWN + "one"
+    assert graph.nodes["run_prepare_2"]["script"] == _WITHDRAWN + "two"
 
 
 def test_every_new_node_routes_a_failure_to_the_terminal_setup_node() -> None:
@@ -149,7 +156,7 @@ def test_the_chain_continues_after_the_committed_tail_in_numeric_order() -> None
     assert setup_node_names(graph=graph)[-2:] == ("run_prepare_11", "run_prepare_12")
     assert _unconditional(graph=graph, source="run_prepare_10") == ["run_prepare_11"]
     assert _unconditional(graph=graph, source="run_prepare_12") == ["dod_gate"]
-    assert graph.nodes["run_prepare_11"]["script"] == "x"
+    assert graph.nodes["run_prepare_11"]["script"] == _WITHDRAWN + "x"
 
 
 def test_a_graph_that_already_declares_the_terminal_node_keeps_exactly_one() -> None:
@@ -163,8 +170,8 @@ def test_a_value_is_stored_so_the_engine_renders_it_back_verbatim() -> None:
     script = 'echo "a\\b"; printf \'%s\' "{{ x }} {% y %} {# z #} ${#v}"\nsecond line'
     graph = _spliced(steps=[PrepareStep(script=script)])
     stored = graph.nodes["run_prepare_1"]["script"]
-    assert stored == escape_minijinja_literal(text=script)
-    assert _rendered(value=stored) == script
+    assert stored == escape_minijinja_literal(text=_WITHDRAWN + script)
+    assert _rendered(value=stored) == _WITHDRAWN + script
 
 
 def test_no_steps_leave_the_graph_text_untouched() -> None:
@@ -262,3 +269,11 @@ def test_an_overlay_whose_run_table_held_only_steps_still_splits() -> None:
 )
 def test_split_refuses_text_it_cannot_remove_without_losing_a_step(text: str) -> None:
     assert split_prepare_steps(overlay_text=text) is None
+
+
+def test_the_step_that_writes_the_inputs_file_keeps_the_credentials_it_writes_from() -> None:
+    writer = f"{INPUTS_WRITER_MARKER}\nset -eu\nwrite the file"
+    graph = _spliced(steps=[PrepareStep(script=writer), PrepareStep(script="other")])
+
+    assert graph.nodes["run_prepare_1"]["script"] == writer
+    assert graph.nodes["run_prepare_2"]["script"] == _WITHDRAWN + "other"

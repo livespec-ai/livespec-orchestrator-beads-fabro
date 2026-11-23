@@ -1903,7 +1903,7 @@ def test_render_run_config_overlay_prepares_refreshing_gh_wrapper(
     # helper the install step appends from the bundle root.
     assert f'tail_file="{DEFAULT_SANDBOX_GH_REFRESH_ROOT}/{GH_WRAPPER_TAIL_RELPATH}"' in prepared
     assert 'cat "$tail_file" >> "$real_gh"' in prepared
-    assert 'token="$(env -u COVERAGE_PROCESS_START ' in _gh_wrapper_tail().decode("utf-8")
+    assert "env -u COVERAGE_PROCESS_START " in _gh_wrapper_tail().decode("utf-8")
     assert 'real_gh="$(command -v gh)"' in prepared
     assert 'mv "$real_gh" "$wrapped_gh"' in prepared
     env_table = rendered[env_table_at:]
