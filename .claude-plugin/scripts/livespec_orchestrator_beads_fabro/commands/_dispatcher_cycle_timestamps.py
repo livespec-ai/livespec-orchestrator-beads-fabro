@@ -25,7 +25,13 @@ def red_order(*, red_at: str) -> tuple[int, float]:
 
 
 def _instant(*, value: str) -> datetime | None:
-    """Parse this trailer's UTC spelling, returning None for invalid provenance."""
+    """Parse this trailer's UTC spelling, returning None for invalid provenance.
+
+    An offset-less instant names no zone, so it cannot be ordered against an
+    aware one and is invalid provenance rather than a guessed local time.
+    """
     normalized = value.removesuffix("Z") + "+00:00" if value.endswith("Z") else value
     parsed = attempt(action=lambda: datetime.fromisoformat(normalized), exceptions=(ValueError,))
-    return None if isinstance(parsed, AttemptFailure) else parsed
+    if isinstance(parsed, AttemptFailure) or parsed.tzinfo is None:
+        return None
+    return parsed

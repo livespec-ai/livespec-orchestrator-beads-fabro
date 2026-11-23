@@ -41,3 +41,24 @@ def test_completed_cycle_timestamp_module_declares_its_public_surface() -> None:
         "livespec_orchestrator_beads_fabro.commands._dispatcher_cycle_timestamps"
     )
     assert timestamps.__all__ == ["elapsed_seconds", "red_order"]
+
+
+def test_completed_cycle_timestamp_derivations_reject_offsetless_values() -> None:
+    """An offset-less instant has no zone, so it is invalid provenance, not a crash."""
+    timestamps = import_module(
+        "livespec_orchestrator_beads_fabro.commands._dispatcher_cycle_timestamps"
+    )
+    elapsed_seconds = timestamps.elapsed_seconds
+    assert elapsed_seconds(red_at="2026-11-23T10:00:00", green_at="2026-11-23T10:01:00Z") == (
+        None,
+        True,
+    )
+    assert elapsed_seconds(red_at="2026-11-23T10:00:00Z", green_at="2026-11-23T10:01:00") == (
+        None,
+        True,
+    )
+    assert elapsed_seconds(red_at="2026-11-23T10:00:00", green_at="2026-11-23T10:01:00") == (
+        None,
+        True,
+    )
+    assert timestamps.red_order(red_at="2026-11-23T10:00:00") == (1, 0.0)
