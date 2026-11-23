@@ -21,6 +21,7 @@ def test_needs_human_receipt_lines_report_a_measured_diff() -> None:
         "commit id: abc123",
         "needs-human diff: 2 files changed, 153 insertions, 12 deletions",
     )
+    assert len(needs_human_receipt_lines(capture=capture)) == 4
 
 
 def test_needs_human_receipt_lines_report_an_unmeasurable_diff() -> None:
