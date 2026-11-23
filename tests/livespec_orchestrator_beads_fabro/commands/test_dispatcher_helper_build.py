@@ -59,8 +59,10 @@ def _ok(*, stdout: str = "") -> CommandResult:
     return CommandResult(exit_code=0, stdout=stdout, stderr="")
 
 
-def _registry(*, path: Path, install: Path, commit: str | None) -> Path:
-    entry: dict[str, str] = {"projectPath": "/repos/governed", "installPath": str(install)}
+def _registry(
+    *, path: Path, install: Path, commit: str | None, project: Path | str = "/repos/governed"
+) -> Path:
+    entry: dict[str, str] = {"projectPath": str(project), "installPath": str(install)}
     if commit is not None:
         entry["gitCommitSha"] = commit
     _ = path.write_text(json.dumps({"plugins": {_PLUGIN_KEY: [entry]}}), encoding="utf-8")
@@ -123,6 +125,35 @@ def test_a_retained_payload_takes_the_commit_of_the_install_it_was_copied_from(
     )
 
     assert source == build.HelperSource(repository=_REPOSITORY, commit=_OTHER_COMMIT)
+
+
+def test_a_retained_payload_uses_the_install_registered_for_its_dispatch_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A credential wrapper may drop the retained-install root before the helper read."""
+    target = tmp_path / "hetzner-xubuntu-info"
+    target.mkdir()
+    install = tmp_path / "cache" / "target-build"
+    install.mkdir(parents=True)
+    payload = tmp_path / "retained"
+    payload.mkdir()
+    monkeypatch.chdir(target)
+    runner = _Runner(answers=[_ok(stdout=f"\n{_COMMIT}\n")])
+
+    source = build.read_helper_source(
+        runner=runner,
+        environ={},
+        payload_root=payload,
+        install_record=_registry(
+            path=tmp_path / "installed.json",
+            project=target,
+            install=install,
+            commit=_COMMIT,
+        ),
+    )
+
+    assert source == build.HelperSource(repository=_REPOSITORY, commit=_COMMIT)
+    assert runner.calls == []
 
 
 def test_a_source_checkout_falls_back_to_its_own_head(tmp_path: Path) -> None:
