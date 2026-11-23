@@ -94,6 +94,8 @@ _OUTCOME_KEY = "outcome"
 _STATUS_KEY = "status"
 _DETAIL_KEY = "detail"
 _NEEDS_HUMAN_KIND_KEY = "needs_human_kind"
+_NEEDS_HUMAN_STAGES_KEY = "needs_human_stages"
+_PR_REFRESH_STAGE = "pr_refresh"
 
 
 def released_for_recovery(*, records: Sequence[Mapping[str, object]], work_item_id: str) -> bool:
@@ -162,6 +164,17 @@ def _is_recovery_terminal(*, record: Mapping[str, object]) -> bool:
             terminal.get(_NEEDS_HUMAN_KIND_KEY), str
         )
     if isinstance(terminal.get(_NEEDS_HUMAN_KIND_KEY), str):
+        return True
+    stages = terminal.get(_NEEDS_HUMAN_STAGES_KEY)
+    if (
+        terminal.get(_STATUS_KEY) == "blocked"
+        and isinstance(stages, Sequence)
+        and not isinstance(stages, str)
+        and any(
+            isinstance(stage, str) and stage.split("@", 1)[0] == _PR_REFRESH_STAGE
+            for stage in cast("Sequence[object]", stages)
+        )
+    ):
         return True
     return terminal.get(_STATUS_KEY) in {"cancelled", RUN_WALL_BUDGET_EXCEEDED_STAGE} or (
         terminal.get(_STATUS_KEY) == "failed"
