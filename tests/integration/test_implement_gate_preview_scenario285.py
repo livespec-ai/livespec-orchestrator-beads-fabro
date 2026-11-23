@@ -49,6 +49,17 @@ FAILED {_SPACED_PYTEST_FAILURE_TARGET} - AssertionError
 ======================== 1 failed, 2 passed in 0.42s ==========================
 """
 
+_DASHED_PYTEST_FAILURE_TARGET = "tests/test_dispatcher.py::test_the_preview_keeps_dashed_ids[a - b]"
+_RECORDED_DASHED_ID_PYTEST_FAILURE_OUTPUT = f"""============================= test session starts ==============================
+collected 3 items
+
+{_DASHED_PYTEST_FAILURE_TARGET} FAILED [ 66%]
+
+=================================== FAILURES ===================================
+FAILED {_DASHED_PYTEST_FAILURE_TARGET} - AssertionError: expected a - b
+======================== 1 failed, 2 passed in 0.42s ==========================
+"""
+
 
 def _run(
     *, repo: Path, env: dict[str, str], argv: list[str], check: bool = True
@@ -260,6 +271,35 @@ def test_gate_preview_records_a_parametrized_pytest_node_id_that_contains_a_spac
     report = cast("dict[str, Any]", json.loads(completed.stdout.splitlines()[-1]))
     assert completed.returncode == 1
     assert report["failed_targets"] == [_SPACED_PYTEST_FAILURE_TARGET]
+
+
+def test_gate_preview_records_a_parametrized_pytest_node_id_that_contains_a_dash_once(
+    tmp_path: Path,
+) -> None:
+    """A parametrize id holding ' - ' is recorded once, not again as a truncated summary id."""
+    preview = importlib.import_module(_MODULE)
+    repo, runner, env = _preview_repository(tmp_path=tmp_path, preview=preview)
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text(
+        "#!/bin/sh\n"
+        "cat <<'PYTEST_OUTPUT'\n"
+        f"{_RECORDED_DASHED_ID_PYTEST_FAILURE_OUTPUT}"
+        "PYTEST_OUTPUT\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+
+    completed = _run(
+        repo=repo,
+        env=env,
+        argv=[sys.executable, str(runner), "green"],
+        check=False,
+    )
+
+    report = cast("dict[str, Any]", json.loads(completed.stdout.splitlines()[-1]))
+    assert completed.returncode == 1
+    assert report["failed_targets"] == [_DASHED_PYTEST_FAILURE_TARGET]
 
 
 def test_gate_preview_records_an_empty_output_tail_when_the_failing_hook_wrote_nothing(
