@@ -39,3 +39,20 @@ def test_needs_human_receipt_lines_report_an_unmeasurable_diff() -> None:
         "commit id: abc123",
         "needs-human diff could not be determined",
     )
+
+
+def test_needs_human_receipt_lines_report_an_empty_diff() -> None:
+    capture = NeedsHumanCapture(
+        ref="refs/heads/needs-human/run-1",
+        commit="abc123",
+        files=0,
+        insertions=0,
+        deletions=0,
+    )
+
+    assert needs_human_receipt_lines(capture=capture) == (
+        "the run has no work-in-progress ref",
+        "needs-human ref: refs/heads/needs-human/run-1",
+        "commit id: abc123",
+        "needs-human diff: 0 files changed, 0 insertions, 0 deletions",
+    )
