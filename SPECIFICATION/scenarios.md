@@ -13351,6 +13351,23 @@ Feature: The committed fleet-launch launchers enforce the interim launcher's gat
     When the canary repository hold file for repository A is removed
     Then the bd-u launcher takes its FIFO place back in the order of the ticket it kept
 
+  Scenario: A canary repository hold that names a build holds only launches that resolve to that build
+    Given the canary repository hold file for repository A has the first non-blank line build: 0.346.1
+    And repository A's installed plugin registry resolves to build 0.346.1
+    And repository B has no canary repository hold file and its registry resolves to build 0.345.0
+    When an impl launcher for repository A and an impl launcher for repository B run
+    Then the repository A launcher keeps its ticket and launches nothing into repository A
+    And the repository B launcher binds and launches
+    When repository A's installed plugin registry resolves to build 0.345.0
+    Then the repository A launcher binds and launches
+    And its log line says that the canary repository hold names another build
+
+  Scenario: A canary repository hold with no build-identity line, or an unresolvable build, holds every launch
+    Given the canary repository hold file for repository A has no build-identity line
+    And a second canary repository hold file for repository C names build 0.346.1 while repository C's installed plugin registry cannot be read
+    When impl launchers for repository A and repository C run
+    Then both launchers keep their tickets and launch nothing
+
   Scenario: A yielding ticket does not block a launchable ticket behind it
     Given the oldest gmktec FIFO ticket belongs to a live launcher and its file carries a line beginning held=
     And the next ticket belongs to a live launcher and its file carries the line wip-wait=1
