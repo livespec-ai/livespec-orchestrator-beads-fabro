@@ -38,6 +38,8 @@ from pathlib import Path
 
 FAILED_TARGETS_HEADER = re.compile(r"^Failed targets \(\d+\):\s*$", re.MULTILINE)
 FAILED_TARGET_LINE = re.compile(r"^\s+-\s+(\S+)\s*$")
+PYTEST_PROGRESS_FAILURE = re.compile(r"^(\S+::.+?)\s+FAILED(?:\s|$)", re.MULTILINE)
+PYTEST_FAILURE_SUMMARY = re.compile(r"^FAILED\s+(\S+::.+?)(?:\s+-\s|\s*$)", re.MULTILINE)
 SKIP_VARIABLE = re.compile(r"^LIVESPEC_.*(?:_SKIP|_RELAX|_DISABLE)(?:_|$)")
 CHECKPOINT_SUBJECT = re.compile(r"^fabro\([^)]*\): ")
 NO_MATCHING_STAGED_FILES = re.compile(r"\(skip\) no matching staged files")
@@ -154,14 +156,24 @@ def copy_path(path, root, preview):
 
 def failed_targets(output):
     header = FAILED_TARGETS_HEADER.search(output)
-    if header is None:
-        return []
+    if header is not None:
+        targets = []
+        for line in output[header.end() :].splitlines()[1:]:
+            match = FAILED_TARGET_LINE.match(line)
+            if match is None:
+                break
+            targets.append(match.group(1))
+        return targets
+
+    # Full-suite pytest output has no hook-provided ``Failed targets`` block.
+    # Read both the progress rows and failure summary, retaining first-seen
+    # order because pytest normally prints each node id in both places.
     targets = []
-    for line in output[header.end() :].splitlines()[1:]:
-        match = FAILED_TARGET_LINE.match(line)
-        if match is None:
-            break
-        targets.append(match.group(1))
+    matches = (*PYTEST_PROGRESS_FAILURE.finditer(output), *PYTEST_FAILURE_SUMMARY.finditer(output))
+    for match in matches:
+        target = match.group(1)
+        if target not in targets:
+            targets.append(target)
     return targets
 
 
