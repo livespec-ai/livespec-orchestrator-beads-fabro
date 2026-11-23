@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.346.5](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.346.4...v0.346.5) (2026-11-23)
+
+
+### Bug Fixes
+
+* the Green gate preview grades gate 02 as the real Red amend and names failed lefthook steps (bd-ib-jujcv7) ([72a39eb](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/72a39ebd2268d4cfb54c55c16b2f699e0bfe6be6))
+
 ## [0.346.4](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.346.3...v0.346.4) (2026-11-23)
 
 
