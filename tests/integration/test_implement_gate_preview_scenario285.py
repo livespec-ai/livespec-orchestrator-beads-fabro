@@ -23,6 +23,21 @@ _MODULE_PATH = (
 )
 _MODULE = "livespec_orchestrator_beads_fabro.commands._dispatcher_gate_preview_program"
 _FAILED_TARGET = "check-keyword-only-args"
+_PYTEST_FAILURE_TARGETS = (
+    "tests/test_dispatcher.py::test_the_preview_records_pytest_failures",
+    "tests/test_dispatcher.py::test_the_handoff_compares_pytest_failures",
+)
+_RECORDED_FULL_SUITE_PYTEST_FAILURE_OUTPUT = """============================= test session starts ==============================
+collected 17 items
+
+tests/test_dispatcher.py::test_the_preview_records_pytest_failures FAILED [ 88%]
+tests/test_dispatcher.py::test_the_handoff_compares_pytest_failures FAILED [100%]
+
+=================================== FAILURES ===================================
+FAILED tests/test_dispatcher.py::test_the_preview_records_pytest_failures - AssertionError
+FAILED tests/test_dispatcher.py::test_the_handoff_compares_pytest_failures - AssertionError
+======================== 2 failed, 15 passed in 0.42s =========================
+"""
 
 
 def _run(
@@ -172,6 +187,40 @@ def test_gate_preview_records_the_hook_output_tail_when_no_failed_target_summary
     assert completed.returncode == 23
     assert report["failed_targets"] == []
     assert report.get("output_tail", "").endswith("type pre-check rejected created.py\n")
+
+
+def test_gate_preview_records_pytest_node_ids_from_a_full_suite_failure_without_target_list(
+    tmp_path: Path,
+) -> None:
+    """A Green refusal names pytest failures even when lefthook emits no target block."""
+    preview = importlib.import_module(_MODULE)
+    repo, runner, env = _preview_repository(tmp_path=tmp_path, preview=preview)
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text(
+        "#!/bin/sh\n"
+        "cat <<'PYTEST_OUTPUT'\n"
+        f"{_RECORDED_FULL_SUITE_PYTEST_FAILURE_OUTPUT}"
+        "PYTEST_OUTPUT\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+
+    completed = _run(
+        repo=repo,
+        env=env,
+        argv=[sys.executable, str(runner), "green"],
+        check=False,
+    )
+
+    report = cast("dict[str, Any]", json.loads(completed.stdout.splitlines()[-1]))
+    assert completed.returncode == 1
+    assert report["failed_targets"] == list(_PYTEST_FAILURE_TARGETS)
+    assert json.loads(
+        (repo / ".git" / "livespec-implement-gate-preview-green-result.json").read_text(
+            encoding="utf-8"
+        )
+    )["failed_targets"] == list(_PYTEST_FAILURE_TARGETS)
 
 
 def test_gate_preview_records_an_empty_output_tail_when_the_failing_hook_wrote_nothing(
