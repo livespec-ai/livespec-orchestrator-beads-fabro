@@ -32,6 +32,9 @@ from livespec_orchestrator_beads_fabro.effects._incident_genesis_fence import (
     FENCED_GENESIS_KEYS,
     fenced_root_holds,
 )
+from livespec_orchestrator_beads_fabro.effects._incident_repository_identity import (
+    same_repository,
+)
 
 if TYPE_CHECKING:
     from livespec_orchestrator_beads_fabro._beads_client import BeadsClient
@@ -80,7 +83,8 @@ def read_genesis(
         ) or decode_record(text=text, marker=GENESIS_MARKER, keys=FENCED_GENESIS_KEYS)
         if (
             record is None
-            or record["repository"] != repository
+            or not isinstance(record["repository"], str)
+            or not same_repository(recorded=record["repository"], caller=repository)
             or record["item_id"] != item_id
             or not isinstance(record["root_token_id"], str)
             or not record["root_token_id"]
