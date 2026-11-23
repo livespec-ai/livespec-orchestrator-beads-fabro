@@ -295,8 +295,9 @@ canary_hold_build() {
   ' "$CANARY_HOLD_FILE" 2>/dev/null
 }
 # canary_held: the target repository's canary hold exists and the exemption list does not name
-# the item. A build-qualified hold applies only to its target's installed-registry build. A missing
-# identity, or an installed build that cannot be resolved, fails closed and holds every launch.
+# the item. A build-qualified hold applies only to a launch whose installed-registry build resolves
+# and matches; an installed build that cannot be resolved matches nothing, so the launch proceeds (and
+# refuses later as "build unresolved"). A hold with no identity line holds every launch.
 # The list is read at every check; an absent or unreadable list exempts no item.
 canary_held() {
   local held_build resolved_build
@@ -304,7 +305,10 @@ canary_held() {
   grep -qxF -- "$ITEM" "$FLEET_LAUNCH_CANARY_EXEMPT_FILE" 2>/dev/null && return 1
   held_build=$(canary_hold_build)
   [ -n "$held_build" ] || return 0
-  resolved_build=$(installed_registry_build 2>/dev/null) || return 0
+  resolved_build=$(installed_registry_build 2>/dev/null) || {
+    echo "$(date -u +%FT%TZ) canary repository hold build unresolved ($CANARY_HOLD_FILE): held=$held_build; proceed"
+    return 1
+  }
   [ "$resolved_build" = "$held_build" ] && return 0
   echo "$(date -u +%FT%TZ) canary repository hold names another build ($CANARY_HOLD_FILE): held=$held_build resolved=$resolved_build; proceed"
   return 1

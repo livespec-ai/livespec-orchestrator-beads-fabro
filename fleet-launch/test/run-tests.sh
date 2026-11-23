@@ -4098,17 +4098,15 @@ open_boards
 printf '{"plugins":{"%s":[{"version":"%s","projectPath":"%s"}]}}\n' \
     "$PLUGIN_KEY" "$CANARY_OTHER_BUILD" "$WORK/no-registry-match" > "$REGISTRY"
 set_canary_hold
-ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-canary-unresolvable > "$CASE_LOG" 2>&1 &
-canary_unresolvable_pid=$!
-if wait_for_line "$CASE_LOG" "canary repository hold present" "$OBSERVE_WAIT_S" \
-    && grep -qx 'held=canary-hold' "$FLEET_LAUNCH_GMK_QUEUE_DIR/100-harness-seat" \
-    && [ ! -s "$DRIVE_LOG" ]; then
-    pass "an unresolvable installed build fails closed under a build-qualified canary hold"
+ONLY_GMK=1 TICKET_NS=100 run_launcher bd-ib-canary-unresolvable
+if log_has "$CASE_LOG" "canary repository hold build unresolved" \
+    && ! log_has "$CASE_LOG" "canary repository hold present" \
+    && [ -z "$(drive_log_items)" ]; then
+    pass "an unresolvable installed build matches no build-qualified canary hold, so the launch is not held"
 else
-    fail "an unresolvable installed build bypassed the canary hold"
+    fail "an unresolvable installed build was held by a build-qualified canary hold (rc=$RC)"
     tail -5 "$CASE_LOG" >&2
 fi
-stop_launcher "$canary_unresolvable_pid"; wait "$canary_unresolvable_pid" 2>/dev/null || true
 cp "$REGISTRY_ORIGINAL" "$REGISTRY"
 
 scenario "38. launch-time commands run under the target repository's committed credential wrapper"
