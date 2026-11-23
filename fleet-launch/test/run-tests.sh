@@ -4526,6 +4526,37 @@ fi
 
 if [ "$HARNESS_SLICE" = all ] || [ "$HARNESS_SLICE" = probe-stderr ]; then
 
+scenario "a wrapper that strips the installed plugin root refuses before it takes a launch slot"
+new_case tenant-wrapper-scrubs-installed-plugin-root
+open_boards
+unset WRAPPER
+SCRUBBING_TENANT_WRAPPER="$STUB/scrubbing-tenant-wrapper"
+cat > "$SCRUBBING_TENANT_WRAPPER" <<'SCRUBBING_TENANT_WRAPPER_STUB'
+#!/usr/bin/env bash
+# This target repository's credential wrapper drops a value the launcher needs
+# to identify the installed plugin build it will dispatch.
+set -u
+[ "${1:-}" = -- ] && shift
+unset LIVESPEC_INSTALLED_PLUGIN_ROOT
+exec "$@"
+SCRUBBING_TENANT_WRAPPER_STUB
+chmod +x "$SCRUBBING_TENANT_WRAPPER"
+printf '{"credential_wrapper": ["%s", "--"]}\n' "$SCRUBBING_TENANT_WRAPPER" > "$TENANT/.livespec.jsonc"
+export LIVESPEC_INSTALLED_PLUGIN_ROOT="$PLUGIN_CACHE/$PLUGIN_BUILD"
+parent_out=$(ONLY_GMK=1 TICKET_NS=100 "$LAUNCHER" bd-ib-scrubbed-installed-root 2>&1)
+parent_rc=$?
+rm -f "$TENANT/.livespec.jsonc"
+unset LIVESPEC_INSTALLED_PLUGIN_ROOT
+if [ "$parent_rc" = 75 ] \
+    && [[ "$parent_out" == *"scrubbing-tenant-wrapper"* ]] \
+    && [[ "$parent_out" != *"gmktec FIFO ticket taken"* ]] \
+    && [[ "$parent_out" != *"LAUNCH target="* ]] \
+    && [ ! -s "$DRIVE_LOG" ]; then
+    pass "a target credential wrapper that strips LIVESPEC_INSTALLED_PLUGIN_ROOT is named by a preflight refusal before it takes a slot or prints LAUNCH"
+else
+    fail "a wrapper that stripped LIVESPEC_INSTALLED_PLUGIN_ROOT took a slot, launched, or was not named (rc=$parent_rc): $(printf '%s' "$parent_out" | tail -5)"
+fi
+
 new_case probe-stderr
 open_boards
 export FLEET_LAUNCH_MAX_WAIT_S=120
