@@ -171,12 +171,15 @@ def is_product_path(*, path: str, prefixes: tuple[str, ...]) -> bool:
     `test_tree` values, for the reason the repository's own commit-time gate
     uses the same prefix: a test path is identified by where it lives, and a
     source tree that nested its tests would otherwise classify them as product.
+
+    Each declared tree is matched at a path boundary, so `src/pkg` claims
+    `src/pkg/x.py` and not the sibling `src/pkg_extra/x.py`.
     """
     if not path.endswith(_PYTHON_SUFFIX):
         return False
     if path.startswith(_TESTS_PREFIX) or _VENDOR_SEGMENT in path:
         return False
-    return path.startswith(prefixes) if prefixes else False
+    return any(path.startswith(tree.rstrip("/") + "/") for tree in prefixes)
 
 
 def changed_product_logical_lines(*, before: str, after: str) -> int | None:
