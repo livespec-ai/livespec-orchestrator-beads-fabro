@@ -16151,6 +16151,77 @@ Feature: Factory credential from the central factory selection
     Then the slot is chosen by the whole-pool ranking of Scenario 278
 ```
 
+## Scenario 384 — Factory admission skips a managed account below the protection floor the role holder published
+
+Governing clause: `contracts.md` §"Dispatcher admission, WIP cap, and post-merge acceptance" → "A managed account's protection floor is read from the role holder's one protection-floors record, never applied from a value of this repository's own".
+
+```gherkin
+Feature: Factory admission skips a managed account below the protection floor the role holder published
+  As the maintainer of the credential-rotation role holder
+  I want every credential chooser to read one published protection floor
+  So that no consumer spends an account's protected weekly reserve
+
+  Scenario: Factory admission skips a managed account below the protection floor the role holder published
+    Given a protection floors record whose entry for the account `anthropic-0` carries `floor_percent` 10
+    And a covered ready item whose centrally selected slot is `anthropic-0` with seven-day remaining 8 percent
+    When the Dispatcher evaluates admission
+    Then the candidate is skipped
+    And the skip line names `anthropic-0` and the floor 10
+```
+
+## Scenario 385 — The bypass launcher reads the same protection floor and applies none of its own
+
+Governing clause: `contracts.md` §"Dispatcher admission, WIP cap, and post-merge acceptance" → "A managed account's protection floor is read from the role holder's one protection-floors record, never applied from a value of this repository's own".
+
+```gherkin
+Feature: The bypass launcher reads the same protection floor and applies none of its own
+  As the maintainer of the credential-rotation role holder
+  I want every credential chooser to read one published protection floor
+  So that no consumer spends an account's protected weekly reserve
+
+  Scenario: The bypass launcher reads the same protection floor and applies none of its own
+    Given a protection floors record whose entry for the account `anthropic-0` carries `floor_percent` 10
+    And a bypass launch whose chosen slot is `anthropic-0` with seven-day remaining 8 percent
+    When the bypass launcher's pre-launch credential check runs
+    Then it refuses the slot and names `anthropic-0` and the floor 10
+    And it applies no protection floor value of its own
+```
+
+## Scenario 386 — Judge and seat selection read the same protection floor and apply none of their own
+
+Governing clause: `contracts.md` §"Dispatcher admission, WIP cap, and post-merge acceptance" → "A managed account's protection floor is read from the role holder's one protection-floors record, never applied from a value of this repository's own".
+
+```gherkin
+Feature: Judge and seat selection read the same protection floor and apply none of their own
+  As the maintainer of the credential-rotation role holder
+  I want every credential chooser to read one published protection floor
+  So that no consumer spends an account's protected weekly reserve
+
+  Scenario: Judge and seat selection read the same protection floor and apply none of their own
+    Given a protection floors record whose entry for the account `anthropic-0` carries `floor_percent` 10
+    And a judge or seat selection whose candidate is `anthropic-0` with seven-day remaining 8 percent
+    When the selection runs
+    Then the candidate is refused and the line names `anthropic-0` and the floor 10
+    And an account with no entry in the record is not refused for protection
+```
+
+## Scenario 387 — An absent protection floors record refuses selection of a managed account
+
+Governing clause: `contracts.md` §"Dispatcher admission, WIP cap, and post-merge acceptance" → "A managed account's protection floor is read from the role holder's one protection-floors record, never applied from a value of this repository's own".
+
+```gherkin
+Feature: An absent protection floors record refuses selection of a managed account
+  As the maintainer of the credential-rotation role holder
+  I want every credential chooser to read one published protection floor
+  So that no consumer spends an account's protected weekly reserve
+
+  Scenario: An absent protection floors record refuses selection of a managed account
+    Given no protection floors record on the host
+    When admission, the bypass launcher or judge and seat selection would choose a managed account
+    Then each refuses it with a line naming the account
+    And none writes, repairs or replaces the record
+```
+
 ## Scenario 379 — A failed run whose tree nothing else carries is published to a preservation ref even when it did not fail a checkpoint
 
 Governing clause: `contracts.md` §"Failed engine checkpoint commit attribution" → "A failed run whose tree nothing else carries is published to a preservation ref whether or not it failed a checkpoint".

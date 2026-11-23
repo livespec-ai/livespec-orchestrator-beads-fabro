@@ -1573,5 +1573,33 @@
     "heading": "## What this spec is not",
     "work_item": "bd-ib-heat",
     "first_seen": "2026-06-08"
+  },
+  {
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "heading": "## Scenario 384 — Factory admission skips a managed account below the protection floor the role holder published",
+    "work_item": "bd-ib-5vrm34",
+    "first_seen": "2026-11-23"
+  },
+  {
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "heading": "## Scenario 385 — The bypass launcher reads the same protection floor and applies none of its own",
+    "work_item": "bd-ib-5vrm34",
+    "first_seen": "2026-11-23"
+  },
+  {
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "heading": "## Scenario 386 — Judge and seat selection read the same protection floor and apply none of their own",
+    "work_item": "bd-ib-5vrm34",
+    "first_seen": "2026-11-23"
+  },
+  {
+    "spec_root": "SPECIFICATION",
+    "spec_file": "scenarios.md",
+    "heading": "## Scenario 387 — An absent protection floors record refuses selection of a managed account",
+    "work_item": "bd-ib-5vrm34",
+    "first_seen": "2026-11-23"
   }
 ]
