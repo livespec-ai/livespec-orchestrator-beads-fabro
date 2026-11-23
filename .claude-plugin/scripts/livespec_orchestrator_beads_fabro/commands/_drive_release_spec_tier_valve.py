@@ -1,4 +1,4 @@
-"""The `release-spec-tier:<id>:<heading>` valve — a human's way through a misjudged hold.
+"""The `release-spec-tier:<id>:<heading>` valve — a human attestation valve.
 
 The autonomy-tier bullet of `SPECIFICATION/contracts.md` holds a spec-change-tier
 item out of `ready` until its linked proposal ratifies and the judgement returns
@@ -6,6 +6,9 @@ item out of `ready` until its linked proposal ratifies and the judgement returns
 already carries, a held item MUST also have a human way through that needs no
 ratification and no agreeing model run", and this valve is it: the human names an
 existing H2 heading and attests that it states the item's asked-for behaviour.
+The same attestation may also be recorded for an un-held item, so its resulting
+`none` tier names the clause that the human supplied rather than a missing model
+generalization target.
 
 THE VALVE ATTESTS AND CLEARS, AND WRITES NO STATUS. It appends the attestation
 comment (`_spec_tier_attestation`), journals the act, and then asks the same
@@ -43,9 +46,6 @@ from returns.pipeline import is_successful
 from returns.unsafe import unsafe_perform_io
 
 from livespec_orchestrator_beads_fabro._store_comments import append_work_item_comment
-from livespec_orchestrator_beads_fabro.commands._dispatcher_dod_judgement_comments import (
-    item_comment_bodies,
-)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_invoker import FALLBACK_SOURCE
 from livespec_orchestrator_beads_fabro.commands._dispatcher_io import (
     JournalFile,
@@ -70,10 +70,7 @@ from livespec_orchestrator_beads_fabro.commands._spec_change_tier import SPEC_DI
 from livespec_orchestrator_beads_fabro.commands._spec_change_tier_gate import (
     classify_item_spec_change_tier,
 )
-from livespec_orchestrator_beads_fabro.commands._spec_change_tier_record import (
-    STAGE_RELEASE,
-    recorded_spec_change_tier,
-)
+from livespec_orchestrator_beads_fabro.commands._spec_change_tier_record import STAGE_RELEASE
 from livespec_orchestrator_beads_fabro.commands._spec_tier_attestation import (
     attestation_comment,
     clause_digest,
@@ -132,7 +129,7 @@ def release_spec_tier(  # noqa: PLR0913 - each argument is one input of the act.
     runner: HumanValveRunner | None,
 ) -> dict[str, Any]:
     """Attest `heading` for `item`, clear its hold, and route it through intake."""
-    refusal = _eligibility_refusal(repo=repo, config=config, item=item, aid=aid, runner=runner)
+    refusal = _eligibility_refusal(repo=repo, item=item, aid=aid, runner=runner)
     if refusal is not None:
         return refusal
     resolved = _resolved_clause(repo=repo, item=item, aid=aid, heading=heading)
@@ -179,13 +176,12 @@ def release_spec_tier(  # noqa: PLR0913 - each argument is one input of the act.
 def _eligibility_refusal(
     *,
     repo: Path,
-    config: StoreConfig,
     item: WorkItem,
     aid: str,
     runner: HumanValveRunner | None,
 ) -> dict[str, Any] | None:
     """The first reason this item may not be released, or `None` when it may."""
-    standing = _standing_refusal(config=config, item=item, aid=aid)
+    standing = _standing_refusal(item=item, aid=aid)
     if standing is not None:
         return standing
     return release_activity_refusal(
@@ -197,22 +193,13 @@ def _eligibility_refusal(
     )
 
 
-def _standing_refusal(*, config: StoreConfig, item: WorkItem, aid: str) -> dict[str, Any] | None:
-    """Refuse an item outside the valid lanes, or one the ledger does not show held."""
+def _standing_refusal(*, item: WorkItem, aid: str) -> dict[str, Any] | None:
+    """Refuse an item outside the valid lanes before it can be attested."""
     if item.status not in _VALID_LANES and not (item.status == _ACTIVE and item.rework_pending):
         return invalid_source_state(
             aid=aid,
             item=item,
             expected="backlog, pending-approval, ready, blocked, or active with rework:pending",
-        )
-    comments = item_comment_bodies(path=config, work_item_id=item.id)
-    recorded = recorded_spec_change_tier(comments=comments or ())
-    if recorded is None or not recorded.is_spec_change:
-        return valve_refusal(
-            aid=aid,
-            wid=item.id,
-            err="not-held",
-            msg=f"{RELEASE_SPEC_TIER_ACTION} refused: {item.id} carries no spec-change-tier hold.",
         )
     return None
 
