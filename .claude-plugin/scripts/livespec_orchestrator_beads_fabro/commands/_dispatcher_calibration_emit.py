@@ -15,7 +15,13 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_calibration import (
 from livespec_orchestrator_beads_fabro.commands._dispatcher_calibration_span import (
     emit_calibration_span,
 )
+from livespec_orchestrator_beads_fabro.commands._dispatcher_commit_series_memo import (
+    MemoizedSeriesRunner,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_cost_gate import derived_costs
+from livespec_orchestrator_beads_fabro.commands._dispatcher_cycle_signals import (
+    completed_cycle_records,
+)
 from livespec_orchestrator_beads_fabro.commands._dispatcher_engine import (
     CommandRunner,
     DispatchOutcome,
@@ -128,6 +134,8 @@ def _build_and_append_calibration(  # noqa: PLR0913 - injectable calibration sea
     runner: CommandRunner,
 ) -> None:
     journal_records = read_journal_records_for(args=args, repo=repo)
+    # The TDD signals and the per-cycle measurements read ONE commit series.
+    series_runner = MemoizedSeriesRunner(inner=runner)
     record = build_calibration_record(
         item=item,
         outcome=outcome,
@@ -159,10 +167,14 @@ def _build_and_append_calibration(  # noqa: PLR0913 - injectable calibration sea
             outcome=outcome,
             records=journal_records,
             sink=TddOrderSink(path=tdd_order_sink_path(args=args, repo=repo)),
-            runner=runner,
+            runner=series_runner,
         ),
     )
     journal.append(record=calibration_journal_record(record=record))
+    for cycle_record in completed_cycle_records(
+        repo=repo, item=item, outcome=outcome, records=journal_records, runner=series_runner
+    ):
+        journal.append(record=cycle_record)
     emit_calibration_span(
         record=record,
         spans_path=calibration_spans_path(args=args, repo=repo),
