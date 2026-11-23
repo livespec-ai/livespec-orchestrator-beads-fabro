@@ -13407,9 +13407,18 @@ Feature: The committed fleet-launch launchers enforce the interim launcher's gat
     And the freeze allowlist names work item bd-x
     When a gmktec launcher for bd-x reaches the launch
     Then it launches bd-x
-    And the freeze allowlist no longer names bd-x
+    And the freeze allowlist still names bd-x until the drive is admitted
+    When bd-x reads active in the ledger
+    Then the freeze allowlist no longer names bd-x
     When a second gmktec launcher for bd-x reaches the head of the FIFO
     Then it launches nothing until the hold file is removed
+
+  Scenario: A drive stopped before admission keeps its allowlist grant
+    Given the gmktec factory hold file exists
+    And the freeze allowlist names work item bd-x
+    When a gmktec launcher invokes the drive for bd-x and re-reads the holds before bd-x reads active
+    Then the hold does not stop the drive, because the allowlist still names bd-x
+    And if the drive exits before bd-x reads active, the freeze allowlist still names bd-x
 
   Scenario: A priority-1 item launches through the gmktec hold
     Given the gmktec factory hold file exists
