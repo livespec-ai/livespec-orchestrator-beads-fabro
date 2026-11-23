@@ -64,10 +64,13 @@ This module is PURE: no IO, no environment reads, and it never raises.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_assertion_count import (
     assertion_count_for,
+)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_completed_cycles import (
+    VerifiedPairCount,
 )
 from livespec_orchestrator_beads_fabro.commands._dispatcher_tdd_commits import TddCommitSignals
 from livespec_orchestrator_beads_fabro.commands._dispatcher_tdd_order_sink import TddOrderSignals
@@ -83,6 +86,7 @@ __all__: list[str] = [
     "tdd_signal_fields",
     "tdd_signals",
     "tdd_span_fields",
+    "with_verified_pairs",
 ]
 
 _RED_COMMIT_COUNT_KEY = "tdd.red_commit_count"
@@ -92,6 +96,8 @@ _GAP_SECONDS_MEDIAN_KEY = "tdd.red_green_gap_seconds_median"
 _FIRST_WRITE_BEFORE_RED_KEY = "tdd.first_product_write_before_red"
 _ORDER_REFUSALS_KEY = "tdd.order_refusals"
 _ASSERTION_COUNT_KEY = "tdd.assertion_count"
+_VERIFIED_PAIR_COUNT_KEY = "tdd.verified_pair_count"
+_VERIFIED_PAIR_REASON_KEY = "tdd.verified_pair_unobserved_reason"
 
 # The adapter is NOT a `tdd.*` key: it is a grouping dimension of the dispatch,
 # not a test-first measurement, and naming it `tdd.adapter` would misreport
@@ -111,6 +117,8 @@ TDD_PROJECTED_KEYS: tuple[str, ...] = (
     _FIRST_WRITE_BEFORE_RED_KEY,
     _ORDER_REFUSALS_KEY,
     _ASSERTION_COUNT_KEY,
+    _VERIFIED_PAIR_COUNT_KEY,
+    _VERIFIED_PAIR_REASON_KEY,
     IMPLEMENT_ADAPTER_KEY,
 )
 
@@ -132,6 +140,8 @@ class TddSignals:
     first_product_write_before_red: bool | None = None
     order_refusals: int | None = None
     assertion_count: int | None = None
+    verified_pair_count: int | None = None
+    verified_pair_unobserved_reason: str | None = None
     adapter: str | None = None
     selected_index: int | None = None
     size_justified: bool | None = None
@@ -175,6 +185,15 @@ def tdd_signals(
     )
 
 
+def with_verified_pairs(*, signals: TddSignals, pairs: VerifiedPairCount) -> TddSignals:
+    """Add the dispatch-series pair result without rebuilding other signals."""
+    return replace(
+        signals,
+        verified_pair_count=pairs.count,
+        verified_pair_unobserved_reason=pairs.unobserved_reason,
+    )
+
+
 def assertion_count(*, item: WorkItem) -> int:
     """The item's gradeable assertion count, through the sanctioned parser.
 
@@ -207,6 +226,8 @@ def tdd_signal_fields(*, signals: TddSignals) -> dict[str, object | None]:
         _FIRST_WRITE_BEFORE_RED_KEY: signals.first_product_write_before_red,
         _ORDER_REFUSALS_KEY: signals.order_refusals,
         _ASSERTION_COUNT_KEY: signals.assertion_count,
+        _VERIFIED_PAIR_COUNT_KEY: signals.verified_pair_count,
+        _VERIFIED_PAIR_REASON_KEY: signals.verified_pair_unobserved_reason,
         IMPLEMENT_ADAPTER_KEY: signals.adapter,
     }
 
