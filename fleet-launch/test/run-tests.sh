@@ -3758,11 +3758,32 @@ git -C "$WORK/seed" "${GIT_IDENTITY[@]}" commit --quiet --allow-empty --no-verif
 git -C "$WORK/seed" "${GIT_IDENTITY[@]}" push --quiet "$ORIGIN" master
 run_launcher bd-ib-origin-diverged
 if [ "$RC" != 0 ] && [ ! -s "$DRIVE_LOG" ] && [ ! -s "$PREFLIGHT_LOG" ] \
-    && line_has_all "$CASE_LOG" 'terminal:' 'cause=checkout-not-at-origin-tip' 'step=fast-forward' 'fatal: Not possible to fast-forward, aborting.'; then
-    pass "a diverged checkout launches nothing and records git's fast-forward failure"
+    && line_has_all "$CASE_LOG" 'terminal:' 'cause=checkout-not-at-origin-tip' 'step=fast-forward' 'fatal: Not possible to fast-forward, aborting.' \
+    && grep -qxF 'fatal: Not possible to fast-forward, aborting.' "$CASE_LOG"; then
+    pass "a diverged checkout logs and records git's fast-forward failure"
 else
-    fail "a diverged checkout did not record git's fast-forward failure (rc=$RC)"
+    fail "a diverged checkout did not log and record git's fast-forward failure (rc=$RC)"
     tail -5 "$CASE_LOG" >&2
+fi
+
+scenario "30b. simultaneous checkout refreshes serialize without a race refusal"
+new_case origin-tip-concurrent
+open_boards
+git -C "$WORK/seed" "${GIT_IDENTITY[@]}" commit --quiet --allow-empty --no-verify -m "origin advances for concurrent refresh"
+git -C "$WORK/seed" "${GIT_IDENTITY[@]}" push --quiet "$ORIGIN" master
+concurrent_tip=$(git -C "$WORK/seed" rev-parse HEAD)
+"$LAUNCHER" bd-ib-origin-concurrent-first > "$CASE_DIR/first.log" 2>&1 &
+concurrent_first_pid=$!
+"$LAUNCHER" bd-ib-origin-concurrent-second > "$CASE_DIR/second.log" 2>&1 &
+concurrent_second_pid=$!
+await_both "$concurrent_first_pid" "$concurrent_second_pid" "$EXIT_WAIT_S"
+if [ "$FIRST_RC" = 0 ] && [ "$SECOND_RC" = 0 ] \
+    && [ "$(git -C "$TENANT" rev-parse HEAD)" = "$concurrent_tip" ] \
+    && [ "$(drive_log_items | tr ' ' '\n' | sort | tr '\n' ' ')" = "bd-ib-origin-concurrent-first bd-ib-origin-concurrent-second " ]; then
+    pass "simultaneous launchers serialize checkout refreshes and both reach the origin tip"
+else
+    fail "simultaneous launchers raced while refreshing the checkout (first=$FIRST_RC second=$SECOND_RC head=$(git -C "$TENANT" rev-parse HEAD))"
+    tail -5 "$CASE_DIR/first.log" "$CASE_DIR/second.log" >&2
 fi
 
 scenario "31. a ready-set refusal lists as open blockers only dependencies that are neither closed nor done"
