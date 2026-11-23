@@ -51,10 +51,7 @@ from livespec_orchestrator_beads_fabro.commands._dispatcher_driver_hooks import 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_factory_provenance import (
     factory_run_id_prepare_steps_block,
 )
-from livespec_orchestrator_beads_fabro.commands._dispatcher_gh_refresh import (
-    refreshing_gh_env_lines,
-    refreshing_gh_prepare_steps_block,
-)
+from livespec_orchestrator_beads_fabro.commands._dispatcher_gh_refresh import github_app_env_present
 from livespec_orchestrator_beads_fabro.commands._dispatcher_git_author import (
     GitAuthor,
     git_author_env_lines,
@@ -289,6 +286,10 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
     forge call, and a build with no identity renders no overlay at all, because
     there would be no commit for the sandbox to fetch.
     """
+    # The dispatch caller still owns and supplies the publication token for the
+    # broker and scripted publication stages.  This agent-stage overlay must
+    # deliberately not project it.
+    _ = github_token
     if codex_auth_snapshot is not None and not isinstance(credential_use, CredentialUseProjection):
         return None
     graph_value = toml_section_string(text=committed_text, section="workflow", key="graph")
@@ -322,7 +323,6 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
     env_environment_id = environment_id if factory_environment is None else factory_environment
     rewritten = substitute_input_tokens(text=rewritten, prepare_inputs=prepare_inputs)
     token_literal = json.dumps(token)
-    github_token_literal = json.dumps(github_token)
     clones = sandbox_clone_fragments(siblings=siblings)
     currency_gate_env_line = f"{CURRENCY_GATE_ENV_VAR} = {json.dumps(CURRENCY_GATE_ENV_VALUE)}\n"
     otel_env_lines = _otel_env_lines(otel_env=otel_env)
@@ -335,8 +335,6 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
     # repository's committed project settings, whose `env` overrides the process
     # environment it inherits (bd-ib-rv2jk4).
     harness_settings_steps = harness_settings_prepare_steps_block()
-    gh_refresh_steps = refreshing_gh_prepare_steps_block()
-    gh_refresh_env_lines = refreshing_gh_env_lines()
     # Rendered immediately after the wrapper it routes to, and unconditionally:
     # the Petri-era runner performs no Git operations of its own, so without this
     # every in-sandbox push reaches origin with no credential (bd-ib-52zt3o).
@@ -365,6 +363,12 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
     helper_fetch_steps = helper_fetch_prepare_steps_block(source=helper_source)
     if helper_fetch_steps is None:
         return None
+    # A local App input means this run can mint a publication credential.  Do
+    # not give the engine its integration projection: every agent node inherits
+    # the run integration, so that table is itself an agent-readable minting
+    # path.  The no-local-input shape remains useful to the availability probe,
+    # which validates a factory declaration without opening a credential path.
+    app_integration = "" if github_app_env_present() else github_app_table(github_app=github_app)
     factory_provenance_steps = factory_run_id_prepare_steps_block(dispatch_id=dispatch_id)
     # Rendered immediately after the helper fetch, ahead of every other
     # Dispatcher-materialized step, which keeps it right behind the committed
@@ -405,7 +409,7 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
     # uses for the needs_human node's emergency commit (S5 / bd-ib-b4u6b7).
     return (
         rewritten
-        + github_app_table(github_app=github_app)
+        + app_integration
         + helper_fetch_steps
         + dispatch_base_steps
         + git_identity_steps
@@ -414,7 +418,6 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
         + clones.steps
         + tmux_steps
         + harness_settings_steps
-        + gh_refresh_steps
         + git_credential_helper_steps
         + codex_steps
         + claude_driver_hooks_prepare_steps_block()
@@ -432,7 +435,6 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
         + "\n# --- (UNCOMMITTED; mode 600; deleted when the run returns) ---\n"
         + f"[environments.{env_environment_id}.env]\n"
         + f"CLAUDE_CODE_OAUTH_TOKEN = {token_literal}\n"
-        + f"GITHUB_TOKEN = {github_token_literal}\n"
         # Process-level github.com helper, so a fetch GitHub refuses anonymously
         # is retried authenticated from ANY git process, the committed chain's
         # `uv sync` included (bd-ib-awv2iu).
@@ -440,7 +442,6 @@ def render_run_config_overlay(  # noqa: PLR0911, PLR0913, PLR0915 — kw-only pu
         + author_env_lines
         + tmux_env_line
         + harness_shell_env
-        + gh_refresh_env_lines
         + clones.env_lines
         + currency_gate_env_line
         + otel_env_lines

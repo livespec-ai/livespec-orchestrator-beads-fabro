@@ -114,18 +114,14 @@ _CATALOG_IMAGE = SandboxImageSource(
 )
 
 
-def _credential_block(*, environment_id: str) -> str:
-    """The two credential lines as the overlay renders them under one id.
+def _agent_environment_block(*, environment_id: str) -> str:
+    """The agent-safe environment line the overlay renders under one id.
 
     The whole BLOCK rather than the header alone: a table header rendered under
-    the right id while the credentials landed under another would satisfy a
-    header-only assertion and project nothing.
+    the right id while the agent environment landed under another would satisfy
+    a header-only assertion and project nothing.
     """
-    return (
-        f"[environments.{environment_id}.env]\n"
-        f'CLAUDE_CODE_OAUTH_TOKEN = "{_FAKE_TOKEN}"\n'
-        f'GITHUB_TOKEN = "{_FAKE_GITHUB_TOKEN}"\n'
-    )
+    return f"[environments.{environment_id}.env]\n" f'CLAUDE_CODE_OAUTH_TOKEN = "{_FAKE_TOKEN}"\n'
 
 
 def test_a_declared_factory_environment_keys_the_env_table_on_that_environment(
@@ -145,7 +141,7 @@ def test_a_declared_factory_environment_keys_the_env_table_on_that_environment(
     )
 
     assert rendered is not None
-    assert _credential_block(environment_id=_FACTORY_ENVIRONMENT) in rendered
+    assert _agent_environment_block(environment_id=_FACTORY_ENVIRONMENT) in rendered
     # And NOT under the committed id, which the engine would never read.
     assert f"[environments.{_COMMITTED_ENVIRONMENT}.env]" not in rendered
 
@@ -196,7 +192,7 @@ def test_no_declared_factory_environment_keys_the_env_table_on_the_committed_id(
     )
 
     assert rendered is not None
-    assert _credential_block(environment_id=_COMMITTED_ENVIRONMENT) in rendered
+    assert _agent_environment_block(environment_id=_COMMITTED_ENVIRONMENT) in rendered
     # The committed image pin stands untouched, which is this arm's own
     # behaviour and not a consequence of the keying.
     assert f"[environments.{_COMMITTED_ENVIRONMENT}.image]" in rendered
@@ -232,7 +228,7 @@ def test_the_rendered_image_table_is_keyed_on_the_committed_environment_id(
     assert rendered is not None
     assert f"[environments.{_COMMITTED_ENVIRONMENT}.image]" in rendered
     assert 'docker = "ghcr.io/example/configured:2"' in rendered
-    assert _credential_block(environment_id=_FACTORY_ENVIRONMENT) in rendered
+    assert _agent_environment_block(environment_id=_FACTORY_ENVIRONMENT) in rendered
 
 
 def test_materialize_overlay_passes_the_resolved_factory_environment(
@@ -271,5 +267,5 @@ def test_materialize_overlay_passes_the_resolved_factory_environment(
 
     assert error is None
     written = overlay.read_text(encoding="utf-8")
-    assert _credential_block(environment_id=_FACTORY_ENVIRONMENT) in written
+    assert _agent_environment_block(environment_id=_FACTORY_ENVIRONMENT) in written
     assert f"[environments.{_COMMITTED_ENVIRONMENT}.env]" not in written

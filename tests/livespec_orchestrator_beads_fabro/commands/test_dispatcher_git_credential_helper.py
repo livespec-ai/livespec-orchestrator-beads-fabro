@@ -134,44 +134,43 @@ def test_credential_helper_configuration_carries_no_token_value(
     assert "!gh auth git-credential" in written
 
 
-def test_push_without_a_url_credential_mints_a_token_at_push_time(
+def test_an_agent_dispatch_has_no_push_time_minting_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The Petri-era case: origin carries no credential, so git asks the helper."""
-    sandbox = _provision_sandbox(tmp_path=tmp_path, monkeypatch=monkeypatch)
-    before = _mint_call_count(sandbox=sandbox)
-
-    filled = _credential_fill(sandbox=sandbox, url=f"{_CREDENTIAL_URL}/owner/repo.git")
-
-    assert "username=x-access-token" in filled
-    assert f"password={_MINTED_TOKEN}" in filled
-    # Minted DURING the fill -- a token resolved any earlier could not have
-    # appended this line while git was waiting on the helper's answer.
-    assert _mint_call_count(sandbox=sandbox) == before + 1
-
-
-def test_push_with_a_url_credential_keeps_that_credential(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The pinned-engine case: Fabro's URL-embedded token still wins.
-
-    Control for the case above. git consults no helper once a URL carries both
-    a username and a password, so configuring one must leave the pinned engine's
-    path byte-for-byte as it was.
-    """
-    sandbox = _provision_sandbox(tmp_path=tmp_path, monkeypatch=monkeypatch)
-    before = _mint_call_count(sandbox=sandbox)
-
-    filled = _credential_fill(
-        sandbox=sandbox,
-        url=f"https://x-access-token:{_URL_EMBEDDED_TOKEN}@github.com/owner/repo.git",
+    """An agent-stage overlay cannot install a wrapper that mints a push token."""
+    monkeypatch.setenv("GITHUB_APP_ID", "42")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY", "stub-pem")
+    rendered = render_run_config_overlay(
+        committed_text=_COMMITTED_WORKFLOW_TOML,
+        workflow_dir=tmp_path,
+        token=_OAUTH_TOKEN,
+        github_token=_GITHUB_TOKEN,
+        siblings=None,
     )
 
-    assert f"password={_URL_EMBEDDED_TOKEN}" in filled
-    assert _MINTED_TOKEN not in filled
-    assert _mint_call_count(sandbox=sandbox) == before
+    assert rendered is not None
+    assert _GH_REFRESH_MARKER not in rendered
+    assert f"GITHUB_TOKEN = {json.dumps(_GITHUB_TOKEN)}" not in rendered
+
+
+def test_an_agent_dispatch_has_no_app_integration_minting_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The run integration is equally unavailable to every inherited agent process."""
+    monkeypatch.setenv("GITHUB_APP_ID", "42")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY", "stub-pem")
+    rendered = render_run_config_overlay(
+        committed_text=_COMMITTED_WORKFLOW_TOML,
+        workflow_dir=tmp_path,
+        token=_OAUTH_TOKEN,
+        github_token=_GITHUB_TOKEN,
+        siblings=None,
+    )
+
+    assert rendered is not None
+    assert "[run.integrations.github.app]" not in rendered
 
 
 @dataclass(frozen=True, kw_only=True)
