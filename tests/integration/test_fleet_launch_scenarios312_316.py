@@ -59,3 +59,12 @@ def test_scenario316_repository_hold_scope_and_launch_point() -> None:
         "a hold created during the mutex wait releases the mutex and marker without driving",
     ):
         assert assertion in output, output
+
+
+def test_scenario307_canary_hold_releases_a_differently_registered_build() -> None:
+    """A build-scoped canary hold does not stop a target using another build."""
+    output = _slice("scenario307")
+
+    assert (
+        "a canary hold naming another build lets a differently registered target launch" in output
+    ), output

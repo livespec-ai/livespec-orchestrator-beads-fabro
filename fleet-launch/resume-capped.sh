@@ -63,10 +63,9 @@ lock=""
 marker=""
 plugin=""
 FLEET_CAP=0
-# Refuse before taking a ticket when the shared installed-build guard cannot
-# resolve this repository's plugin directory.
-plugin=$(installed_plugin_dir) || exit 70
-build=${plugin##*/}
+# Resolve after the repository and canary hold checks. A canary hold with a
+# build identity must fail closed when the target registry cannot resolve it,
+# rather than letting this early guard bypass the hold.
 # Non-run exit accounting (Scenario 312): a resume launcher that exits before its resume client starts
 # writes one terminal line and, when its item still reads ready, one ledger comment naming the dropped ticket.
 resume_started=0
@@ -317,6 +316,10 @@ while :; do
     log_canary_hold
     sleep "$FLEET_LAUNCH_POLL_S"
     continue
+  fi
+  if [ -z "$plugin" ]; then
+    plugin=$(installed_plugin_dir) || { exit_cause="build unresolved"; exit 70; }
+    build=${plugin##*/}
   fi
   restore_ticket
   ahead=$(oldest_live_ticket "$QUEUE")
