@@ -115,6 +115,19 @@ def test_an_unparseable_trailer_instant_contributes_no_gap_sample() -> None:
     assert signals.red_green_gap_seconds_median is None
 
 
+def test_an_offsetless_trailer_instant_contributes_no_gap_sample_and_does_not_raise() -> None:
+    """An offset-less instant names no zone, so it cannot be subtracted from an aware one."""
+    module = _module()
+
+    signals = module.tdd_commit_signals(
+        messages=(_green_amended(red_at="2026-10-01T20:38:30", green_at="2026-10-01T20:42:24Z"),)
+    )
+
+    assert signals.red_commit_count == 1
+    assert signals.green_commit_count == 1
+    assert signals.red_green_gap_seconds_median is None
+
+
 def test_commit_trailers_keeps_the_first_value_and_ignores_prose() -> None:
     module = _module()
 

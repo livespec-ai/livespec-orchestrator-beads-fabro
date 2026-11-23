@@ -199,7 +199,10 @@ def _gap_seconds(*, red_at: str | None, green_at: str | None) -> float | None:
 
 
 def _instant(*, value: str) -> datetime | None:
-    """Parse one trailer instant, or None when it does not parse.
+    """Parse one trailer instant, or None when it does not parse or names no zone.
+
+    An offset-less instant cannot be ordered against an aware one, so it is
+    invalid provenance rather than a guessed local time.
 
     The hook writes a `Z`-suffixed UTC instant, which `fromisoformat` does not
     accept on this interpreter's version, so the suffix is normalized to the
@@ -209,6 +212,6 @@ def _instant(*, value: str) -> datetime | None:
     if normalized.endswith(_UTC_SUFFIX):
         normalized = normalized[: -len(_UTC_SUFFIX)] + _UTC_OFFSET
     parsed = attempt(action=lambda: datetime.fromisoformat(normalized), exceptions=(ValueError,))
-    if isinstance(parsed, AttemptFailure):
+    if isinstance(parsed, AttemptFailure) or parsed.tzinfo is None:
         return None
     return parsed
