@@ -54,6 +54,7 @@ as a one-second budget.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import cast
 
 from livespec_orchestrator_beads_fabro.commands._dispatcher_stall_cancel_comments import (
     UNREAD_CANCEL_ROW,
@@ -102,11 +103,12 @@ def run_wall_budget_comment(*, item_id: str, row: Mapping[str, object] | None) -
             f"whole-run wall budget seconds: {_measured_field(row=row, key='budget_seconds')}",
             f"budget supplied by layer: {cancel_row_field(row=row, key='budget_layer')}",
             *_preservation_lines(row=row),
+            *_no_progress_lines(row=row),
             *_publication_lines(row=row),
             "",
-            "This run held a factory slot past its whole-run wall budget, so",
+            _cut_explanation(row=row),
             *_account_lines(row=row),
-            "A budget cancel is NOT factory non-convergence:",
+            "This cancellation is NOT factory non-convergence:",
             "the item was not bounced to backlog, no non-convergence observation",
             "was recorded, and its across-dispatch progress count is unchanged.",
             "",
@@ -116,6 +118,34 @@ def run_wall_budget_comment(*, item_id: str, row: Mapping[str, object] | None) -
             "  for an item resting on a human decision.",
             *_pointer_remedy_lines(row=row),
         )
+    )
+
+
+def _no_progress_lines(*, row: Mapping[str, object] | None) -> tuple[str, ...]:
+    """Render the earlier cut only when its complete measurement is present."""
+    if row is None:
+        return ()
+    count = row.get("no_progress_consecutive_stage_count")
+    stages = row.get("no_progress_stages")
+    if not isinstance(count, int) or isinstance(count, bool) or not isinstance(stages, list):
+        return ()
+    stage_values = cast("list[object]", stages)
+    stage_names = tuple(stage for stage in stage_values if isinstance(stage, str))
+    if len(stage_names) != count or len(stage_values) != count:
+        return ()
+    return (
+        "no-progress cut",
+        f"K: {count}",
+        f"stages: {', '.join(stage_names)}",
+    )
+
+
+def _cut_explanation(*, row: Mapping[str, object] | None) -> str:
+    """Name an earlier no-progress cut without misreporting a budget expiry."""
+    return (
+        "This run reached the no-progress cut before its whole-run wall budget, so"
+        if _no_progress_lines(row=row)
+        else "This run held a factory slot past its whole-run wall budget, so"
     )
 
 

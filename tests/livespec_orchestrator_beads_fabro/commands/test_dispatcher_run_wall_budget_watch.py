@@ -398,3 +398,43 @@ def test_a_failed_export_dump_holds_without_writing_a_pointer(tmp_path: Path) ->
     assert "rm" not in runner.calls
     assert [record["stage"] for record in journal.records] == [RUN_WALL_BUDGET_HELD_STAGE]
     assert "selective stage-diff read failed" in str(journal.records[0]["failed_measurement"])
+
+
+def test_empty_implement_stage_diffs_cut_before_the_whole_run_wall_budget(
+    tmp_path: Path,
+) -> None:
+    """A no-progress run is preserved before its still-distant budget expires.
+
+    The three empty artifacts deliberately have different stage names: the
+    signal is empty content across the configured consecutive-stage cut, not a
+    repeated digest.  The existing budget-cancel test above proves the shared
+    export/read-back/cancel mechanics; this acceptance case proves the new
+    earlier trigger adds its own durable explanation to that same pointer.
+    """
+    watch = _watch()
+    cut = getattr(watch, "cancel_run_for_no_progress", None)
+    assert callable(cut), "the run-wall watch has no no-progress cut"
+    runner = _ScriptedRunner()
+    ledger = _FakeLedger()
+    journal = _RecordingJournal()
+
+    verdict = cut(
+        dispatch_id="dispatch-01",
+        plan=_plan(repo=tmp_path),
+        port=_port(repo=tmp_path, runner=runner),
+        runner=cast("Any", runner),
+        journal=cast("Any", journal),
+        run_id=_RUN_ID,
+        ledger=cast("Any", ledger),
+        stage_diffs={"green@1": "", "commit_green@1": "", "fix@1": ""},
+        consecutive_stage_count=3,
+    )
+
+    assert verdict == watch.RunWallVerdict.CANCELLED
+    assert ledger.writes == [_WORK_ITEM_ID]
+    assert len(ledger.reads) == 2
+    assert "rm" in runner.calls
+    comment = str(ledger.comments[0]["text"])
+    assert "no-progress cut" in comment
+    assert "K: 3" in comment
+    assert "green@1, commit_green@1, fix@1" in comment

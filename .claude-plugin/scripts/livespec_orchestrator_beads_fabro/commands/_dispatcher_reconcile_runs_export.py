@@ -132,6 +132,7 @@ def export_run_reference(  # noqa: PLR0913 — kw-only export; the run's identit
     fabro_bin: str,
     runner: CommandRunner,
     ledger: LedgerComments,
+    pointer_suffix: str = "",
 ) -> ExportOutcome:
     """Preserve ONE run's record on its work-item, verifying it by read-back.
 
@@ -183,7 +184,10 @@ def export_run_reference(  # noqa: PLR0913 — kw-only export; the run's identit
             detail="work-item absent from the ledger; pointer preserved in the dispatch journal",
         )
     return _preserved_on_item(
-        work_item_id=work_item_id, run_id=run_id, ledger=ledger, body=pointer.body
+        work_item_id=work_item_id,
+        run_id=run_id,
+        ledger=ledger,
+        body=f"{pointer.body}{pointer_suffix}",
     )
 
 
