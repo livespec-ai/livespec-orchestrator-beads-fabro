@@ -351,7 +351,7 @@ def test_a_heading_the_specification_does_not_carry_is_refused_and_the_hold_stan
     assert _wall(repo=repo, tmp_path=tmp_path) == EXIT_UNGRADEABLE_CRITERIA
 
 
-def test_an_item_that_is_not_held_is_refused(
+def test_a_human_release_of_an_unheld_item_records_the_pressed_heading_as_its_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = _repo(tmp_path=tmp_path)
@@ -361,10 +361,13 @@ def test_an_item_that_is_not_held_is_refused(
 
     result = _release(repo=repo)
 
-    assert result["status"] == "failed"
-    assert result["domain_error"] == "not-held"
-    assert _ITEM in str(result["summary"])
-    assert "livespec-spec-tier-attestation" not in _comments(repo=repo)
+    assert result["status"] == "green", result
+    assert result["target_status"] == "ready"
+    recorded = _comments(repo=repo)
+    assert "livespec-spec-tier-attestation" in recorded
+    assert "livespec-spec-change-tier" in recorded
+    assert "tier: none" in recorded
+    assert f"generalization-target: {_HEADING}" in recorded
 
 
 def test_a_status_outside_the_valid_lanes_is_refused(
