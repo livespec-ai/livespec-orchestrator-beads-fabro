@@ -694,24 +694,42 @@ log_wip_at_cap() {
 # is the one the remote's HEAD names, read with `git ls-remote --symref`, never assumed to be master.
 # One refresh at a time per checkout. Prints the failing step and returns non-zero when it fails.
 refresh_checkout() {
-  local lock_file="$OUT/checkout-refresh-$REPO_NAME.lock"
+  local lock_file="$OUT/checkout-refresh-$REPO_NAME.lock" stderr_file rc
+  stderr_file=$(mktemp "$OUT/checkout-refresh-$REPO_NAME.XXXXXX.stderr") || {
+    echo stderr-capture
+    return 1
+  }
   (
     flock -w 300 9 || { echo lock; exit 1; }
     branch=$(git -C "$REPO" ls-remote --symref origin HEAD 2>/dev/null | sed -n 's|^ref: refs/heads/\(.*\)[[:space:]]HEAD$|\1|p' | head -n 1)
     [ -n "$branch" ] || { echo default-branch; exit 1; }
     git -C "$REPO" fetch -q origin "$branch" 2>/dev/null || { echo fetch; exit 1; }
-    git -C "$REPO" merge --ff-only -q FETCH_HEAD 2>/dev/null || { echo fast-forward; exit 1; }
+    if ! git -C "$REPO" merge --ff-only -q FETCH_HEAD 2>"$stderr_file"; then
+      tail -n 12 "$stderr_file" >&2
+      printf 'fast-forward\t'
+      tail -n 12 "$stderr_file" | tr '\n' ' ' | cut -c1-600
+      printf '\n'
+      exit 1
+    fi
     [ "$(git -C "$REPO" rev-parse HEAD 2>/dev/null)" = "$(git -C "$REPO" rev-parse FETCH_HEAD 2>/dev/null)" ] || { echo not-at-tip; exit 1; }
   ) 9>"$lock_file"
+  rc=$?
+  rm -f "$stderr_file"
+  return "$rc"
 }
 # checkout_at_origin_tip: refresh the checkout, or make a non-run exit that launches nothing and
 # holds no factory slot (the exit trap removes any marker and the ticket).
 checkout_at_origin_tip() {
-  local step
-  step=$(refresh_checkout) && return 0
-  write_terminal "checkout-not-at-origin-tip step=${step:-unknown}"
-  echo "$(date -u +%FT%TZ) checkout of $REPO is not at the origin tip (step ${step:-unknown}): no launch"
-  report_dropped_ticket "checkout-not-at-origin-tip step=${step:-unknown}"
+  local refresh step stderr_tail
+  refresh=$(refresh_checkout) && return 0
+  IFS=$'\t' read -r step stderr_tail <<< "$refresh"
+  step=${step:-unknown}
+  if [ -n "$stderr_tail" ]; then
+    step="$step git-stderr-tail=$stderr_tail"
+  fi
+  write_terminal "checkout-not-at-origin-tip step=$step"
+  echo "$(date -u +%FT%TZ) checkout of $REPO is not at the origin tip (step $step): no launch"
+  report_dropped_ticket "checkout-not-at-origin-tip step=$step"
   exit 75
 }
 # size_screen: the pre-launch screen of the materialized workflow.toml against Fabro's per-file cap.
