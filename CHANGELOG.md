@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.346.6](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.346.5...v0.346.6) (2026-11-24)
+
+
+### Bug Fixes
+
+* a sibling tree sharing a declared source tree's name is not product (bd-ib-d3pdrv) ([ec9d100](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/ec9d100658fc73a3817d5594bdf878f6f71f0656))
+* an offset-less Red or Green trailer instant contributes no gap sample instead of raising at the calibration boundary (bd-ib-d3pdrv) ([2ee0bb6](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/2ee0bb6af6b38e474bfb93f4c6011f55c42d5d2b))
+* an offset-less timestamp is invalid provenance, not a comparison crash (bd-ib-d3pdrv) ([a38a9cc](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/a38a9cc64ac605ca2044c5bc72c302840e45d642))
+* journal each completed cycle's measurements beside the calibration record (bd-ib-d3pdrv) ([5e025e8](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/commit/5e025e8977d985e6464631af55110d8175d52667))
+
 ## [0.346.5](https://github.com/livespec-ai/livespec-orchestrator-beads-fabro/compare/v0.346.4...v0.346.5) (2026-11-23)
 
 
